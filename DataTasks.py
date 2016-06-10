@@ -55,7 +55,33 @@ class InputData(luigi.Task):
 class ExternalSegmentation(luigi.Task):
     """
     Task for loading external segmentation from HDF5.
-    We perform a label Volume and
+    """
+
+    # Path to the segmentation
+    PathToSeg = luigi.Parameter()
+
+    def run(self):
+        f = h5py.File(self.PathToData, 'r+')
+        keys = f.keys()
+        f.close()
+
+        if len(keys) > 1:
+            raise RuntimeError("Can only handle single key in input data.")
+        key = keys[0]
+
+        if key != "data":
+            f["data"] = f[key]
+            del f[key]
+
+
+    def output(self):
+        return HDF5Target( self.PathToSeg  )
+
+
+class ExternalSegmentationLabeled(luigi.Task):
+    """
+    Task for loading external segmentation from HDF5.
+    Perform a label Volume and cache
     """
 
     # Path to the segmentation
@@ -79,31 +105,6 @@ class ExternalSegmentation(luigi.Task):
                 os.path.split(self.PathToSeg)[1] )
         return HDF5Target( save_path  )
 
-
-# TODO how to integrate this into workflow?
-class WsdtSegmentation(luigi.Task):
-    """
-    Task for generating segmentation via wsdt.
-    """
-
-    # TODO own param
-    WatershedParameter = luigi.Parameter( default = GetWatershedParameter() )
-
-    PathToProbabilities = luigi.Parameter()
-
-    def requires(self):
-        """
-        Dependencies:
-        """
-        return ExternalInputData(self.PathToProbabilities)
-
-    def run(self):
-        # TODO run wsdt
-        pass
-
-    def output(self):
-        # TODO proper saving
-        pass
 
 
 class DenseGroundtruth(luigi.Task):
@@ -140,7 +141,7 @@ class RegionAdjacencyGraph(luigi.Task):
     PathToSeg = luigi.Parameter()
 
     def requires(self):
-        return ExternalSegmentation(self.PathToSeg)
+        return ExternalSegmentationLabeled(self.PathToSeg)
 
 
     def run(self):

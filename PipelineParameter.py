@@ -32,21 +32,3 @@ class PipelineParameter(object):
 
     def set_max_aniso(max_aniso):
         self.max_aniso = max_aniso
-
-def GetFeatureParameter():
-    params = { 'anisotropy_factor' : 1., 'extra_2d_features' : False,
-        "filter_list" :["gaussianSmoothing","hessianOfGaussianEigenvalues","laplacianOfGaussian"],
-        "sigmas" : [1.6, 4.2, 8.3] }
-    return params
-
-# TODO
-# TODO Redo this properly and implememt everything as own class!
-
-def GetWatershedParameter():
-    return dict()
-
-def GetLearningParameter():
-    return dict()
-
-def GetMulticutParameter():
-    return dict()

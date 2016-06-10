@@ -1,5 +1,6 @@
 {
-    "filternames": "["gaussianSmoothing","hessianOfGaussianEigenvalues","laplacianOfGaussian"]",
-    "anisotropy" : 20.,
-    "sigmas"     : [1.6, 4.2, 8.3]
+"filternames":["gaussianSmoothing","hessianOfGaussianEigenvalues","laplacianOfGaussian"],
+"anisotropy":20,
+"sigmas":[1.6, 4.2, 8.3],
+"2dfeatures":True
 }

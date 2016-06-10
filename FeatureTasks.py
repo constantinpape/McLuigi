@@ -19,8 +19,6 @@ import vigra
 # class TopologyFeatures
 # proper feature hierarchies
 
-# Task for the filters
-# TODO don't cache this
 class FilterVigra(luigi.Task):
 
     PathToInput = luigi.Parameter()
@@ -75,6 +73,42 @@ class FilterVigra(luigi.Task):
                     [os.path.split(self.PathToInput)[1], self.FilterName, str(self.Sigma), str(aniso)] ) + ".h5") )
 
 
+# implement this as function, because we don't want to cache the filters!
+def filter_vigra(PathToInput, FilterName, Sigma, Anisotropy):
+
+    inp = vigra.readHDF5(PathToInput, "data")
+
+    # TODO assert thtat this exists
+    eval_filter = eval( ".".join( ["vigra", "filters", FilterName] ) )
+
+    # calculate filter purely in 2d
+    if Anisotropy > PipelineParameter().max_aniso:
+        res = []
+        for z in range(inp.shape[2]):
+            filt_z = eval_filter( inp[:,:,z], sig )
+            assert len(filt_z.shape) in (2,3)
+            # insert z axis to stack later
+            if len(filt_z.shape) == 2:
+                # single channel filter
+                filt_z = filt_z[:,:,np.newaxis]
+            elif len(filt_z.shape) == 3:
+                # multi channel filter
+                filt_z = filt_z[:,:,np.newaxis,:]
+            res.append(filt_z)
+        # stack them together
+        res = np.concatenate(res, axis = 2)
+    else:
+        if Anisotropy > 1.:
+            sig = (Sigma, Sigma, Sigma / Anisotropy)
+        else:
+            sig = Sigma
+
+        res = eval_filter( inp, sig )
+
+    return res
+
+
+
 class EdgeFeatures(luigi.Task):
 
     # input over which filters are calculated and features accumulated
@@ -84,27 +118,25 @@ class EdgeFeatures(luigi.Task):
     FeatureParameter  = luigi.DictParameter()
 
     def requires(self):
-        return { "filters" :
-            [ FilterVigra(self.PathToInput, filt_name, sig,self.FeatureParameter["anisotropy"]) for filt_name in self.FeatureParameter["filternames"] for sig in self.FeatureParameter["sigmas"] ],
-            "rag" : RegionAdjacencyGraph(self.PathToSeg) }
-
+        return RegionAdjacencyGraph(self.PathToSeg)
 
     def run(self):
         edge_features = []
-        rag = self.input()["rag"].read()
-        for filter_task in self.input()["filters"]:
-            filt = filter_task.read()
+        rag = self.input().read()
+        for filter_name in self.FeatureParameter["filternames"]:
+            for sigma in self.FeatureParameter["sigmas"]:
+                filt = filter_vigra(self.PathToInput, filter_name, sigma, self.FeatureParameter["anisotropy"])
 
-            if len(filt.shape) == 3:
-                # let RAG do the work
-                gridGraphEdgeIndicator = vigra.graphs.implicitMeanEdgeMap(rag.baseGraph, filt)
-                edge_features.append( rag.accumulateEdgeStatistics(gridGraphEdgeIndicator) )
+                if len(filt.shape) == 3:
+                    # let RAG do the work
+                    gridGraphEdgeIndicator = vigra.graphs.implicitMeanEdgeMap(rag.baseGraph, filt)
+                    edge_features.append( rag.accumulateEdgeStatistics(gridGraphEdgeIndicator) )
 
-            elif len(filt.shape) == 4:
-                for c in range(filt.shape[3]):
-                    gridGraphEdgeIndicator = vigra.graphs.implicitMeanEdgeMap(
-                            rag.baseGraph, filt[:,:,:,c] )
-                    edge_features.append(rag.accumulateEdgeStatistics(gridGraphEdgeIndicator))
+                elif len(filt.shape) == 4:
+                    for c in range(filt.shape[3]):
+                        gridGraphEdgeIndicator = vigra.graphs.implicitMeanEdgeMap(
+                                rag.baseGraph, filt[:,:,:,c] )
+                        edge_features.append(rag.accumulateEdgeStatistics(gridGraphEdgeIndicator))
 
         edge_features = np.concatenate( edge_features, axis = 1)
         assert edge_features.shape[0] == rag.edgeNum, str(edge_features.shape[0]) + " , " +str(rag.edgeNum)
@@ -115,7 +147,10 @@ class EdgeFeatures(luigi.Task):
 
     def output(self):
         # TODO make filter_list and sigmas hashable and add them here
-        return HDF5Target(
-            os.path.join(
-                PipelineParameter().cache,
-                "_".join([ "EdgeFeatures", os.path.split(self.PathToInput)[1], str(self.FeatureParameter["anisotropy"]) ]) ) + ".h5")
+        return HDF5Target( os.path.join( PipelineParameter().cache,
+                "_".join([ "EdgeFeatures", os.path.split(self.PathToInput)[1],
+                    os.path.split(self.PathToSeg)[1],
+                    str(self.FeatureParameter["anisotropy"]) ]) ) + ".h5")
+        #return HDF5Target(
+        #    os.path.join(
+        #        PipelineParameter().cache, os.path.split(self.PathToInput)[1]) + ".h5")
