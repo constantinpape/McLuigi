@@ -81,13 +81,11 @@ class EdgeFeatures(luigi.Task):
     PathToInput = luigi.Parameter()
     # current oversegmentation
     PathToSeg = luigi.Parameter()
-
-    # TODO own param
-    FeatureParameter  = luigi.Parameter( default = GetFeatureParameter() )
+    FeatureParameter  = luigi.DictParameter()
 
     def requires(self):
         return { "filters" :
-            [ FilterVigra(self.PathToInput, filt_name, sig,self.FeatureParameter["anisotropy_factor"]) for filt_name in self.FeatureParameter["filter_list"] for sig in self.FeatureParameter["sigmas"] ],
+            [ FilterVigra(self.PathToInput, filt_name, sig,self.FeatureParameter["anisotropy"]) for filt_name in self.FeatureParameter["filternames"] for sig in self.FeatureParameter["sigmas"] ],
             "rag" : RegionAdjacencyGraph(self.PathToSeg) }
 
 
@@ -120,4 +118,4 @@ class EdgeFeatures(luigi.Task):
         return HDF5Target(
             os.path.join(
                 PipelineParameter().cache,
-                "_".join([ "EdgeFeatures", os.path.split(self.PathToInput)[1], str(self.FeatureParameter["anisotropy_factor"]) ]) ) + ".h5")
+                "_".join([ "EdgeFeatures", os.path.split(self.PathToInput)[1], str(self.FeatureParameter["anisotropy"]) ]) ) + ".h5")
