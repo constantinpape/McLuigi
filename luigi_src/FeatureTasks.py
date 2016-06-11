@@ -7,6 +7,7 @@ from PipelineParameter import *
 from DataTasks import InputData, RegionAdjacencyGraph, ExternalSegmentation
 
 import logging
+import json
 
 import os
 import numpy as np
@@ -73,6 +74,7 @@ class FilterVigra(luigi.Task):
                     [os.path.split(self.PathToInput)[1], self.FilterName, str(self.Sigma), str(aniso)] ) + ".h5") )
 
 
+# TODO svens filters, blockwise, chunked, presmoothing
 # implement this as function, because we don't want to cache the filters!
 def filter_vigra(PathToInput, FilterName, Sigma, Anisotropy):
 
@@ -85,7 +87,7 @@ def filter_vigra(PathToInput, FilterName, Sigma, Anisotropy):
     if Anisotropy > PipelineParameter().max_aniso:
         res = []
         for z in range(inp.shape[2]):
-            filt_z = eval_filter( inp[:,:,z], sig )
+            filt_z = eval_filter( inp[:,:,z], Sigma )
             assert len(filt_z.shape) in (2,3)
             # insert z axis to stack later
             if len(filt_z.shape) == 2:
@@ -108,6 +110,53 @@ def filter_vigra(PathToInput, FilterName, Sigma, Anisotropy):
     return res
 
 
+# read the feature configuration from PipelineParams.FeatureConfigFile
+# and return the corresponding feature tasks
+def getLocalFeatures():
+    # load the paths to input files
+    with open(PipelineParameter().InputFile, 'r') as f:
+        inputs = json.load(f)
+    # load the feature config
+    with open(PipelineParameter().FeatureConfigFile, 'r') as f:
+        feat_params = json.load(f)
+
+    feature_tasks = []
+    features = feat_params["features"]
+    if not isinstance(features, list):
+        features = [features,]
+
+    input_data = inputs["data"]
+    if not isinstance(input_data, list):
+        input_data = [input_data,]
+
+    anisotropy  = feat_params["anisotropy"]
+    filternames = feat_params["filternames"]
+    sigmas = feat_params["sigmas"]
+    features2d = feat_params["features2d"]
+
+    # TODO check for invalid keys
+    if "raw" in features:
+        # by convention we assume that the raw data is given as 0th
+        feature_tasks.append( EdgeFeatures(input_data[0], inputs["seg"],
+                filternames, sigmas, anisotropy) )
+    if "prob" in features:
+        # by convention we assume that the membrane probs are given as 1st
+        feature_tasks.append( EdgeFeatures(input_data[1], inputs["seg"],
+                filternames, sigmas, anisotropy) )
+    if "reg" in features:
+        # by convention we calculate region features only on the raw data (0th input)
+        # TODO should try it on probmaps. For big data we might spare shipping the raw data!
+        feature_tasks.append( RegionFeatures(input_data[0], inputs["seg"]) )
+    if "topo" in features:
+        # by convention we calculate region features only on the raw data (0th input)
+        feature_tasks.append( TopologyFeatures(inputs["seg"], features2d ) )
+
+
+    return feature_tasks
+
+
+# TODO class RegionFeatures(luigi.Task)
+# TODO class ToplogyFeatures(luigi.Task)
 
 class EdgeFeatures(luigi.Task):
 
@@ -115,17 +164,19 @@ class EdgeFeatures(luigi.Task):
     PathToInput = luigi.Parameter()
     # current oversegmentation
     PathToSeg = luigi.Parameter()
-    FeatureParameter  = luigi.DictParameter()
+    FilterNames = luigi.ListParameter(default = [ "vigra.filters.gaussianSmoothing", "vigra.filters.hessianOfGaussianEigenvalues", "vigra.filters.laplacianOfGaussian"] )
+    Sigmas = luigi.ListParameter(default = [1.6, 4.2, 8.3] )
+    Anisotropy = luigi.Parameter(default = 25.)
 
     def requires(self):
-        return RegionAdjacencyGraph(self.PathToSeg)
+        return RegionAdjacencyGraph(self.PathToSeg), InputData(self.PathToInput)
 
     def run(self):
         edge_features = []
-        rag = self.input().read()
-        for filter_name in self.FeatureParameter["filternames"]:
-            for sigma in self.FeatureParameter["sigmas"]:
-                filt = filter_vigra(self.PathToInput, filter_name, sigma, self.FeatureParameter["anisotropy"])
+        rag = self.input()[0].read()
+        for filter_name in self.FilterNames:
+            for sigma in self.Sigmas:
+                filt = filter_vigra(self.PathToInput, filter_name, sigma, self.Anisotropy)
 
                 if len(filt.shape) == 3:
                     # let RAG do the work
@@ -142,15 +193,11 @@ class EdgeFeatures(luigi.Task):
         assert edge_features.shape[0] == rag.edgeNum, str(edge_features.shape[0]) + " , " +str(rag.edgeNum)
 
         edge_features = np.nan_to_num(edge_features)
+
         self.output().write(edge_features)
 
 
     def output(self):
-        # TODO make filter_list and sigmas hashable and add them here
+        inp_name = os.path.split(self.PathToInput)[1][:-3]
         return HDF5Target( os.path.join( PipelineParameter().cache,
-                "_".join([ "EdgeFeatures", os.path.split(self.PathToInput)[1],
-                    os.path.split(self.PathToSeg)[1],
-                    str(self.FeatureParameter["anisotropy"]) ]) ) + ".h5")
-        #return HDF5Target(
-        #    os.path.join(
-        #        PipelineParameter().cache, os.path.split(self.PathToInput)[1]) + ".h5")
+            "EdgeFeatures_" + inp_name + ".h5" ) )

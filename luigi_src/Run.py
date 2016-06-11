@@ -2,9 +2,10 @@ import luigi
 import os
 
 import logging
+import json
 
-from FeatureTasks import EdgeFeatures
-from LearningTasks import EdgeProbabilities
+from PipelineParameter import PipelineParameter
+from LearningTasks import EdgeProbabilitiesFromExternalRF
 
 
 class SimpleTest(luigi.Task):
@@ -28,13 +29,10 @@ class SimpleTest(luigi.Task):
 
 class TestEdgeProbs(luigi.Task):
 
-    PathInp = luigi.Parameter()
-    PathSeg = luigi.Parameter()
-    FeatureTasks = luigi.ListParameter()
+    PathRF = luigi.Parameter()
 
     def requires(self):
-        return EdgeProbabilities(self.PathInp, self.PathSeg,
-            self.FeatureParameter )
+        return EdgeProbabilitiesFromExternalRF( self.PathRF )
 
     def run(self):
         logging.info("Running EdgeProbsTest")
@@ -44,19 +42,13 @@ class TestEdgeProbs(luigi.Task):
 
 
 if __name__ == '__main__':
-    with open("./config/feature_config.json",'r') as f:
-        json = f.read().replace('\n','')
 
-    print type(json)
+    PipelineParameter().InputFile = "../config/input_config.json"
+    PipelineParameter().FeatureConfigFile = "../config/feature_config.json"
 
-    raw_path = "/home/consti/Work/data_neuro/test_block/test-raw.h5"
-    seg_path = "/home/consti/Work/data_neuro/test_block/test-seg.h5"
-
-    FeatureTasks = [EdgeFeatures(input_path, seg_path, json)]
+    with open(PipelineParameter().InputFile, 'r') as f:
+        inputs = json.load(f)
 
     luigi.run(["--local-scheduler",
-        "--PathInp", raw_path,
-        "--PathSeg", seg_path,
-        "--FeatureTasks", FeatureTasks],
+        "--PathRF", inputs["rf"]],
         main_task_cls = TestEdgeProbs)
-

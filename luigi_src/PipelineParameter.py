@@ -19,16 +19,20 @@ class PipelineParameter(object):
 
     def __init__(self):
         self.cache = "/tmp/mc_cache"
-        self.n_threads = 1
+        self.n_threads = 8
         self.max_aniso = 20.
+        self.InputFile = ""
+        self.FeatureConfigFile = ""
+        self.MCConfigFile = ""
 
-    # TODO checks...
-    # TODO this is not pythonic, overload some __ stuff instead
-    def set_cache(self, cahce):
-        self.cache = cache
+    ## TODO checks...
+    ## TODO this is not pythonic, overload some __ stuff instead
+    #def set_cache(self, cahce):
+    #    self.cache = cache
 
-    def set_n_threads(n_threads):
-        self.n_threads = n_threads
+    #def set_n_threads(n_threads):
+    #    self.n_threads = n_threads
 
-    def set_max_aniso(max_aniso):
-        self.max_aniso = max_aniso
+    #def set_max_aniso(max_aniso):
+    #    self.max_aniso = max_aniso
+
