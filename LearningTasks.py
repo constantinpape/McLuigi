@@ -29,8 +29,9 @@ class EdgeProbabilities(luigi.Task):
 
     def run(self):
         rf = self.input()["RF"].read()
-        features = np.concatenate(feat for feat in self.input()["Features"].read())
-        probs = rf.predict_proba(features)
+        features = np.concatenate(
+                [feat for feat in self.input()["Features"].read()])
+        probs = rf.predict_proba(features)[:,1]
         self.output().write(probs)
 
     def output(self):
