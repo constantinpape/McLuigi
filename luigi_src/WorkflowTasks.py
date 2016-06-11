@@ -6,6 +6,8 @@ import luigi
 from MulticutSolverTasks import MCProblem, MCSSolverOpengmExact, MCSSolverOpengmFusionMoves
 from BlockwiseMulticutTasks import BlockwiseMulticutSolver
 from DataTasks import RegionAdjacencyGraph
+from PipelineParameter import PipelineParameter
+from CustomTargets import HDF5Target
 
 import logging
 import json
@@ -22,7 +24,7 @@ class MulticutSegmentation(luigi.Task):
 
     def requires(self):
         return { "MCRes" : MCSSolverOpengmExact( MCProblem(self.PathToSeg, self.PathToRF) ),
-                "RAG" : RegionAdjacencyGraph(PathToSeg) }
+                "RAG" : RegionAdjacencyGraph(self.PathToSeg) }
 
     def run(self):
 

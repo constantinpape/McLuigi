@@ -201,4 +201,4 @@ class EdgeFeatures(luigi.Task):
         inp_name = os.path.split(self.PathToInput)[1][:-3]
         seg_name = os.path.split(self.PathToSeg)[1][:-3]
         return HDF5Target( os.path.join( PipelineParameter().cache,
-            "EdgeFeatures_" + inp_name + "_" + seg_name ".h5" ) )
+            "EdgeFeatures_" + inp_name + "_" + seg_name + ".h5" ) )
