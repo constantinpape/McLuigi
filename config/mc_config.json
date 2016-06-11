@@ -1,0 +1,8 @@
+{
+    "Beta"   : 0.5,
+    "WeightingScheme" : "z",
+    "Weight" : 16,
+    "SeedFraction" : 0.005,
+    "NumIt" : 2500,
+    "NumItStop" : 10
+}
