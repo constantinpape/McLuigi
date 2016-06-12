@@ -7,12 +7,15 @@ from PipelineParameter import PipelineParameter
 from DataTasks import RegionAdjacencyGraph
 from LearningTasks import EdgeProbabilitiesFromExternalRF
 from MiscTasks import EdgeIndications
+from CustomTargets import HDF5Target
 
 import logging
 import json
 
 import numpy as np
 import vigra
+import os
+import time
 
 #class BlockwiseSolver(lugi.Task):
 
@@ -65,7 +68,7 @@ class MCSSolverOpengmFusionMoves(luigi.Task):
         inf.infer()
         t_inf = time.time() - t_inf
 
-        logging.info("Inference with fusin moves solver in " + t_inf + " s")
+        logging.info("Inference with fusin moves solver in " + str(t_inf) + " s")
 
         res_node = inf.arg()
 
@@ -78,7 +81,7 @@ class MCSSolverOpengmFusionMoves(luigi.Task):
 
         E_glob = gm.evaluate(res_node)
 
-        logging.info("Energy of the solution " + E_glob)
+        logging.info("Energy of the solution " + str(E_glob) )
 
         self.output().write(res_node)
 
@@ -133,7 +136,7 @@ class MCSSolverOpengmExact(luigi.Task):
         inf.infer()
         t_inf = time.time() - t_inf
 
-        logging.info("Inference with exact solver in " + t_inf + " s")
+        logging.info("Inference with exact solver in " + str(t_inf) + " s")
 
         res_node = inf.arg()
 
@@ -146,7 +149,7 @@ class MCSSolverOpengmExact(luigi.Task):
 
         E_glob = gm.evaluate(res_node)
 
-        logging.info("Energy of the solution " + E_glob)
+        logging.info("Energy of the solution " + str(E_glob) )
 
         self.output().write(res_node)
 
@@ -197,8 +200,8 @@ class MCProblem(luigi.Task):
         weighting_scheme = MCConfig["WeightingScheme"]
         weight = MCConfig["Weight"]
         # TODO own loglevel for pipeline related stuff
-        logging.info("Weighting edge costs with scheme " + weighting_scheme + " and weight " + weight)
-        if exp_params.weighting_scheme == "z":
+        logging.info("Weighting edge costs with scheme " + weighting_scheme + " and weight " + str(weight) )
+        if weighting_scheme == "z":
             edges_size = rag.edgeLengths()
             edge_indications = self.input()["EdgeIndications"].read()
             assert edges_size.shape[0] == edge_costs.shape[0]
@@ -210,7 +213,7 @@ class MCProblem(luigi.Task):
             w = weight * edges_size[edge_indications == 0] / z_max
             edge_costs[edge_indications == 0] = np.multiply(w, edge_costs[edge_indications == 0])
 
-       elif exp_params.weighting_scheme == "xyz":
+        elif weighting_scheme == "xyz":
             edges_size =rag.edgeLengths()
             edge_indications = self.input()["EdgeIndications"].read()
             assert edges_size.shape[0] == edge_costs.shape[0]
@@ -223,7 +226,7 @@ class MCProblem(luigi.Task):
             edge_costs[edge_indications == 0] = np.multiply(w_z, edge_costs[edge_indications == 0])
             edge_costs[edge_indications == 1] = np.multiply(w_xy, edge_costs[edge_indications == 1])
 
-        elif exp_params.weighting_scheme == "all":
+        elif weighting_scheme == "all":
             edges_size = rag.edgeLengths()
             assert edges_size.shape[0] == edge_costs.shape[0]
 
@@ -234,7 +237,7 @@ class MCProblem(luigi.Task):
         assert edge_costs.shape[0] == uv_ids.shape[0]
 
         # write concatenation of uvids and edge costs
-        self.output.write( np.concatenate( [uv_ids, edge_costs[:,None]], axis = 1 ) )
+        self.output().write( np.concatenate( [uv_ids, edge_costs[:,None]], axis = 1 ) )
 
 
     def output(self):

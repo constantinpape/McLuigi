@@ -4,5 +4,7 @@
     "Weight" : 16,
     "SeedFraction" : 0.005,
     "NumIt" : 2500,
-    "NumItStop" : 10
+    "NumItStop" : 10,
+    "BlockSize" : [512, 512, 50],
+    "BlockOverlaps" : [20,20,4]
 }

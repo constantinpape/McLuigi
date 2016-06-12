@@ -13,13 +13,15 @@ import json
 import numpy as np
 import vigra
 
+# TODO would be better to let the scheduler handle the parallelisation
+
 class BlockwiseMulticutSolver(luigi.Task):
 
     PathToSeg = luigi.Parameter()
     PathToRF  = luigi.Parameter()
 
     def requires(self):
-        return
+        return BlockwiseSubProblems( self.PathToSeg, self.PathToRF )
 
     def run(self):
         pass
@@ -29,4 +31,6 @@ class BlockwiseMulticutSolver(luigi.Task):
         return HDF5Target( save_path )
 
 
-#class BlockwiseSubProblems(luigi.Task):
+class BlockwiseSubProblems(luigi.Task):
+
+    def requires(self):
