@@ -1,7 +1,7 @@
 {
-"features": "raw",
-"filternames":["gaussianSmoothing","hessianOfGaussianEigenvalues","laplacianOfGaussian"],
-"anisotropy":20,
-"sigmas":[1.6, 4.2, 8.3],
-"features2d":true
+    "features": ["probs","reg"],
+    "filternames":["gaussianSmoothing","hessianOfGaussianEigenvalues","laplacianOfGaussian"],
+    "anisotropy":25,
+    "sigmas":[1.6, 4.2, 8.3],
+    "features2d":true
 }

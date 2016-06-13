@@ -5,7 +5,7 @@ import luigi
 
 from CustomTargets import PickleTarget, HDF5Target
 from PipelineParameter import PipelineParameter
-from FeatureTasks import getLocalFeatures
+from FeatureTasks import get_local_features
 
 import logging
 
@@ -30,7 +30,7 @@ class EdgeProbabilitiesFromExternalRF(luigi.Task):
         # This way of generating the features is quite hacky, but it is the
         # least ugly way I could come up with till now.
         # and as long as we only use the pipeline for deploymeny it should be alright
-        feature_tasks = getLocalFeatures()
+        feature_tasks = get_local_features()
         return {"RF" : ExternalRF(self.RFPath), "Features" : feature_tasks}
 
     def run(self):

@@ -50,7 +50,7 @@ class BlockwiseMulticutSegmentation(luigi.Task):
 
     def requires(self):
         return { "MCRes" : BlockwiseMulticutSolver( self.PathToSeg, self.PathToRF ),
-                "RAG" : RegionAdjacencyGraph(PathToSeg) }
+                "RAG" : RegionAdjacencyGraph(self.PathToSeg) }
 
     def run(self):
 
