@@ -155,9 +155,8 @@ class RegionAdjacencyGraph(luigi.Task):
             vigra.graphs.gridGraph(seg.shape[0:3]), seg))
 
         t_rag = time.time() - t_rag
-        workflow_logger("Computed RAG in " + str(t_rag) + " s")
+        workflow_logger.info("Computed RAG in " + str(t_rag) + " s")
 
 
     def output(self):
-        return RagTarget( os.path.join(PipelineParameter().cache,
-            os.path.split(self.PathToSeg)[1] + "_rag.h5") )
+        return RagTarget( os.path.join(PipelineParameter().cache, "RegionAdjacencyGraph.h5") )
