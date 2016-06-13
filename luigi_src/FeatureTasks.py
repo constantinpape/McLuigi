@@ -11,8 +11,14 @@ import logging
 import json
 
 import os
+import time
 import numpy as np
 import vigra
+
+# init the workflow logger
+from customLogging import config_logger
+workflow_logger = logging.getLogger(__name__)
+config_logger(workflow_logger)
 
 
 # TODO
@@ -183,6 +189,8 @@ class RegionFeatures(luigi.Task):
 
         import gc
 
+        t_feats = time.time()
+
         inp = self.input()["Data"].read()
         seg = self.input()["Seg"].read()
         rag = self.input()["RAG"].read()
@@ -252,6 +260,9 @@ class RegionFeatures(luigi.Task):
 
         allFeat = np.concatenate(allFeat, axis = 1)
 
+        t_feats = time.time() - t_feats
+        workflow_logger.info("Calculated Region Features in: " + str(t_feats) + " s")
+
         self.output().write( np.nan_to_num(allFeat) )
 
 
@@ -275,6 +286,8 @@ class TopologyFeatures(luigi.Task):
     # Features from edge_topology
     #def topology_features(self, seg_id, use_2d_edges):
     def run(self):
+
+        t_feats = time.time()
 
         rag = self.input()["RAG"].read()
         seg = self.input()["Seg"].read()
@@ -346,6 +359,9 @@ class TopologyFeatures(luigi.Task):
             topology_features[:,6][z_mask] = np.absolute(
                     shape_feats_u[z_mask] - shape_feats_v[z_mask])
 
+        t_feats = time.time() - t_feats
+        workflow_logger.info("Calculated Topology Features in: " + str(t_feats) + " s")
+
         self.output().write(topology_features)
 
     def output(self):
@@ -366,6 +382,9 @@ class EdgeFeatures(luigi.Task):
         return RegionAdjacencyGraph(self.PathToSeg), InputData(self.PathToInput)
 
     def run(self):
+
+        t_feats = time.time()
+
         edge_features = []
         rag = self.input()[0].read()
         for filter_name in self.FilterNames:
@@ -387,6 +406,9 @@ class EdgeFeatures(luigi.Task):
         assert edge_features.shape[0] == rag.edgeNum, str(edge_features.shape[0]) + " , " +str(rag.edgeNum)
 
         edge_features = np.nan_to_num(edge_features)
+
+        t_feats = time.time() - t_feats
+        workflow_logger.info("Calculated Edge Features in: " + str(t_feats) + " s")
 
         self.output().write(edge_features)
 

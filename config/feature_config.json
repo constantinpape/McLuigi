@@ -1,5 +1,5 @@
 {
-    "features": ["probs","reg"],
+    "features": ["prob","reg","topo"],
     "filternames":["gaussianSmoothing","hessianOfGaussianEigenvalues","laplacianOfGaussian"],
     "anisotropy":25,
     "sigmas":[1.6, 4.2, 8.3],

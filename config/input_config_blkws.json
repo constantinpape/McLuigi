@@ -1,6 +1,6 @@
 {
-"data":["/home/constantin/Work/neurodata_hdd/cremi/sample_A/train_block/cremi_sampleA_raw.h5","/home/constantin/Work/neurodata_hdd/cremi/sample_A/train_block/probs/cremi_sampleA_probs_googleV1.h5"],
-"seg":"/home/constantin/Work/neurodata_hdd/cremi/sample_A/train_block/ws/cremi_sampleA_wsdt_googleV1.h5",
-"rf":"/home/constantin/Work/home_hdd/cache/large_blocks/rf_cache/rf_sample_A_gt_cutout_0_0/rf_sample_A_gt_cutout_0_0_('prob', 'reg', 'topo')_25.0_False_False_1000_0.4_0.6_True_True",
-"cache" : "/home/constantin/Work/home_hdd/cache/cache_luigi"
+    "data":["/home/constantin/Work/neurodata_hdd/cremi/sample_A/train_block/cremi_sampleA_raw.h5","/home/constantin/Work/neurodata_hdd/cremi/sample_A/train_block/probs/cremi_sampleA_probs_googleV1.h5"],
+    "seg":"/home/constantin/Work/neurodata_hdd/cremi/sample_A/train_block/ws/cremi_sampleA_wsdt_googleV1.h5",
+    "rf":"/home/constantin/Work/home_hdd/cache/large_blocks/rf_cache/rf_sample_A_gt_cutout_0_0/rf_sample_A_gt_cutout_0_0_('prob', 'reg', 'topo')_25.0_False_False_1000_0.4_0.6_True_True",
+    "cache" : "/home/constantin/Work/home_hdd/cache/cache_luigi"
 }

@@ -12,7 +12,13 @@ import logging
 import numpy as np
 import vigra
 import os
+import time
 #from sklearn.Ensemble import RandomForestClassifier
+
+# init the workflow logger
+from customLogging import config_logger
+workflow_logger = logging.getLogger(__name__)
+config_logger(workflow_logger)
 
 class ExternalRF(luigi.Task):
 
@@ -34,9 +40,16 @@ class EdgeProbabilitiesFromExternalRF(luigi.Task):
         return {"RF" : ExternalRF(self.RFPath), "Features" : feature_tasks}
 
     def run(self):
+
+        t_pred = time.time()
+
         rf = self.input()["RF"].read()
         features = np.concatenate( [feat.read() for feat in self.input()["Features"]], axis = 1 )
         probs = rf.predict_proba(features)[:,1]
+
+        t_pred = time.time() - t_pred
+        workflow_logger.info("Predicted RF in: " + str(t_pred) + " s")
+
         self.output().write(probs)
 
     def output(self):

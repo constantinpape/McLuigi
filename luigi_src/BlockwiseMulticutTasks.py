@@ -26,6 +26,11 @@ from concurrent import futures
 # so this is only preliminary
 # -> need more tasks and more atomicity!
 
+# init the workflow logger
+from customLogging import config_logger
+workflow_logger = logging.getLogger(__name__)
+config_logger(workflow_logger)
+
 # TODO use Fusionmoves task instead
 def fusion_moves(uv_ids, edge_costs, id):
 
@@ -64,7 +69,7 @@ def fusion_moves(uv_ids, edge_costs, id):
     inf.infer()
     t_inf = time.time() - t_inf
 
-    logging.info("Inference for subblock " + str(id) + " with fusion moves solver in " + str(t_inf) + " s")
+    workflow_logger.info("Inference for block " + str(id) + " with fusion moves solver in " + str(t_inf) + " s")
 
     res_node = inf.arg()
 
@@ -153,11 +158,11 @@ class BlockwiseMulticutSolver(luigi.Task):
         # this should have the correct order
         costs_new = np.array( new_edges_dict.values() )
 
-        logging.info("Merging of blockwise results reduced problemsize:" )
-        logging.info("Nodes: From" + str(n_nodes) + "to" + str(n_nodes_new) )
-        logging.info("Edges: From" + str(uvIds.shape[0]) + "to" + str(n_edges_new) )
+        workflow_logger.info("Merging of blockwise results reduced problemsize:" )
+        workflow_logger.info("Nodes: From " + str(n_nodes) + " to " + str(n_nodes_new) )
+        workflow_logger.info("Edges: From " + str(uvIds.shape[0]) + " to " + str(n_edges_new) )
 
-        res_node_new = fusion_moves( uv_ids_new, costs_new, "reduced" )
+        res_node_new = fusion_moves( uv_ids_new, costs_new, "reduced global" )
 
         assert res_node_new.shape[0] == n_nodes_new
 
@@ -169,7 +174,7 @@ class BlockwiseMulticutSolver(luigi.Task):
 
         # get the global energy
         E_glob = gm_global.evaluate(res_node)
-        logging.info("Blcokwise Multicut problem solved with energy " + str(E_glob) )
+        workflow_logger.info("Blcokwise Multicut problem solved with energy " + str(E_glob) )
 
         if 0 in res_node:
             res_node += 1
@@ -268,7 +273,7 @@ class BlockwiseSubSolver(luigi.Task):
 
         nBlocks = nX * nY * nZ
 
-        logging.info("Fitting " + str(nBlocks) + " blocks of size " + str(BlockSize) + " into shape " + str(Shape))
+        workflow_logger.info("Fitting " + str(nBlocks) + " blocks of size " + str(BlockSize) + " into shape " + str(Shape) + " additional overlaps: " + str(BlockOverlap))
 
         slicings = []
         for x in xrange(nX):
@@ -304,7 +309,7 @@ class BlockwiseSubSolver(luigi.Task):
                     slicings.append( np.s_[startX:endX,startY:endY,startZ:endZ] )
 
         # TODO figure out what to run in parallel / sequential
-        # preliminary results:
+        # preliminary results (sampleA_gt):
         #            sequential | parallel (20 cores)
         # extraction:       38 s                 42 s
         # inference :       15 s                  2 s
@@ -317,20 +322,20 @@ class BlockwiseSubSolver(luigi.Task):
         #with futures.ThreadPoolExecutor(max_workers=nWorkers) as executor:
         #    tasks = []
         #    for id, slicing in enumerate(slicings):
-        #        logging.info( "Block id " + str(id) + " slicing " + str(slicing) )
+        #        workflow_logger.info( "Block id " + str(id) + " slicing " + str(slicing) )
         #        tasks.append( executor.submit( extract_subproblems, seg[slicing], rag  ) )
 
         #SubProblems = [task.result() for task in tasks]
 
         SubProblems = []
         for id, slicing in enumerate(slicings):
-            logging.info( "Block id " + str(id) + " slicing " + str(slicing) )
+            workflow_logger.info( "Block id " + str(id) + " slicing " + str(slicing) )
             SubProblems.append( extract_subproblems(seg[slicing], rag) )
 
         assert len(SubProblems) == nBlocks, str(len(SubProblems)) + " , " + str(nBlocks)
 
         t_extract = time.time() - t_extract
-        logging.info( "Extraction time for subproblems" + str(t_extract)  + " s")
+        workflow_logger.info( "Extraction time for subproblems " + str(t_extract)  + " s")
 
         t_inf_total = time.time()
 
@@ -346,12 +351,7 @@ class BlockwiseSubSolver(luigi.Task):
         #    SubResults.append( fusion_moves(sub_problem[2], costs[sub_problem[0]], id) )
 
         t_inf_total = time.time() - t_inf_total
-        logging.info( "Inference time total for subproblems " + str(t_inf_total)  + " s")
-        print "T-inf:"
-        print "T-inf:"
-        print "T-inf:"
-        print "T-inf:"
-        print t_inf_total
+        workflow_logger.info( "Inference time total for subproblems " + str(t_inf_total)  + " s")
 
         nEdges = rag.edgeNum
         CutEdges = np.zeros( nEdges, dtype = np.uint8 )

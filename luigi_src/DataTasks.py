@@ -13,9 +13,10 @@ import vigra
 import os
 import h5py
 
-#TODO implement classes for pipeline parameter
-# to wrap cache folder, wsdt params, mc params, etc.
-
+# init the workflow logger
+from customLogging import config_logger
+workflow_logger = logging.getLogger(__name__)
+config_logger(workflow_logger)
 
 # we do nasty stuff and change the key inside the dataset to data
 # don't know, if this is wise, but this is the most lazy option...
@@ -145,9 +146,15 @@ class RegionAdjacencyGraph(luigi.Task):
 
 
     def run(self):
+
+        t_rag = time.time()
+
         seg = self.input().read()
         self.output().write(vigra.graphs.regionAdjacencyGraph(
             vigra.graphs.gridGraph(seg.shape[0:3]), seg))
+
+        t_rag = time.time() - t_rag
+        workflow_logger("Computed RAG in " + str(t_rag) + " s")
 
 
     def output(self):
