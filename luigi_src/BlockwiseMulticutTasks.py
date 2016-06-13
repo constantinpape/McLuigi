@@ -6,14 +6,17 @@ import luigi
 from PipelineParameter import PipelineParameter
 from DataTasks import RegionAdjacencyGraph, ExternalSegmentationLabeled
 from MulticutSolverTasks import MCProblem#, MCSSolverOpengmFusionMoves, MCSSolverOpengmExact
+from CustomTargets import HDF5Target
 
 from Tools import UnionFind
 
 import logging
 import json
+import time
 
 import numpy as np
 import vigra
+import os
 from concurrent import futures
 
 # TODO would be better to let the scheduler handle the parallelisation
@@ -25,6 +28,8 @@ from concurrent import futures
 
 # TODO use Fusionmoves task instead
 def fusion_moves(uv_ids, edge_costs, id):
+
+    import opengm
 
     # read the mc parameter
     with open(PipelineParameter().MCConfigFile, 'r') as f:
@@ -52,6 +57,7 @@ def fusion_moves(uv_ids, edge_costs, id):
                                 numStopIt = MCConfig["NumItStop"],
                                 numIt = MCConfig["NumIt"])
 
+    #print "Starting Inference"
     inf = opengm.inference.IntersectionBased(gm, parameter=parameter)
 
     t_inf = time.time()
@@ -76,10 +82,12 @@ class BlockwiseMulticutSolver(luigi.Task):
 
     def run(self):
 
+        import opengm
+
         problem = self.input()["GlobalProblem"].read()
         CutEdges = self.input()["SubSolutions"].read()
 
-        uvIds = problem[:,:2]
+        uvIds = problem[:,:2].astype(np.uint32)
         costs = problem[:,2]
 
         n_nodes = uvIds.max() + 1
@@ -146,10 +154,10 @@ class BlockwiseMulticutSolver(luigi.Task):
         costs_new = np.array( new_edges_dict.values() )
 
         logging.info("Merging of blockwise results reduced problemsize:" )
-        logging.info("Nodes: From" + n_nodes + "to" + n_nodes_new )
-        logging.info("Edges: From" + n_edges + "to" + n_edges_new )
+        logging.info("Nodes: From" + str(n_nodes) + "to" + str(n_nodes_new) )
+        logging.info("Edges: From" + str(uvIds.shape[0]) + "to" + str(n_edges_new) )
 
-        res_node_new = fusion_moves( uv_ids_new, costs_new )
+        res_node_new = fusion_moves( uv_ids_new, costs_new, "reduced" )
 
         assert res_node_new.shape[0] == n_nodes_new
 
@@ -161,7 +169,7 @@ class BlockwiseMulticutSolver(luigi.Task):
 
         # get the global energy
         E_glob = gm_global.evaluate(res_node)
-        logging.info()
+        logging.info("Blcokwise Multicut problem solved with energy " + str(E_glob) )
 
         if 0 in res_node:
             res_node += 1
@@ -169,9 +177,9 @@ class BlockwiseMulticutSolver(luigi.Task):
         self.output().write(res_node)
 
 
-        def output(self):
-            save_path = os.path.join( PipelineParameter().cache, "MCBlockwise.h5")
-            return HDF5Target( save_path )
+    def output(self):
+        save_path = os.path.join( PipelineParameter().cache, "MCBlockwise.h5")
+        return HDF5Target( save_path )
 
 
 class BlockwiseSubSolver(luigi.Task):
@@ -246,13 +254,17 @@ class BlockwiseSubSolver(luigi.Task):
         sY = BlockSize[1]
         sZ = BlockSize[2]
 
+        assert sX < Shape[0], str(sX) + " , " + str(Shape[0])
+        assert sY < Shape[1], str(sY) + " , " + str(Shape[1])
+        assert sZ < Shape[0], str(sZ) + " , " + str(Shape[2])
+
         oX = BlockOverlap[0]
         oY = BlockOverlap[1]
         oZ = BlockOverlap[2]
 
-        nX = int( np.ceil( float( sX / Shape[0] ) ) )
-        nY = int( np.ceil( float( sY / Shape[1] ) ) )
-        nZ = int( np.ceil( float( sZ / Shape[2] ) ) )
+        nX = int( np.ceil( float( Shape[0] ) / sX ) )
+        nY = int( np.ceil( float( Shape[1] ) / sY ) )
+        nZ = int( np.ceil( float( Shape[2] ) / sZ ) )
 
         nBlocks = nX * nY * nZ
 
@@ -267,7 +279,7 @@ class BlockwiseSubSolver(luigi.Task):
                 startX -= oX
             endX = (x + 1) * sX + oX
             if endX > Shape[0]:
-                x = Shape[0]
+                endX = Shape[0]
 
             for y in xrange(nY):
 
@@ -277,65 +289,93 @@ class BlockwiseSubSolver(luigi.Task):
                     startY -= oY
                 endY = (y + 1) * sY + oY
                 if endY > Shape[1]:
-                    y = Shape[1]
+                    endY = Shape[1]
 
                 for z in xrange(nZ):
 
                     # Z range
-                    startZ = y * sZ
+                    startZ = z * sZ
                     if z != 0:
                         startZ -= oZ
-                    endZ = (z + 1) * sZ + oz
+                    endZ = (z + 1) * sZ + oZ
                     if endZ > Shape[2]:
-                        z = Shape[2]
+                        endZ = Shape[2]
 
                     slicings.append( np.s_[startX:endX,startY:endY,startZ:endZ] )
 
+        # TODO figure out what to run in parallel / sequential
+        # preliminary results:
+        #            sequential | parallel (20 cores)
+        # extraction:       38 s                 42 s
+        # inference :       15 s                  2 s
+
         #nWorkers = 4
         nWorkers = min( nBlocks, PipelineParameter().n_threads )
-        with futures.ThreadPoolExecutor(max_workers=nWorkers) as executor:
-            tasks = []
-            for id, slicing in enumerate(slicings):
-                logging.info( "Block id " + str(id) + " slicing " + str(slicing) )
-                tasks.append( executor.submit( seg[slicing], rag  ) )
 
-        SubProblems = [task.result() for task in tasks]
+        t_extract = time.time()
+
+        #with futures.ThreadPoolExecutor(max_workers=nWorkers) as executor:
+        #    tasks = []
+        #    for id, slicing in enumerate(slicings):
+        #        logging.info( "Block id " + str(id) + " slicing " + str(slicing) )
+        #        tasks.append( executor.submit( extract_subproblems, seg[slicing], rag  ) )
+
+        #SubProblems = [task.result() for task in tasks]
+
+        SubProblems = []
+        for id, slicing in enumerate(slicings):
+            logging.info( "Block id " + str(id) + " slicing " + str(slicing) )
+            SubProblems.append( extract_subproblems(seg[slicing], rag) )
+
+        assert len(SubProblems) == nBlocks, str(len(SubProblems)) + " , " + str(nBlocks)
+
+        t_extract = time.time() - t_extract
+        logging.info( "Extraction time for subproblems" + str(t_extract)  + " s")
 
         t_inf_total = time.time()
 
         with futures.ThreadPoolExecutor(max_workers=nWorkers) as executor:
+            tasks = []
             for id, SubProblem in enumerate(SubProblems):
                 tasks.append( executor.submit( fusion_moves, SubProblem[2],
                     costs[SubProblem[0]], id ) )
-
         SubResults = [task.result() for task in tasks]
 
-        t_inf_total = t_inf_total - time.time()
-        log.info( "Inference time total for subproblems " + str(t_inf_total)  + " s")
+        #SubResults = []
+        #for id, sub_problem in enumerate(SubProblems):
+        #    SubResults.append( fusion_moves(sub_problem[2], costs[sub_problem[0]], id) )
+
+        t_inf_total = time.time() - t_inf_total
+        logging.info( "Inference time total for subproblems " + str(t_inf_total)  + " s")
+        print "T-inf:"
+        print "T-inf:"
+        print "T-inf:"
+        print "T-inf:"
+        print t_inf_total
 
         nEdges = rag.edgeNum
         CutEdges = np.zeros( nEdges, dtype = np.uint8 )
 
-        assert len(SubResults) == len(SubProblems)
+        assert len(SubResults) == len(SubProblems), str(len(SubResults)) + " , " + str(len(SubProblems))
 
         for id in xrange(nBlocks):
 
             # get the cut edges from the subproblem
             nodeRes = SubResults[id]
-            uvIdsSub = SubProblem[id][2]
+            uvIdsSub = SubProblems[id][2]
 
             ru = nodeRes[uvIdsSub[:,0]]
             rv = nodeRes[uvIdsSub[:,1]]
             edgeRes = ru!=rv
 
             # add up cut inner edges
-            CutEdges[SubProblem[id][0]] += edgeRes
+            CutEdges[SubProblems[id][0]] += edgeRes
 
             # add up outer edges
-            CutEdges[SubProblem[id][1]] += 1
+            CutEdges[SubProblems[id][1]] += 1
 
         # all edges which are cut at least once will be cut
-        CutEdges[cut_edges >= 1] = 1
+        CutEdges[CutEdges >= 1] = 1
 
         self.output().write(CutEdges)
 

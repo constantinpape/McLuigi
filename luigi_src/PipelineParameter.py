@@ -19,7 +19,7 @@ class PipelineParameter(object):
 
     def __init__(self):
         self.cache = "/tmp/mc_cache"
-        self.n_threads = 8
+        self.n_threads = 20
         self.max_aniso = 20.
         self.InputFile = ""
         self.FeatureConfigFile = ""

@@ -188,9 +188,14 @@ class MCProblem(luigi.Task):
         # scale the probabilities
         # this is pretty arbitrary, it used to be 1. / n_tress, but this does not make that much sense for sklearn impl
         probs = self.input()["EdgeProbs"].read()
+
+        print probs.min()
+        print probs.max()
+
         p_min = 0.001
         p_max = 1. - p_min
-        edge_probs = (p_max - p_min) * probs + p_min
+        probs = (p_max - p_min) * probs + p_min
+
         beta = MCConfig["Beta"]
 
         # probabilities to energies, second term is boundary bias
@@ -235,6 +240,8 @@ class MCProblem(luigi.Task):
             edge_costs = np.multiply(w, edge_costs)
 
         assert edge_costs.shape[0] == uv_ids.shape[0]
+        assert np.isfinite( edge_costs.min() ), str(edge_costs.min())
+        assert np.isfinite( edge_costs.max() ), str(edge_costs.max())
 
         # write concatenation of uvids and edge costs
         self.output().write( np.concatenate( [uv_ids, edge_costs[:,None]], axis = 1 ) )
@@ -242,6 +249,6 @@ class MCProblem(luigi.Task):
 
     def output(self):
         # TODO more meaningful caching name
-        save_path = os.path.join( PipelineParameter().cache,
-                "MC_problem" + os.path.split(self.PathToSeg)[1][:-3] + ".h5" )
+        save_path = os.path.join( PipelineParameter().cache, "MCProblem.h5" )
+                #"MC_problem" + os.path.split(self.PathToSeg)[1][:-3] + ".h5" )
         return HDF5Target( save_path )
