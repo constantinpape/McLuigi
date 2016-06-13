@@ -12,6 +12,7 @@ import numpy as np
 import vigra
 import os
 import h5py
+import time
 
 # init the workflow logger
 from customLogging import config_logger
