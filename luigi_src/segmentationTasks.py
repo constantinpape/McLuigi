@@ -1,6 +1,9 @@
 import luigi
 
-from DataTasks import ExternalInputData
+from dataTasks import ExternalInputData
+
+from pipelineParameter import PipelineParameter
+from toolsLuigi import config_logger
 
 from wsdt import WsdtSegmentation
 

@@ -2,9 +2,9 @@ import luigi
 import os
 import numpy as np
 
-from DataTasks import RegionAdjacencyGraph
-from CustomTargets import HDF5Target
-from PipelineParameter import PipelineParameter
+from dataTasks import RegionAdjacencyGraph
+from customTargets import HDF5Target
+from pipelineParameter import PipelineParameter
 
 
 class EdgeIndications(luigi.Task):
@@ -34,6 +34,7 @@ class EdgeIndications(luigi.Task):
         self.output().write(edge_indications)
 
     def output(self):
-        seg_name = os.path.split(self.PathToSeg)[1][:-3]
-        return HDF5Target( os.path.join( PipelineParameter().cache,
-            "EdgeIndications_" + seg_name + ".h5" ) )
+        #seg_name = os.path.split(self.PathToSeg)[1][:-3]
+        #return HDF5Target( os.path.join( PipelineParameter().cache,
+        #    "EdgeIndications_" + seg_name + ".h5" ) )
+        return HDF5Target( os.path.join( PipelineParameter().cache, "EdgeIndications.h5" ) )

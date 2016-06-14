@@ -3,9 +3,11 @@
 
 import luigi
 
-from CustomTargets import PickleTarget, HDF5Target
-from PipelineParameter import PipelineParameter
-from FeatureTasks import get_local_features
+from customTargets import PickleTarget, HDF5Target
+from featureTasks import get_local_features
+
+from pipelineParameter import PipelineParameter
+from toolsLuigi import config_logger
 
 import logging
 
@@ -16,7 +18,6 @@ import time
 #from sklearn.Ensemble import RandomForestClassifier
 
 # init the workflow logger
-from customLogging import config_logger
 workflow_logger = logging.getLogger(__name__)
 config_logger(workflow_logger)
 

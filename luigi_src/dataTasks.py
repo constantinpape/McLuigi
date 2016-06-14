@@ -2,9 +2,10 @@
 # Tasks for providing the input data
 
 import luigi
-from CustomTargets import HDF5Target, RagTarget
+from customTargets import HDF5Target, RagTarget
 
-from PipelineParameter import *
+from pipelineParameter import PipelineParameter
+from toolsLuigi import config_logger
 
 import logging
 
@@ -15,7 +16,6 @@ import h5py
 import time
 
 # init the workflow logger
-from customLogging import config_logger
 workflow_logger = logging.getLogger(__name__)
 config_logger(workflow_logger)
 

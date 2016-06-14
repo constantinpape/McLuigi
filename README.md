@@ -1,16 +1,31 @@
 # LuigiCUt
 
 Implementation of Multicut Workflow based on luigi.
-This is mostly for deployment purposes, so it will need some cleaning up...
+This is mostly for deployment purposes. 
+Still under development and quite unstable.
+
+## Features
+
+Implemented:
+
+* Edge Features, Region Features, Topology Features
+* RF Prediction
+* MC Solver
+* Blockwise MC Solver
+
+Missing (and don't know what we actually want here yet):
+
+* Generating Oversemgentation 
+* RF Learning
+* Lifted Multicut
 
 ## TODO next
 
-* Understand caching.
-* RF Learning.
-* Blockwise MC.
+* Consistent caching names (for now just the task name) -> understand caching better.
+* Get central schedular running.
+* Move parallelisation of blockwise stuff to scheduler, if possible.
 * Backend for chunked h5.
 * Chunked and blockwise processing.
-* Logging , log-level for stuff from pipeline
 
 ## TODO then
 

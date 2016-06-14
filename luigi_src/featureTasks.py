@@ -2,10 +2,13 @@
 # Taksks for Feature Calculation
 
 import luigi
-from CustomTargets import HDF5Target
-from PipelineParameter import *
-from DataTasks import InputData, RegionAdjacencyGraph, ExternalSegmentationLabeled
-from MiscTasks import EdgeIndications
+
+from customTargets import HDF5Target
+from dataTasks import InputData, RegionAdjacencyGraph, ExternalSegmentationLabeled
+from miscTasks import EdgeIndications
+
+from pipelineParameter import PipelineParameter
+from toolsLuigi import config_logger
 
 import logging
 import json
@@ -16,83 +19,84 @@ import numpy as np
 import vigra
 
 # init the workflow logger
-from customLogging import config_logger
 workflow_logger = logging.getLogger(__name__)
 config_logger(workflow_logger)
 
 
-# TODO
-# class FilterSven
-# proper feature hierarchies
+# we have this as a function now to calculate it on the fly
+# maybe want to go back to a task once, so leave it in for now
 
-class FilterVigra(luigi.Task):
-
-    PathToInput = luigi.Parameter()
-
-    FilterName = luigi.Parameter()
-    Sigma = luigi.Parameter()
-    Anisotropy = luigi.Parameter()
-
-    def requires(self):
-        return InputData(self.PathToInput)
-
-    def run(self):
-
-        inp = self.input().read()
-
-        # TODO assert thtat this exists
-        eval_filter = eval( ".".join( ["vigra", "filters", self.FilterName] ) )
-
-        # calculate filter purely in 2d
-        if self.Anisotropy > PipelineParameter().max_aniso:
-            res = []
-            for z in range(inp.shape[2]):
-                filt_z = eval_filter( inp[:,:,z], sig )
-                assert len(filt_z.shape) in (2,3)
-                # insert z axis to stack later
-                if len(filt_z.shape) == 2:
-                    # single channel filter
-                    filt_z = filt_z[:,:,np.newaxis]
-                elif len(filt_z.shape) == 3:
-                    # multi channel filter
-                    filt_z = filt_z[:,:,np.newaxis,:]
-                res.append(filt_z)
-            # stack them together
-            res = np.concatenate(res, axis = 2)
-        else:
-            if self.Anisotropy > 1.:
-                sig = (self.Sigma, self.Sigma, self.Sigma / self.Anisotropy)
-            else:
-                sig = self.Sigma
-
-            res = eval_filter( inp, sig )
-
-        self.output().write(res)
-
-
-    def output(self):
-        aniso = self.Anisotropy
-        if aniso > PipelineParameter().max_aniso:
-            aniso = PipelineParameter().max_aniso
-        return HDF5Target(
-                os.path.join( PipelineParameter().cache, "_".join(
-                    [os.path.split(self.PathToInput)[1], self.FilterName, str(self.Sigma), str(aniso)] ) + ".h5") )
+#class FilterVigra(luigi.Task):
+#
+#    PathToInput = luigi.Parameter()
+#
+#    FilterName = luigi.Parameter()
+#    Sigma = luigi.Parameter()
+#    Anisotropy = luigi.Parameter()
+#
+#    def requires(self):
+#        return InputData(self.PathToInput)
+#
+#    def run(self):
+#
+#        inp = self.input().read()
+#
+#        # TODO assert thtat this exists
+#        eval_filter = eval( ".".join( ["vigra", "filters", self.FilterName] ) )
+#
+#        # calculate filter purely in 2d
+#        if self.Anisotropy > PipelineParameter().max_aniso:
+#            res = []
+#            for z in range(inp.shape[2]):
+#                filt_z = eval_filter( inp[:,:,z], sig )
+#                assert len(filt_z.shape) in (2,3)
+#                # insert z axis to stack later
+#                if len(filt_z.shape) == 2:
+#                    # single channel filter
+#                    filt_z = filt_z[:,:,np.newaxis]
+#                elif len(filt_z.shape) == 3:
+#                    # multi channel filter
+#                    filt_z = filt_z[:,:,np.newaxis,:]
+#                res.append(filt_z)
+#            # stack them together
+#            res = np.concatenate(res, axis = 2)
+#        else:
+#            if self.Anisotropy > 1.:
+#                sig = (self.Sigma, self.Sigma, self.Sigma / self.Anisotropy)
+#            else:
+#                sig = self.Sigma
+#
+#            res = eval_filter( inp, sig )
+#
+#        self.output().write(res)
+#
+#
+#    def output(self):
+#        aniso = self.Anisotropy
+#        if aniso > PipelineParameter().max_aniso:
+#            aniso = PipelineParameter().max_aniso
+#        return HDF5Target(
+#                os.path.join( PipelineParameter().cache, "_".join(
+#                    [os.path.split(self.PathToInput)[1], self.FilterName, str(self.Sigma), str(aniso)] ) + ".h5") )
 
 
 # TODO svens filters, blockwise, chunked, presmoothing
 # implement this as function, because we don't want to cache the filters!
-def filter_vigra(PathToInput, FilterName, Sigma, Anisotropy):
+def filter_vigra(input_path, filter_name, sigma, anisotropy):
 
-    inp = vigra.readHDF5(PathToInput, "data")
+    inp = vigra.readHDF5(input_path, "data")
 
     # TODO assert thtat this exists
-    eval_filter = eval( ".".join( ["vigra", "filters", FilterName] ) )
+    eval_filter = eval( ".".join( ["vigra", "filters", filter_name] ) )
+
+    workflow_logger.debug("Calculating " + filter_name + " on input from " + input_path +  " for anisotropy factor " + str(anisotropy))
 
     # calculate filter purely in 2d
-    if Anisotropy > PipelineParameter().max_aniso:
+    if anisotropy > PipelineParameter().MaxAniso:
+        workflow_logger.debug("Filter calculation in 2d")
         res = []
         for z in range(inp.shape[2]):
-            filt_z = eval_filter( inp[:,:,z], Sigma )
+            filt_z = eval_filter( inp[:,:,z], sigma )
             assert len(filt_z.shape) in (2,3)
             # insert z axis to stack later
             if len(filt_z.shape) == 2:
@@ -105,10 +109,11 @@ def filter_vigra(PathToInput, FilterName, Sigma, Anisotropy):
         # stack them together
         res = np.concatenate(res, axis = 2)
     else:
-        if Anisotropy > 1.:
-            sig = (Sigma, Sigma, Sigma / Anisotropy)
+        workflow_logger.debug("Filter calculation in 3d")
+        if anisotropy > 1.:
+            sig = (sigma, sigma, sigma / anisotropy)
         else:
-            sig = Sigma
+            sig = sigma
 
         res = eval_filter( inp, sig )
 
@@ -144,17 +149,21 @@ def get_local_features():
         # by convention we assume that the raw data is given as 0th
         feature_tasks.append( EdgeFeatures(input_data[0], inputs["seg"],
                 filternames, sigmas, anisotropy) )
+        workflow_logger.debug("Calculating Edge Features from raw input: " + input_data[0])
     if "prob" in features:
         # by convention we assume that the membrane probs are given as 1st
         feature_tasks.append( EdgeFeatures(input_data[1], inputs["seg"],
                 filternames, sigmas, anisotropy) )
+        workflow_logger.debug("Calculating Edge Features from probability maps: " + input_data[1])
     if "reg" in features:
         # by convention we calculate region features only on the raw data (0th input)
         # TODO should try it on probmaps. For big data we might spare shipping the raw data!
         feature_tasks.append( RegionFeatures(input_data[0], inputs["seg"]) )
+        workflow_logger.debug("Calculating Region Features")
     if "topo" in features:
         # by convention we calculate region features only on the raw data (0th input)
         feature_tasks.append( TopologyFeatures(inputs["seg"], features2d ) )
+        workflow_logger.debug("Calculating Topology Features")
 
     return feature_tasks
 
@@ -204,66 +213,64 @@ class RegionFeatures(luigi.Task):
 
         region_statistics, region_statistics_names = region_statistics(inp, seg)
 
-        regStats = []
+        reg_stats = []
 
-        for regStatName in region_statistics_names[0:10]:
-            regStat = region_statistics[regStatName]
-            if regStat.ndim == 1:
-                regStats.append(regStat[:,None])
+        for reg_stat_name in region_statistics_names[0:10]:
+            reg_stat = region_statistics[reg_stat_name]
+            if reg_stat.ndim == 1:
+                reg_stats.append(reg_stat[:,None])
             else:
-                regStats.append(regStat)
+                reg_stats.append(reg_stat)
 
-        regStats = np.concatenate(regStats, axis=1)
+        reg_stats = np.concatenate(reg_stats, axis=1)
 
-        regCenters = []
-        for regStatName in  region_statistics_names[10:12]:
-            regCenter = region_statistics[regStatName]
-            if regCenter.ndim == 1:
-                regCenters.append(regCenter[:,None])
+        reg_centers = []
+        for reg_stat_name in region_statistics_names[10:12]:
+            reg_center = region_statistics[reg_stat_name]
+            if reg_center.ndim == 1:
+                reg_centers.append(reg_center[:,None])
             else:
-                regCenters.append(regCenter)
+                reg_centers.append(reg_center)
 
-        regCenters = np.concatenate(regCenters, axis=1)
+        reg_centers = np.concatenate(reg_centers, axis=1)
 
         # we actively delete stuff we don't need to free memory
         # because this may become memory consuming for lifted edges
         del region_statistics
         gc.collect()
 
-        fU = regStats[uv_ids[:,0],:]
-        fV = regStats[uv_ids[:,1],:]
+        f_u = reg_stats[uv_ids[:,0],:]
+        f_v = reg_stats[uv_ids[:,1],:]
 
-        allFeat = [np.minimum(fU, fV),
-                np.maximum(fU, fV),
-                np.abs(fU - fV),
-                fU + fV ]
+        all_feat = [np.minimum(f_u, f_v), np.maximum(f_u, f_v),
+                np.abs(f_u - f_v), f_u + f_v ]
 
         # we actively delete stuff we don't need to free memory
         # because this may become memory consuming for lifted edges
-        fV = fV.resize((1,1))
-        fU = fU.resize((1,1))
-        del fU
-        del fV
+        f_u = f_u.resize((1,1))
+        f_v = f_v.resize((1,1))
+        del f_u
+        del f_v
         gc.collect()
 
-        sU = regCenters[uv_ids[:,0],:]
-        sV = regCenters[uv_ids[:,1],:]
-        allFeat.append( (sU - sV)**2 )
+        s_u = reg_centers[uv_ids[:,0],:]
+        s_v = reg_centers[uv_ids[:,1],:]
+        all_feat.append( (s_u - s_v)**2 )
 
         # we actively delete stuff we don't need to free memory
         # because this may become memory consuming for lifted edges
-        sV = sV.resize((1,1))
-        sU = sU.resize((1,1))
-        del sU
-        del sV
+        s_u = s_u.resize((1,1))
+        s_v = s_v.resize((1,1))
+        del s_u
+        del s_v
         gc.collect()
 
-        allFeat = np.concatenate(allFeat, axis = 1)
+        all_feat = np.concatenate(all_feat, axis = 1)
 
         t_feats = time.time() - t_feats
         workflow_logger.info("Calculated Region Features in: " + str(t_feats) + " s")
 
-        self.output().write( np.nan_to_num(allFeat) )
+        self.output().write( np.nan_to_num(all_feat) )
 
 
     def output(self):
@@ -393,14 +400,14 @@ class EdgeFeatures(luigi.Task):
 
                 if len(filt.shape) == 3:
                     # let RAG do the work
-                    gridGraphEdgeIndicator = vigra.graphs.implicitMeanEdgeMap(rag.baseGraph, filt)
-                    edge_features.append( rag.accumulateEdgeStatistics(gridGraphEdgeIndicator) )
+                    grid_graph_edge_indicator = vigra.graphs.implicitMeanEdgeMap(rag.baseGraph, filt)
+                    edge_features.append( rag.accumulateEdgeStatistics( grid_graph_edge_indicator) )
 
                 elif len(filt.shape) == 4:
                     for c in range(filt.shape[3]):
-                        gridGraphEdgeIndicator = vigra.graphs.implicitMeanEdgeMap(
+                        grid_graph_edge_indicator = vigra.graphs.implicitMeanEdgeMap(
                                 rag.baseGraph, filt[:,:,:,c] )
-                        edge_features.append(rag.accumulateEdgeStatistics(gridGraphEdgeIndicator))
+                        edge_features.append(rag.accumulateEdgeStatistics(grid_graph_edge_indicator))
 
         edge_features = np.concatenate( edge_features, axis = 1)
         assert edge_features.shape[0] == rag.edgeNum, str(edge_features.shape[0]) + " , " +str(rag.edgeNum)
@@ -414,7 +421,8 @@ class EdgeFeatures(luigi.Task):
 
 
     def output(self):
-        inp_name = os.path.split(self.PathToInput)[1][:-3]
-        seg_name = os.path.split(self.PathToSeg)[1][:-3]
-        return HDF5Target( os.path.join( PipelineParameter().cache,
-            "EdgeFeatures_" + inp_name + "_" + seg_name + ".h5" ) )
+        #inp_name = os.path.split(self.PathToInput)[1][:-3]
+        #seg_name = os.path.split(self.PathToSeg)[1][:-3]
+        #return HDF5Target( os.path.join( PipelineParameter().cache,
+        #    "EdgeFeatures_" + inp_name + "_" + seg_name + ".h5" ) )
+        return HDF5Target( os.path.join( PipelineParameter().cache, "EdgeFeatures.h5" ) )

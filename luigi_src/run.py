@@ -4,14 +4,14 @@ import os
 import logging
 import json
 
-from PipelineParameter import PipelineParameter
-from customLogging import config_logger
-from WorkflowTasks import MulticutSegmentation, BlockwiseMulticutSegmentation
-from FeatureTasks import RegionFeatures, TopologyFeatures
-from MulticutSolverTasks import MCProblem
+from workflowTasks import MulticutSegmentation, BlockwiseMulticutSegmentation
+
+from pipelineParameter import PipelineParameter
+from toolsLuigi import config_logger
 
 # the workflow logger
 workflow_logger = logging.getLogger(__name__)
+config_logger(workflow_logger)
 
 if __name__ == '__main__':
 
@@ -24,7 +24,6 @@ if __name__ == '__main__':
 
     PipelineParameter().cache = inputs["cache"]
 
-    config_logger(workflow_logger)
     workflow_logger.info("Starting Workflow for inputs:")
     for i, data_file in enumerate(inputs["data"]):
         workflow_logger.info("Input data nr. " + str(i) + ": " + data_file )
@@ -37,9 +36,4 @@ if __name__ == '__main__':
         "--PathToSeg", inputs["seg"],
         "--PathToRF", inputs["rf"]],
         main_task_cls = BlockwiseMulticutSegmentation)
-        #main_task_cls = MCProblem)
-
-    #luigi.run(["--local-scheduler",
-    #    "--PathToSeg", inputs["seg"]],
-    #    #"--Use2dFeatures", 'true'],
-    #    main_task_cls = TopologyFeatures)
+        #main_task_cls = MulticutSegmentation)

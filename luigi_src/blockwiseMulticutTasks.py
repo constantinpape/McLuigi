@@ -1,14 +1,14 @@
 # Multicut Pipeline implemented with luigi
-# Multicut Solver Tasks
+# Blockwise solver tasks
 
 import luigi
 
-from PipelineParameter import PipelineParameter
-from DataTasks import RegionAdjacencyGraph, ExternalSegmentationLabeled
-from MulticutSolverTasks import MCProblem#, MCSSolverOpengmFusionMoves, MCSSolverOpengmExact
-from CustomTargets import HDF5Target
+from pipelineParameter import PipelineParameter
+from dataTasks import RegionAdjacencyGraph, ExternalSegmentationLabeled
+from multicutSolverTasks import MCProblem#, MCSSolverOpengmFusionMoves, MCSSolverOpengmExact
+from customTargets import HDF5Target
 
-from Tools import UnionFind
+from toolsLuigi import UnionFind, config_logger
 
 import logging
 import json
@@ -27,7 +27,6 @@ from concurrent import futures
 # -> need more tasks and more atomicity!
 
 # init the workflow logger
-from customLogging import config_logger
 workflow_logger = logging.getLogger(__name__)
 config_logger(workflow_logger)
 
@@ -38,7 +37,7 @@ def fusion_moves(uv_ids, edge_costs, id):
 
     # read the mc parameter
     with open(PipelineParameter().MCConfigFile, 'r') as f:
-        MCConfig = json.load(f)
+        mc_config = json.load(f)
 
     n_var = uv_ids.max() + 1
 
@@ -48,19 +47,17 @@ def fusion_moves(uv_ids, edge_costs, id):
 
     # potts model
     potts_shape = [n_var, n_var]
-
     potts = opengm.pottsFunctions(potts_shape, np.zeros_like( edge_costs ), edge_costs )
-
     # potts model to opengm function
     fids_b = gm.addFunctions(potts)
 
     gm.addFactors(fids_b, uv_ids)
 
-    pparam = opengm.InfParam(seedFraction = MCConfig["SeedFraction"])
+    pparam = opengm.InfParam(seedFraction = mc_config["SeedFraction"])
     parameter = opengm.InfParam(generator = 'randomizedWatershed',
                                 proposalParam = pparam,
-                                numStopIt = MCConfig["NumItStop"],
-                                numIt = MCConfig["NumIt"])
+                                numStopIt = mc_config["NumItStop"],
+                                numIt = mc_config["NumIt"])
 
     #print "Starting Inference"
     inf = opengm.inference.IntersectionBased(gm, parameter=parameter)
@@ -76,6 +73,8 @@ def fusion_moves(uv_ids, edge_costs, id):
     return res_node
 
 
+# produce reduced global graph from subproblems
+# solve global multicut problem on the reduced graph
 class BlockwiseMulticutSolver(luigi.Task):
 
     PathToSeg = luigi.Parameter()
@@ -90,12 +89,12 @@ class BlockwiseMulticutSolver(luigi.Task):
         import opengm
 
         problem = self.input()["GlobalProblem"].read()
-        CutEdges = self.input()["SubSolutions"].read()
+        cut_edges = self.input()["SubSolutions"].read()
 
-        uvIds = problem[:,:2].astype(np.uint32)
-        costs = problem[:,2]
+        uv_ids = problem[:,:2].astype(np.uint32)
+        costs  = problem[:,2]
 
-        n_nodes = uvIds.max() + 1
+        n_nodes = uv_ids.max() + 1
 
         # set up the opengm model
         states = np.ones(n_nodes) * n_nodes
@@ -107,16 +106,16 @@ class BlockwiseMulticutSolver(luigi.Task):
         # potts model to opengm function
         fids_b = gm_global.addFunctions(potts)
 
-        gm_global.addFactors(fids_b, uvIds)
+        gm_global.addFactors(fids_b, uv_ids)
 
         # merge nodes according to cut edges
         # this means, that we merge all segments that have an edge with value 0 in between
         # for this, we use a ufd datastructure
         udf = UnionFind( n_nodes )
 
-        MergeNodes = uvIds[CutEdges == 0]
+        merge_nodes = uv_ids[cut_edges == 0]
 
-        for pair in MergeNodes:
+        for pair in merge_nodes:
             u = pair[0]
             v = pair[1]
             udf.merge(u, v)
@@ -134,11 +133,11 @@ class BlockwiseMulticutSolver(luigi.Task):
                 old_to_new_nodes[n_id] = set_id
 
         # find new edges and new edge weights
-        active_edges = np.where( CutEdges == 1 )[0]
+        active_edges = np.where( cut_edges == 1 )[0]
         new_edges_dict = {}
         for edge_id in active_edges:
-            u_old = uvIds[edge_id][0]
-            v_old = uvIds[edge_id][1]
+            u_old = uv_ids[edge_id][0]
+            v_old = uv_ids[edge_id][1]
             n_0_new = old_to_new_nodes[u_old]
             n_1_new = old_to_new_nodes[v_old]
             # we have to bew in different new nodes!
@@ -160,7 +159,7 @@ class BlockwiseMulticutSolver(luigi.Task):
 
         workflow_logger.info("Merging of blockwise results reduced problemsize:" )
         workflow_logger.info("Nodes: From " + str(n_nodes) + " to " + str(n_nodes_new) )
-        workflow_logger.info("Edges: From " + str(uvIds.shape[0]) + " to " + str(n_edges_new) )
+        workflow_logger.info("Edges: From " + str(uv_ids.shape[0]) + " to " + str(n_edges_new) )
 
         res_node_new = fusion_moves( uv_ids_new, costs_new, "reduced global" )
 
@@ -173,17 +172,14 @@ class BlockwiseMulticutSolver(luigi.Task):
                 res_node[old_node] = res_node_new[n_id]
 
         # get the global energy
-        E_glob = gm_global.evaluate(res_node)
-        workflow_logger.info("Blcokwise Multicut problem solved with energy " + str(E_glob) )
-
-        if 0 in res_node:
-            res_node += 1
+        e_glob = gm_global.evaluate(res_node)
+        workflow_logger.info("Blcokwise Multicut problem solved with energy " + str(e_glob) )
 
         self.output().write(res_node)
 
 
     def output(self):
-        save_path = os.path.join( PipelineParameter().cache, "MCBlockwise.h5")
+        save_path = os.path.join( PipelineParameter().cache, "BlockwiseMulticutSolver.h5")
         return HDF5Target( save_path )
 
 
@@ -247,66 +243,62 @@ class BlockwiseSubSolver(luigi.Task):
 
         # block parameters
         with open(PipelineParameter().MCConfigFile, 'r') as f:
-            MCConfig = json.load(f)
+            mc_config = json.load(f)
 
-        BlockSize = MCConfig["BlockSize"]
-        BlockOverlap = MCConfig["BlockOverlap"]
+        block_size    = mc_config["BlockSize"]
+        block_overlap = mc_config["BlockOverlap"]
 
-        # calculate number and locations of the subblocks
-        Shape = seg.shape
+        s_x = block_size[0]
+        assert s_x < seg.shape[0], str(s_x) + " , " + str(seg.shape[0])
+        s_y = block_size[1]
+        assert s_y < seg.shape[1], str(s_y) + " , " + str(seg.shape[1])
+        s_z = block_size[2]
+        assert s_z < seg.shape[0], str(s_z) + " , " + str(seg.shape[2])
 
-        sX = BlockSize[0]
-        sY = BlockSize[1]
-        sZ = BlockSize[2]
+        o_x = block_overlap[0]
+        o_y = block_overlap[1]
+        o_z = block_overlap[2]
 
-        assert sX < Shape[0], str(sX) + " , " + str(Shape[0])
-        assert sY < Shape[1], str(sY) + " , " + str(Shape[1])
-        assert sZ < Shape[0], str(sZ) + " , " + str(Shape[2])
+        n_x = int( np.ceil( float( seg.shape[0] ) / s_x ) )
+        n_y = int( np.ceil( float( seg.shape[1] ) / s_y ) )
+        n_z = int( np.ceil( float( seg.shape[2] ) / s_z ) )
 
-        oX = BlockOverlap[0]
-        oY = BlockOverlap[1]
-        oZ = BlockOverlap[2]
+        n_blocks = n_x * n_y * n_z
 
-        nX = int( np.ceil( float( Shape[0] ) / sX ) )
-        nY = int( np.ceil( float( Shape[1] ) / sY ) )
-        nZ = int( np.ceil( float( Shape[2] ) / sZ ) )
-
-        nBlocks = nX * nY * nZ
-
-        workflow_logger.info("Fitting " + str(nBlocks) + " blocks of size " + str(BlockSize) + " into shape " + str(Shape) + " additional overlaps: " + str(BlockOverlap))
+        workflow_logger.info("Fitting " + str(n_blocks) + " blocks of size " + str(block_size) + " into shape " + str(seg.shape) + " additional overlaps: " + str(block_overlap))
 
         slicings = []
-        for x in xrange(nX):
+        for x in xrange(n_x):
 
             # X range
-            startX = x * sX
+            start_x = x * s_x
             if x != 0:
-                startX -= oX
-            endX = (x + 1) * sX + oX
-            if endX > Shape[0]:
-                endX = Shape[0]
+                start_x -= o_x
+            end_x = (x + 1) * s_x + o_x
+            if end_x > seg.shape[0]:
+                end_x = seg.shape[0]
 
-            for y in xrange(nY):
+            for y in xrange(n_y):
 
                 # Y range
-                startY = y * sY
+                start_y = y * s_y
                 if y != 0:
-                    startY -= oY
-                endY = (y + 1) * sY + oY
-                if endY > Shape[1]:
-                    endY = Shape[1]
+                    start_y -= o_y
+                end_y = (y + 1) * s_y + o_y
+                if end_y > seg.shape[1]:
+                    end_y = seg.shape[1]
 
-                for z in xrange(nZ):
+                for z in xrange(n_z):
 
                     # Z range
-                    startZ = z * sZ
+                    start_z = z * s_z
                     if z != 0:
-                        startZ -= oZ
-                    endZ = (z + 1) * sZ + oZ
-                    if endZ > Shape[2]:
-                        endZ = Shape[2]
+                        start_z -= o_z
+                    end_z = (z + 1) * s_z + o_z
+                    if end_z > seg.shape[2]:
+                        end_z = seg.shape[2]
 
-                    slicings.append( np.s_[startX:endX,startY:endY,startZ:endZ] )
+                    slicings.append( np.s_[start_x:end_x,start_y:end_y,start_z:end_z] )
 
         # TODO figure out what to run in parallel / sequential
         # preliminary results (sampleA_gt):
@@ -315,7 +307,7 @@ class BlockwiseSubSolver(luigi.Task):
         # inference :       15 s                  2 s
 
         #nWorkers = 4
-        nWorkers = min( nBlocks, PipelineParameter().n_threads )
+        nWorkers = min( n_blocks, PipelineParameter().nThreads )
 
         t_extract = time.time()
 
@@ -325,14 +317,14 @@ class BlockwiseSubSolver(luigi.Task):
         #        workflow_logger.info( "Block id " + str(id) + " slicing " + str(slicing) )
         #        tasks.append( executor.submit( extract_subproblems, seg[slicing], rag  ) )
 
-        #SubProblems = [task.result() for task in tasks]
+        #sub_problems = [task.result() for task in tasks]
 
-        SubProblems = []
+        sub_problems = []
         for id, slicing in enumerate(slicings):
             workflow_logger.info( "Block id " + str(id) + " slicing " + str(slicing) )
-            SubProblems.append( extract_subproblems(seg[slicing], rag) )
+            sub_problems.append( extract_subproblems(seg[slicing], rag) )
 
-        assert len(SubProblems) == nBlocks, str(len(SubProblems)) + " , " + str(nBlocks)
+        assert len(sub_problems) == n_blocks, str(len(sub_problems)) + " , " + str(n_blocks)
 
         t_extract = time.time() - t_extract
         workflow_logger.info( "Extraction time for subproblems " + str(t_extract)  + " s")
@@ -341,43 +333,43 @@ class BlockwiseSubSolver(luigi.Task):
 
         with futures.ThreadPoolExecutor(max_workers=nWorkers) as executor:
             tasks = []
-            for id, SubProblem in enumerate(SubProblems):
-                tasks.append( executor.submit( fusion_moves, SubProblem[2],
-                    costs[SubProblem[0]], id ) )
-        SubResults = [task.result() for task in tasks]
+            for id, sub_problem in enumerate(sub_problems):
+                tasks.append( executor.submit( fusion_moves, sub_problem[2],
+                    costs[sub_problem[0]], id ) )
+        sub_results = [task.result() for task in tasks]
 
-        #SubResults = []
-        #for id, sub_problem in enumerate(SubProblems):
-        #    SubResults.append( fusion_moves(sub_problem[2], costs[sub_problem[0]], id) )
+        #sub_results = []
+        #for id, sub_problem in enumerate(sub_problems):
+        #    sub_results.append( fusion_moves(sub_problem[2], costs[sub_problem[0]], id) )
 
         t_inf_total = time.time() - t_inf_total
         workflow_logger.info( "Inference time total for subproblems " + str(t_inf_total)  + " s")
 
-        nEdges = rag.edgeNum
-        CutEdges = np.zeros( nEdges, dtype = np.uint8 )
+        n_edges = rag.edgeNum
+        cut_edges = np.zeros( n_edges, dtype = np.uint8 )
 
-        assert len(SubResults) == len(SubProblems), str(len(SubResults)) + " , " + str(len(SubProblems))
+        assert len(sub_results) == len(sub_problems), str(len(sub_results)) + " , " + str(len(sub_problems))
 
-        for id in xrange(nBlocks):
+        for id in xrange(n_blocks):
 
             # get the cut edges from the subproblem
-            nodeRes = SubResults[id]
-            uvIdsSub = SubProblems[id][2]
+            node_res = sub_results[id]
+            uv_ids_sub = sub_problems[id][2]
 
-            ru = nodeRes[uvIdsSub[:,0]]
-            rv = nodeRes[uvIdsSub[:,1]]
-            edgeRes = ru!=rv
+            ru = node_res[uv_ids_sub[:,0]]
+            rv = node_res[uv_ids_sub[:,1]]
+            edge_res = ru!=rv
 
             # add up cut inner edges
-            CutEdges[SubProblems[id][0]] += edgeRes
+            cut_edges[sub_problems[id][0]] += edge_res
 
             # add up outer edges
-            CutEdges[SubProblems[id][1]] += 1
+            cut_edges[sub_problems[id][1]] += 1
 
         # all edges which are cut at least once will be cut
-        CutEdges[CutEdges >= 1] = 1
+        cut_edges[cut_edges >= 1] = 1
 
-        self.output().write(CutEdges)
+        self.output().write(cut_edges)
 
 
     def output(self):

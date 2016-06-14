@@ -3,11 +3,13 @@
 
 import luigi
 
-from PipelineParameter import PipelineParameter
-from DataTasks import RegionAdjacencyGraph
-from LearningTasks import EdgeProbabilitiesFromExternalRF
-from MiscTasks import EdgeIndications
-from CustomTargets import HDF5Target
+from dataTasks import RegionAdjacencyGraph
+from learningTasks import EdgeProbabilitiesFromExternalRF
+from miscTasks import EdgeIndications
+from customTargets import HDF5Target
+
+from pipelineParameter import PipelineParameter
+from toolsLuigi import config_logger
 
 import logging
 import json
@@ -17,7 +19,9 @@ import vigra
 import os
 import time
 
-#class BlockwiseSolver(lugi.Task):
+# init the workflow logger
+workflow_logger = logging.getLogger(__name__)
+config_logger(workflow_logger)
 
 class MCSSolverOpengmFusionMoves(luigi.Task):
 
@@ -31,7 +35,7 @@ class MCSSolverOpengmFusionMoves(luigi.Task):
 
         # read the mc parameter
         with open(PipelineParameter().MCConfigFile, 'r') as f:
-            MCConfig = json.load(f)
+            mc_config = json.load(f)
 
         mc_problem = self.input().read()
 
@@ -40,7 +44,7 @@ class MCSSolverOpengmFusionMoves(luigi.Task):
 
         n_var = uv_ids.max() + 1
 
-        logging.info("Solving MC Problem with " + str(n_var) + " number of variables")
+        workflow_logger.info("Solving MC Problem with " + str(n_var) + " number of variables")
 
         # set up the opengm model
         states = np.ones(n_var) * n_var
@@ -56,11 +60,11 @@ class MCSSolverOpengmFusionMoves(luigi.Task):
 
         gm.addFactors(fids_b, uv_ids)
 
-        pparam = opengm.InfParam(seedFraction = MCConfig["SeedFraction"])
+        pparam = opengm.InfParam(seedFraction = mc_config["SeedFraction"])
         parameter = opengm.InfParam(generator = 'randomizedWatershed',
                                     proposalParam = pparam,
-                                    numStopIt = MCConfig["NumItStop"],
-                                    numIt = MCConfig["NumIt"])
+                                    numStopIt = mc_config["NumItStop"],
+                                    numIt = mc_configonfig["NumIt"])
 
         inf = opengm.inference.IntersectionBased(gm, parameter=parameter)
 
@@ -68,7 +72,7 @@ class MCSSolverOpengmFusionMoves(luigi.Task):
         inf.infer()
         t_inf = time.time() - t_inf
 
-        logging.info("Inference with fusin moves solver in " + str(t_inf) + " s")
+        workflow_loggerinfo("Inference with fusin moves solver in " + str(t_inf) + " s")
 
         res_node = inf.arg()
 
@@ -79,15 +83,15 @@ class MCSSolverOpengmFusionMoves(luigi.Task):
         #rv = res_node[uv_ids[:,1]]
         #res_edge = ru!=rv
 
-        E_glob = gm.evaluate(res_node)
+        e_glob = gm.evaluate(res_node)
 
-        logging.info("Energy of the solution " + str(E_glob) )
+        workflow_logger.info("Energy of the solution " + str(e_glob) )
 
         self.output().write(res_node)
 
 
     def output(self):
-        save_path = os.path.join( PipelineParameter().cache, "MCFusionmoves.h5")
+        save_path = os.path.join( PipelineParameter().cache, "MCSSolverOpengmFusionMoves.h5")
         return HDF5Target( save_path )
 
 
@@ -108,7 +112,7 @@ class MCSSolverOpengmExact(luigi.Task):
 
         n_var = uv_ids.max() + 1
 
-        logging.info("Solving MC Problem with " + str(n_var) + " number of variables")
+        workflow_logger.info("Solving MC Problem with " + str(n_var) + " number of variables")
 
         # set up the opengm model
         states = np.ones(n_var) * n_var
@@ -136,7 +140,7 @@ class MCSSolverOpengmExact(luigi.Task):
         inf.infer()
         t_inf = time.time() - t_inf
 
-        logging.info("Inference with exact solver in " + str(t_inf) + " s")
+        workflow_logger.info("Inference with exact solver in " + str(t_inf) + " s")
 
         res_node = inf.arg()
 
@@ -147,19 +151,19 @@ class MCSSolverOpengmExact(luigi.Task):
         #rv = res_node[uv_ids[:,1]]
         #res_edge = ru!=rv
 
-        E_glob = gm.evaluate(res_node)
+        e_glob = gm.evaluate(res_node)
 
-        logging.info("Energy of the solution " + str(E_glob) )
+        workflow_logger.info("Energy of the solution " + str(e_glob) )
 
         self.output().write(res_node)
 
 
     def output(self):
-        save_path = os.path.join( PipelineParameter().cache, "MCExact.h5")
+        save_path = os.path.join( PipelineParameter().cache, "MCSSolverOpengmExact.h5")
         return HDF5Target( save_path )
 
 
-# get weights and size of the MC problem
+# get weights and uvids of the MC problem
 class MCProblem(luigi.Task):
 
     PathToSeg = luigi.Parameter()
@@ -174,7 +178,7 @@ class MCProblem(luigi.Task):
 
         # read the mc parameter
         with open(PipelineParameter().MCConfigFile, 'r') as f:
-            MCConfig = json.load(f)
+            mc_config = json.load(f)
 
         rag = self.input()["RAG"].read()
 
@@ -189,23 +193,20 @@ class MCProblem(luigi.Task):
         # this is pretty arbitrary, it used to be 1. / n_tress, but this does not make that much sense for sklearn impl
         probs = self.input()["EdgeProbs"].read()
 
-        print probs.min()
-        print probs.max()
-
         p_min = 0.001
         p_max = 1. - p_min
         probs = (p_max - p_min) * probs + p_min
 
-        beta = MCConfig["Beta"]
+        beta = mc_config["Beta"]
 
         # probabilities to energies, second term is boundary bias
         edge_costs = np.log( (1. - probs) / probs ) + np.log( (1. - beta) / beta )
 
         # weight edge costs
-        weighting_scheme = MCConfig["WeightingScheme"]
-        weight = MCConfig["Weight"]
-        # TODO own loglevel for pipeline related stuff
-        logging.info("Weighting edge costs with scheme " + weighting_scheme + " and weight " + str(weight) )
+        weighting_scheme = mc_config["WeightingScheme"]
+        weight           = mc_config["Weight"]
+
+        workflow_logger.info("Weighting edge costs with scheme " + weighting_scheme + " and weight " + str(weight) )
         if weighting_scheme == "z":
             edges_size = rag.edgeLengths()
             edge_indications = self.input()["EdgeIndications"].read()
@@ -248,7 +249,5 @@ class MCProblem(luigi.Task):
 
 
     def output(self):
-        # TODO more meaningful caching name
         save_path = os.path.join( PipelineParameter().cache, "MCProblem.h5" )
-                #"MC_problem" + os.path.split(self.PathToSeg)[1][:-3] + ".h5" )
         return HDF5Target( save_path )
