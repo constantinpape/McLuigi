@@ -1,4 +1,4 @@
-# LuigiCUt
+# LuigiCut
 
 Implementation of Multicut Workflow based on luigi.
 This is mostly for deployment purposes. 
@@ -22,7 +22,7 @@ Missing (and don't know what we actually want here yet):
 ## TODO next
 
 * Consistent caching names (for now just the task name) -> understand caching better.
-* Get central schedular running.
+* Get central scheduler running.
 * Move parallelisation of blockwise stuff to scheduler, if possible.
 * Backend for chunked h5.
 * Chunked and blockwise processing.
