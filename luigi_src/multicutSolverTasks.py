@@ -95,6 +95,84 @@ class MCSSolverOpengmFusionMoves(luigi.Task):
         return HDF5Target( save_path )
 
 
+class MCSSolverNiftyFusionMoves(luigi.Task):
+
+    Problem = luigi.TaskParameter()
+
+    def requires(self):
+        return Problem
+
+    def run(self):
+        import nifty
+
+        # read the mc parameter
+        with open(PipelineParameter().MCConfigFile, 'r') as f:
+            mc_config = json.load(f)
+
+        # TODO use the parameters for initialising the solver!
+        mc_problem = self.input().read()
+
+        uv_ids = mc_problem[:,:2]
+        edge_costs = mc_problem[:,2]
+
+        n_var = uv_ids.max() + 1
+
+        g =  nifty.graph.UndirectedGraph(int(n_var))
+        g.insertEdges(uv_ids)
+
+        assert g.numberOfEdges == edge_costs.shape[0]
+        assert g.numberOfEdges == uv_ids.shape[0]
+
+        obj = nifty.graph.multicut.multicutObjective(g, edge_costs)
+
+        workflow_logger.info("Solving MC Problem with " + str(n_var) + " number of variables")
+        workflow_logger.info("Using nifty fusionmoves")
+
+        greedy=nifty.greedyAdditiveFactory().create(obj)
+        ret = greedy.optimize()
+        workflow_logger.info("Energy greedy", obj.evalNodeLabels(ret))
+
+        t_inf = time.time()
+
+        ilpFac = nifty.multicutIlpFactory(ilpSolver='cplex',verbose=0,
+            addThreeCyclesConstraints=True,
+            addOnlyViolatedThreeCyclesConstraints=True
+        )
+        greedy=nifty.greedyAdditiveFactory()
+        factory = nifty.fusionMoveBasedFactory(
+            verbose=1,
+            #fusionMove=nifty.fusionMoveSettings(mcFactory=greedy),
+            fusionMove=nifty.fusionMoveSettings(mcFactory=ilpFac),
+            #proposalGen=nifty.greedyAdditiveProposals(sigma=100,nodeNumStopCond=0.0001,weightStopCond=-10000.0),
+            proposalGen=nifty.watershedProposals(sigma=10,seedFraction=0.01),
+            numberOfIterations=100,
+            numberOfParallelProposals=20,
+            stopIfNoImprovement=4,
+            fuseN=2,
+        )
+        solver = factory.create(obj)
+        ret = solver.optimize(ret)
+
+        t_inf = time.time() - t_inf
+        workflow_loggerinfo("Inference with fusin moves solver in " + str(t_inf) + " s")
+
+        # projection to edge result, don't really need it
+        # if necessary at some point, make extra task and recover
+
+        #ru = res_node[uv_ids[:,0]]
+        #rv = res_node[uv_ids[:,1]]
+        #res_edge = ru!=rv
+
+        workflow_logger.info("Energy of the solution " + obj.evalNodeLabels(ret))
+
+        self.output().write(ret)
+
+
+    def output(self):
+        save_path = os.path.join( PipelineParameter().cache, "MCSSolverOpengmFusionMoves.h5")
+        return HDF5Target( save_path )
+
+
 class MCSSolverOpengmExact(luigi.Task):
 
     Problem = luigi.TaskParameter()

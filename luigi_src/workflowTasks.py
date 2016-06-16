@@ -79,7 +79,7 @@ class BlockwiseMulticutSegmentation(luigi.Task):
         #save_path = os.path.join( PipelineParameter().cache,
         #        "BlockwiseMulitcutSegmentation_" + os.path.split(self.PathToSeg)[1][:-3] + ".h5" )
         #return HDF5Target( save_path )
-        save_path = os.path.join( PipelineParameter().cache, "BlockwiseMulitcutSegmentation.h5" )
+        save_path = os.path.join( PipelineParameter().cache, "BlockwiseMulticutSegmentation.h5" )
         return HDF5Target( save_path )
 
 

@@ -73,6 +73,61 @@ def fusion_moves(uv_ids, edge_costs, id):
     return res_node
 
 
+# TODO use Fusionmoves task instead
+def fusion_moves_nifty(uv_ids, edge_costs, id, n_parallel):
+
+    import nifty
+
+    # read the mc parameter
+    # TODO actually use these
+    with open(PipelineParameter().MCConfigFile, 'r') as f:
+        mc_config = json.load(f)
+
+    n_var = uv_ids.max() + 1
+
+    g =  nifty.graph.UndirectedGraph(int(n_var))
+    g.insertEdges(uv_ids)
+
+    assert g.numberOfEdges == edge_costs.shape[0]
+    assert g.numberOfEdges == uv_ids.shape[0]
+
+    obj = nifty.graph.multicut.multicutObjective(g, edge_costs)
+
+    workflow_logger.info("Solving MC Problem with " + str(n_var) + " number of variables")
+    workflow_logger.info("Using nifty fusionmoves")
+
+    greedy=nifty.greedyAdditiveFactory().create(obj)
+    ret = greedy.optimize()
+    workflow_logger.info("Energy greedy", obj.evalNodeLabels(ret))
+
+    t_inf = time.time()
+
+    ilpFac = nifty.multicutIlpFactory(ilpSolver='cplex',verbose=0,
+        addThreeCyclesConstraints=True,
+        addOnlyViolatedThreeCyclesConstraints=True
+    )
+    greedy=nifty.greedyAdditiveFactory()
+    factory = nifty.fusionMoveBasedFactory(
+        verbose=1,
+        #fusionMove=nifty.fusionMoveSettings(mcFactory=greedy),
+        fusionMove=nifty.fusionMoveSettings(mcFactory=ilpFac),
+        #proposalGen=nifty.greedyAdditiveProposals(sigma=100,nodeNumStopCond=0.0001,weightStopCond=-10000.0),
+        proposalGen=nifty.watershedProposals(sigma=10,seedFraction=0.01),
+        numberOfIterations=2000,
+        numberOfParallelProposals=n_parallel,
+        stopIfNoImprovement=4,
+        fuseN=2,
+    )
+    solver = factory.create(obj)
+    ret = solver.optimize(ret)
+
+    t_inf = time.time() - t_inf
+
+    workflow_logger.info("Inference for block " + str(id) + " with fusion moves solver in " + str(t_inf) + " s")
+
+    return ret
+
+
 # produce reduced global graph from subproblems
 # solve global multicut problem on the reduced graph
 class BlockwiseMulticutSolver(luigi.Task):
@@ -161,7 +216,7 @@ class BlockwiseMulticutSolver(luigi.Task):
         workflow_logger.info("Nodes: From " + str(n_nodes) + " to " + str(n_nodes_new) )
         workflow_logger.info("Edges: From " + str(uv_ids.shape[0]) + " to " + str(n_edges_new) )
 
-        res_node_new = fusion_moves( uv_ids_new, costs_new, "reduced global" )
+        res_node_new = fusion_moves_nifty( uv_ids_new, costs_new, "reduced global", 20 )
 
         assert res_node_new.shape[0] == n_nodes_new
 
@@ -334,8 +389,8 @@ class BlockwiseSubSolver(luigi.Task):
         with futures.ThreadPoolExecutor(max_workers=nWorkers) as executor:
             tasks = []
             for id, sub_problem in enumerate(sub_problems):
-                tasks.append( executor.submit( fusion_moves, sub_problem[2],
-                    costs[sub_problem[0]], id ) )
+                tasks.append( executor.submit( fusion_moves_nifty, sub_problem[2],
+                    costs[sub_problem[0]], id, 1 ) )
         sub_results = [task.result() for task in tasks]
 
         #sub_results = []
