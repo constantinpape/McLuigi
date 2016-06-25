@@ -98,7 +98,7 @@ def fusion_moves_nifty(uv_ids, edge_costs, id, n_parallel):
 
     greedy=nifty.greedyAdditiveFactory().create(obj)
     ret = greedy.optimize()
-    workflow_logger.info("Energy greedy", obj.evalNodeLabels(ret))
+    workflow_logger.info("Energy greedy", str(obj.evalNodeLabels(ret)) )
 
     t_inf = time.time()
 
