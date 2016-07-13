@@ -98,7 +98,7 @@ def fusion_moves_nifty(uv_ids, edge_costs, id, n_parallel):
 
     greedy=nifty.greedyAdditiveFactory().create(obj)
     ret = greedy.optimize()
-    workflow_logger.info("Energy greedy", str(obj.evalNodeLabels(ret)) )
+    workflow_logger.info("Energy greedy " + str(obj.evalNodeLabels(ret)) )
 
     t_inf = time.time()
 
@@ -106,16 +106,13 @@ def fusion_moves_nifty(uv_ids, edge_costs, id, n_parallel):
         addThreeCyclesConstraints=True,
         addOnlyViolatedThreeCyclesConstraints=True
     )
-    greedy=nifty.greedyAdditiveFactory()
     factory = nifty.fusionMoveBasedFactory(
-        verbose=1,
-        #fusionMove=nifty.fusionMoveSettings(mcFactory=greedy),
+        verbose=0,
         fusionMove=nifty.fusionMoveSettings(mcFactory=ilpFac),
-        #proposalGen=nifty.greedyAdditiveProposals(sigma=100,nodeNumStopCond=0.0001,weightStopCond=-10000.0),
         proposalGen=nifty.watershedProposals(sigma=10,seedFraction=0.01),
         numberOfIterations=2000,
         numberOfParallelProposals=n_parallel,
-        stopIfNoImprovement=4,
+        stopIfNoImprovement=20,
         fuseN=2,
     )
     solver = factory.create(obj)

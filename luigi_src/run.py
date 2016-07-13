@@ -5,6 +5,7 @@ import logging
 import json
 
 from workflowTasks import MulticutSegmentation, BlockwiseMulticutSegmentation
+from featureTasks import calculate_filter
 
 from pipelineParameter import PipelineParameter
 from toolsLuigi import config_logger
@@ -15,7 +16,7 @@ config_logger(workflow_logger)
 
 if __name__ == '__main__':
 
-    PipelineParameter().InputFile = "../config/input_config_blkws.json"
+    PipelineParameter().InputFile = "../config/input_config_blkwsC.json"
     PipelineParameter().FeatureConfigFile = "../config/feature_config.json"
     PipelineParameter().MCConfigFile = "../config/mc_config.json"
 

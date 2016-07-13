@@ -18,6 +18,7 @@ import time
 import numpy as np
 import vigra
 
+
 # init the workflow logger
 workflow_logger = logging.getLogger(__name__)
 config_logger(workflow_logger)
@@ -82,9 +83,7 @@ config_logger(workflow_logger)
 
 # TODO svens filters, blockwise, chunked, presmoothing
 # implement this as function, because we don't want to cache the filters!
-def calculate_filter(input_path, filter_library, filter_name, sigma, anisotropy):
-
-    inp = vigra.readHDF5(input_path, "data")
+def calculate_filter(inp, filter_library, filter_name, sigma, anisotropy):
 
     assert filter_library in ("vigra", "fastfilters"), filter_library
     # svens filters
@@ -95,25 +94,52 @@ def calculate_filter(input_path, filter_library, filter_name, sigma, anisotropy)
     else:
         eval_filter = eval( ".".join( ["vigra", "filters", filter_name] ) )
 
-    workflow_logger.debug("Calculating " + filter_name + " on input from " + input_path +  " for anisotropy factor " + str(anisotropy))
+    workflow_logger.debug("Calculating " + filter_name + " for anisotropy factor " + str(anisotropy))
 
     # calculate filter purely in 2d
     if anisotropy > PipelineParameter().MaxAniso:
         workflow_logger.debug("Filter calculation in 2d")
-        res = []
-        for z in range(inp.shape[2]):
-            filt_z = eval_filter( inp[:,:,z], sigma )
-            assert len(filt_z.shape) in (2,3)
-            # insert z axis to stack later
-            if len(filt_z.shape) == 2:
-                # single channel filter
-                filt_z = filt_z[:,:,np.newaxis]
-            elif len(filt_z.shape) == 3:
-                # multi channel filter
-                filt_z = filt_z[:,:,np.newaxis,:]
-            res.append(filt_z)
-        # stack them together
-        res = np.concatenate(res, axis = 2)
+
+        # code not parallelized
+
+        #res = []
+        #for z in xrange(inp.shape[2]):
+        #    filt_z = eval_filter( inp[:,:,z], sigma )
+        #    assert len(filt_z.shape) in (2,3)
+        #    # insert z axis to stack later
+        #    if len(filt_z.shape) == 2:
+        #        # single channel filter
+        #        filt_z = filt_z[:,:,np.newaxis]
+        #    elif len(filt_z.shape) == 3:
+        #        # multi channel filter
+        #        filt_z = filt_z[:,:,np.newaxis,:]
+        #    res.append(filt_z)
+        ## stack them together
+        #res = np.concatenate(res, axis = 2)
+
+        # code parallelized
+
+        from concurrent import futures
+
+        t_filt_pure = time.time()
+        #with futures.ThreadPoolExecutor(max_workers = PipelineParameter().nThreads) as executor:
+        with futures.ThreadPoolExecutor(max_workers = 8) as executor:
+            tasks = []
+            for z in xrange(inp.shape[2]):
+                tasks.append( executor.submit(eval_filter, inp[:,:,z], sigma ) )
+        workflow_logger.debug("Pure calculation time: " + str(time.time() - t_filt_pure))
+
+        res = [task.result() for task in tasks]
+
+        # TODO this is not really efficient !
+
+        if res[0].ndim == 2:
+            res = [re[:,:,None] for re in res]
+        elif res[0].ndim == 3:
+            res = [re[:,:,None,:] for re in res]
+
+        res = np.concatenate( res, axis = 2)
+
     else:
         workflow_logger.debug("Filter calculation in 3d")
         if anisotropy > 1.:
@@ -403,10 +429,16 @@ class EdgeFeatures(luigi.Task):
 
         edge_features = []
         rag = self.input()[0].read()
+        inp = self.input()[1].read()
+
         for filter_name in self.FilterNames:
             for sigma in self.Sigmas:
-                filt =  caclulate_filtercalculate_filter(self.PathToInput, self.FilterLibrary, filter_name, sigma, self.Anisotropy)
+                t_filt = time.time()
+                workflow_logger.info("Calculation of " + filter_name + " for sigma: " + str(sigma)  )
+                filt = calculate_filter(inp, self.FilterLibrary, filter_name, sigma, self.Anisotropy)
+                workflow_logger.info("Filter calculation in "+ str( time.time() - t_filt))
 
+                t_acc = time.time()
                 if len(filt.shape) == 3:
                     # let RAG do the work
                     grid_graph_edge_indicator = vigra.graphs.implicitMeanEdgeMap(rag.baseGraph, filt)
@@ -420,6 +452,7 @@ class EdgeFeatures(luigi.Task):
 
         edge_features = np.concatenate( edge_features, axis = 1)
         assert edge_features.shape[0] == rag.edgeNum, str(edge_features.shape[0]) + " , " +str(rag.edgeNum)
+        workflow_logger.info("Accumulation over the edges in " + str(time.time() - t_acc))
 
         edge_features = np.nan_to_num(edge_features)
 
