@@ -7,6 +7,38 @@ import vigra
 import cPickle as pickle
 import os
 
+
+class ChunkedTarget(FileSystemTarget):
+    fs = LocalFileSystem()
+
+    def makedirs(self):
+        """
+        Create all parent folders if they do not exist.
+        """
+        normpath = os.path.normpath(self.path)
+        parentfolder = os.path.dirname(normpath)
+        if parentfolder:
+            try:
+                os.makedirs(parentfolder)
+            except OSError:
+                pass
+
+    def __init__(self, path):
+        super(ChunkedTarget, self).__init__(path)
+
+    def open(self, mode = vigra.ReadOnly):
+
+        self.array = vigra.ChunkedArrayHDF5(self.path, mode = mode)
+
+    def write(self, start, data):
+        if not os.path.exists(self.path):
+            self.makedirs()
+        self.array.commitSubarray(start, data)
+
+    def read(self, start, stop):
+        return self.array.checkoutSubArray(start, stop)
+
+
 # vigra impl
 class HDF5Target(FileSystemTarget):
     fs = LocalFileSystem()
