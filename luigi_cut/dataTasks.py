@@ -2,7 +2,7 @@
 # Tasks for providing the input data
 
 import luigi
-from customTargets import HDF5Target, RagTarget
+from customTargets import HDF5Target, RagTarget, ChunkedTarget
 
 from pipelineParameter import PipelineParameter
 from toolsLuigi import config_logger
@@ -53,6 +53,38 @@ class InputData(luigi.Task):
         return HDF5Target(self.PathToData)
 
 
+class InputDataChunked(luigi.Task):
+    """
+    Task for loading external input data, e.g. raw data or probability maps.
+    For HDF5 input.
+    """
+
+    PathToData = luigi.Parameter()
+
+    def run(self):
+        f = h5py.File(self.PathToData, 'r+')
+        keys = f.keys()
+        f.close()
+
+        if len(keys) > 1:
+            raise RuntimeError("Can only handle single key in input data.")
+        key = keys[0]
+
+        if key != "data":
+            f["data"] = f[key]
+            del f[key]
+
+    def output(self):
+        """
+        Returns the target output.
+
+        :return: Target output
+        :rtype: object( :py:class: HDF5Target)
+        """
+
+        return ChunkedTarget(self.PathToData )
+
+
 
 class ExternalSegmentation(luigi.Task):
     """
@@ -80,7 +112,62 @@ class ExternalSegmentation(luigi.Task):
         return HDF5Target( self.PathToSeg  )
 
 
+class ExternalSegmentationChunked(luigi.Task):
+    """
+    Task for loading external segmentation from HDF5.
+    """
+
+    # Path to the segmentation
+    PathToSeg = luigi.Parameter()
+
+    def run(self):
+        f = h5py.File(self.PathToData, 'r+')
+        keys = f.keys()
+        f.close()
+
+        if len(keys) > 1:
+            raise RuntimeError("Can only handle single key in input data.")
+        key = keys[0]
+
+        if key != "data":
+            f["data"] = f[key]
+            del f[key]
+
+
+    def output(self):
+        return ChunkedTarget( self.PathToSeg  )
+
+
 class ExternalSegmentationLabeled(luigi.Task):
+    """
+    Task for loading external segmentation from HDF5.
+    Perform a label Volume and cache
+    """
+
+    # Path to the segmentation
+    PathToSeg = luigi.Parameter()
+
+    def run(self):
+
+        f = h5py.File(self.PathToSeg, 'r')
+        keys = f.keys()
+        f.close()
+        if len(keys) > 1:
+            raise RuntimeError("Can only handle single key in input data.")
+        key = keys[0]
+
+        # TODO blockwise labelVolume ?
+        seg = vigra.readHDF5(self.PathToSeg, key).astype(np.uint32)
+        seg = vigra.analysis.labelVolume(seg) - 1
+        self.output().write(seg)
+
+    def output(self):
+        save_path = os.path.join( PipelineParameter().cache,
+                os.path.split(self.PathToSeg)[1] )
+        return HDF5Target( save_path  )
+
+
+class ExternalSegmentationLabeledChunked(luigi.Task):
     """
     Task for loading external segmentation from HDF5.
     Perform a label Volume and cache
@@ -100,12 +187,13 @@ class ExternalSegmentationLabeled(luigi.Task):
 
         seg = vigra.readHDF5(self.PathToSeg, key).astype(np.uint32)
         seg = vigra.analysis.labelVolume(seg) - 1
-        self.output().write(seg)
+        self.output().open(mode = vigra.HDF5Mode.ReadWrite )
+        self.output().write( (0,0,0), seg)
 
     def output(self):
         save_path = os.path.join( PipelineParameter().cache,
                 os.path.split(self.PathToSeg)[1] )
-        return HDF5Target( save_path  )
+        return ChunkedTarget( save_path)
 
 
 
@@ -133,6 +221,34 @@ class DenseGroundtruth(luigi.Task):
         save_path = os.path.join( PipelineParameter().cache,
                 os.path.split(self.PathToSeg)[1] )
         return HDF5Target( save_path  )
+
+
+class DenseGroundtruthChunked(luigi.Task):
+    """
+    Task for loading external groundtruth from HDF5.
+    """
+
+    PathToGt = luigi.Parameter()
+
+    def run(self):
+
+        f = h5py.File(PathToSeg, 'r')
+        keys = f.keys()
+        f.close()
+        if len(keys) > 1:
+            raise RuntimeError("Can only handle single key in input data.")
+        key = keys[0]
+
+        # TODO blockwise labelVolume ?
+        gt = vigra.readHDF5(self.PathToSeg, key).astype(np.uint32)
+        gt = vigra.analysis.labelVolumeWithBackground(gt)
+        self.output.open(mode = vigra.HDF5Mode.ReadWrite )
+        self.output().write( (0,0,0), gt)
+
+    def output(self):
+        save_path = os.path.join( PipelineParameter().cache,
+                os.path.split(self.PathToSeg)[1] )
+        return ChunkedTarget( save_path  )
 
 
 class RegionAdjacencyGraph(luigi.Task):

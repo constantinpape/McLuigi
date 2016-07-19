@@ -4,7 +4,7 @@
 import luigi
 
 from customTargets import HDF5Target
-from dataTasks import InputData, RegionAdjacencyGraph, ExternalSegmentationLabeled
+from dataTasks import InputData, InputDataChunked, RegionAdjacencyGraph, ExternalSegmentationLabeled
 from miscTasks import EdgeIndications
 
 from pipelineParameter import PipelineParameter
@@ -23,133 +23,6 @@ import vigra
 workflow_logger = logging.getLogger(__name__)
 config_logger(workflow_logger)
 
-
-# we have this as a function now to calculate it on the fly
-# maybe want to go back to a task once, so leave it in for now
-
-#class FilterVigra(luigi.Task):
-#
-#    PathToInput = luigi.Parameter()
-#
-#    FilterName = luigi.Parameter()
-#    Sigma = luigi.Parameter()
-#    Anisotropy = luigi.Parameter()
-#
-#    def requires(self):
-#        return InputData(self.PathToInput)
-#
-#    def run(self):
-#
-#        inp = self.input().read()
-#
-#        # TODO assert thtat this exists
-#        eval_filter = eval( ".".join( ["vigra", "filters", self.FilterName] ) )
-#
-#        # calculate filter purely in 2d
-#        if self.Anisotropy > PipelineParameter().max_aniso:
-#            res = []
-#            for z in range(inp.shape[2]):
-#                filt_z = eval_filter( inp[:,:,z], sig )
-#                assert len(filt_z.shape) in (2,3)
-#                # insert z axis to stack later
-#                if len(filt_z.shape) == 2:
-#                    # single channel filter
-#                    filt_z = filt_z[:,:,np.newaxis]
-#                elif len(filt_z.shape) == 3:
-#                    # multi channel filter
-#                    filt_z = filt_z[:,:,np.newaxis,:]
-#                res.append(filt_z)
-#            # stack them together
-#            res = np.concatenate(res, axis = 2)
-#        else:
-#            if self.Anisotropy > 1.:
-#                sig = (self.Sigma, self.Sigma, self.Sigma / self.Anisotropy)
-#            else:
-#                sig = self.Sigma
-#
-#            res = eval_filter( inp, sig )
-#
-#        self.output().write(res)
-#
-#
-#    def output(self):
-#        aniso = self.Anisotropy
-#        if aniso > PipelineParameter().max_aniso:
-#            aniso = PipelineParameter().max_aniso
-#        return HDF5Target(
-#                os.path.join( PipelineParameter().cache, "_".join(
-#                    [os.path.split(self.PathToInput)[1], self.FilterName, str(self.Sigma), str(aniso)] ) + ".h5") )
-
-
-# TODO svens filters, blockwise, chunked, presmoothing
-# implement this as function, because we don't want to cache the filters!
-def calculate_filter(inp, filter_library, filter_name, sigma, anisotropy):
-
-    assert filter_library in ("vigra", "fastfilters"), filter_library
-    # svens filters
-    if filter_library == "fastfilters":
-        import fastfilters
-        eval_filter = eval( ".".join( ["fastfilters", filter_name] ) )
-
-    else:
-        eval_filter = eval( ".".join( ["vigra", "filters", filter_name] ) )
-
-    workflow_logger.debug("Calculating " + filter_name + " for anisotropy factor " + str(anisotropy))
-
-    # calculate filter purely in 2d
-    if anisotropy > PipelineParameter().MaxAniso:
-        workflow_logger.debug("Filter calculation in 2d")
-
-        # code not parallelized
-
-        #res = []
-        #for z in xrange(inp.shape[2]):
-        #    filt_z = eval_filter( inp[:,:,z], sigma )
-        #    assert len(filt_z.shape) in (2,3)
-        #    # insert z axis to stack later
-        #    if len(filt_z.shape) == 2:
-        #        # single channel filter
-        #        filt_z = filt_z[:,:,np.newaxis]
-        #    elif len(filt_z.shape) == 3:
-        #        # multi channel filter
-        #        filt_z = filt_z[:,:,np.newaxis,:]
-        #    res.append(filt_z)
-        ## stack them together
-        #res = np.concatenate(res, axis = 2)
-
-        # code parallelized
-
-        from concurrent import futures
-
-        t_filt_pure = time.time()
-        #with futures.ThreadPoolExecutor(max_workers = PipelineParameter().nThreads) as executor:
-        with futures.ThreadPoolExecutor(max_workers = 8) as executor:
-            tasks = []
-            for z in xrange(inp.shape[2]):
-                tasks.append( executor.submit(eval_filter, inp[:,:,z], sigma ) )
-        workflow_logger.debug("Pure calculation time: " + str(time.time() - t_filt_pure))
-
-        res = [task.result() for task in tasks]
-
-        # TODO this is not really efficient !
-
-        if res[0].ndim == 2:
-            res = [re[:,:,None] for re in res]
-        elif res[0].ndim == 3:
-            res = [re[:,:,None,:] for re in res]
-
-        res = np.concatenate( res, axis = 2)
-
-    else:
-        workflow_logger.debug("Filter calculation in 3d")
-        if anisotropy > 1.:
-            sig = (sigma, sigma, sigma / anisotropy)
-        else:
-            sig = sigma
-
-        res = eval_filter( inp, sig )
-
-    return res
 
 
 # read the feature configuration from PipelineParams.FeatureConfigFile
@@ -416,26 +289,80 @@ class EdgeFeatures(luigi.Task):
     # current oversegmentation
     PathToSeg = luigi.Parameter()
     FilterLibrary = luigi.Parameter(default = "vigra")
-    FilterNames = luigi.ListParameter(default = [ "vigra.filters.gaussianSmoothing", "vigra.filters.hessianOfGaussianEigenvalues", "vigra.filters.laplacianOfGaussian"] )
+    FilterNames = luigi.ListParameter(default = [ "gaussianSmoothing", "hessianOfGaussianEigenvalues", "laplacianOfGaussian"] )
     Sigmas = luigi.ListParameter(default = [1.6, 4.2, 8.3] )
     Anisotropy = luigi.Parameter(default = 25.)
 
     def requires(self):
-        return RegionAdjacencyGraph(self.PathToSeg), InputData(self.PathToInput)
+        return RegionAdjacencyGraph(self.PathToSeg), InputDataChunked(self.PathToInput)
 
     def run(self):
+
+        # TODO blockwise, chunked, presmoothing
+        def calculate_filter(data, filter_library, filter_name, sigma, anisotropy):
+
+            assert filter_library in ("vigra", "fastfilters"), filter_library
+            # svens filters
+            if filter_library == "fastfilters":
+                import fastfilters
+                eval_filter = eval( ".".join( ["fastfilters", filter_name] ) )
+
+            else:
+                eval_filter = eval( ".".join( ["vigra", "filters", filter_name] ) )
+
+            # calculate filter purely in 2d
+            if anisotropy > PipelineParameter().MaxAniso:
+                workflow_logger.debug("Filter calculation in 2d")
+
+                # code parallelized
+
+                from concurrent import futures
+
+                t_filt_pure = time.time()
+                #with futures.ThreadPoolExecutor(max_workers = PipelineParameter().nThreads) as executor:
+                with futures.ThreadPoolExecutor(max_workers = 8) as executor:
+                    tasks = []
+                    for z in xrange(data.shape[2]):
+                        tasks.append( executor.submit(eval_filter, data[:,:,z], sigma ) )
+                workflow_logger.debug("Pure calculation time: " + str(time.time() - t_filt_pure))
+
+                res = [task.result() for task in tasks]
+
+                # TODO this is not really efficient !
+
+                if res[0].ndim == 2:
+                    res = [re[:,:,None] for re in res]
+                elif res[0].ndim == 3:
+                    res = [re[:,:,None,:] for re in res]
+
+                res = np.concatenate( res, axis = 2)
+
+            else:
+                workflow_logger.debug("Filter calculation in 3d")
+                if anisotropy > 1.:
+                    sig = (sigma, sigma, sigma / anisotropy)
+                else:
+                    sig = sigma
+
+                res = eval_filter( data, sig )
+
+            return res
+
 
         t_feats = time.time()
 
         edge_features = []
         rag = self.input()[0].read()
-        inp = self.input()[1].read()
+        inp = self.input()[1]
+        inp.open()
+        data = inp.read((0,0,0), inp.shape())
 
         for filter_name in self.FilterNames:
             for sigma in self.Sigmas:
+
                 t_filt = time.time()
                 workflow_logger.info("Calculation of " + filter_name + " for sigma: " + str(sigma)  )
-                filt = calculate_filter(inp, self.FilterLibrary, filter_name, sigma, self.Anisotropy)
+                filt = calculate_filter(data, self.FilterLibrary, filter_name, sigma, self.Anisotropy)
                 workflow_logger.info("Filter calculation in "+ str( time.time() - t_filt))
 
                 t_acc = time.time()

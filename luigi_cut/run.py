@@ -5,7 +5,7 @@ import logging
 import json
 
 from workflowTasks import MulticutSegmentation, BlockwiseMulticutSegmentation
-from featureTasks import calculate_filter
+from featureTasks import EdgeFeatures
 
 from pipelineParameter import PipelineParameter
 from toolsLuigi import config_logger
@@ -16,7 +16,7 @@ config_logger(workflow_logger)
 
 if __name__ == '__main__':
 
-    PipelineParameter().InputFile = "../config/input_config_blkwsC.json"
+    PipelineParameter().InputFile = "../config/input_config_chunked.json"
     PipelineParameter().FeatureConfigFile = "../config/feature_config.json"
     PipelineParameter().MCConfigFile = "../config/mc_config.json"
 
@@ -29,12 +29,12 @@ if __name__ == '__main__':
     for i, data_file in enumerate(inputs["data"]):
         workflow_logger.info("Input data nr. " + str(i) + ": " + data_file )
     workflow_logger.info("Segmentation input: " + inputs["seg"])
-    workflow_logger.info("Random Forest input: " + inputs["rf"])
+    #workflow_logger.info("Random Forest input: " + inputs["rf"])
     workflow_logger.info("Writing cache to: " + inputs["cache"])
 
     # TODO get central scheduler running
     luigi.run(["--local-scheduler",
-        "--PathToSeg", inputs["seg"],
-        "--PathToRF", inputs["rf"]],
-        main_task_cls = BlockwiseMulticutSegmentation)
+        "--PathToInput", inputs["data"],
+        "--PathToSeg", inputs["seg"]],
+        main_task_cls = EdgeFeatures)
         #main_task_cls = MulticutSegmentation)

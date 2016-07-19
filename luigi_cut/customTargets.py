@@ -26,17 +26,19 @@ class ChunkedTarget(FileSystemTarget):
     def __init__(self, path):
         super(ChunkedTarget, self).__init__(path)
 
-    def open(self, mode = vigra.ReadOnly):
-
-        self.array = vigra.ChunkedArrayHDF5(self.path, mode = mode)
+    def open(self, key = "data", mode = vigra.HDF5Mode.Default):
+        self.array = vigra.ChunkedArrayHDF5(str(self.path), key, mode = mode)
 
     def write(self, start, data):
         if not os.path.exists(self.path):
             self.makedirs()
         self.array.commitSubarray(start, data)
 
+    def shape(self):
+        return self.array.shape
+
     def read(self, start, stop):
-        return self.array.checkoutSubArray(start, stop)
+        return self.array.checkoutSubarray(start, stop)
 
 
 # vigra impl
