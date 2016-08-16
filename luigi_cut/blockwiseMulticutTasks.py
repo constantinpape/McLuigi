@@ -4,7 +4,7 @@
 import luigi
 
 from pipelineParameter import PipelineParameter
-from dataTasks import RegionAdjacencyGraph, ExternalSegmentationLabeled
+from dataTasks import StacekdRegionAdjacencyGraph, ExternalSegmentationLabeled
 from multicutSolverTasks import MCProblem#, MCSSolverOpengmFusionMoves, MCSSolverOpengmExact
 from customTargets import HDF5Target
 

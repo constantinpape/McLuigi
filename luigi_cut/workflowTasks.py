@@ -3,10 +3,10 @@
 
 import luigi
 
-from multicutSolverTasks import MCProblem, MCSSolverOpengmExact, MCSSolverOpengmFusionMoves
+from multicutSolverTasks import McProblem, McSolverExact, McSolverFusionMoves
 from blockwiseMulticutTasks import BlockwiseMulticutSolver
-from dataTasks import RegionAdjacencyGraph
-from customTargets import HDF5Target
+from dataTasks import StackedRegionAdjacencyGraph
+from customTargets import HDF5VolumeTarget
 
 from pipelineParameter import PipelineParameter
 from toolsLuigi import config_logger
@@ -16,71 +16,79 @@ import json
 import os
 
 import numpy as np
-import vigra
+import nifty
 
 
 class MulticutSegmentation(luigi.Task):
 
-    PathToSeg = luigi.Parameter()
-    PathToRF  = luigi.Parameter()
+    pathToSeg = luigi.Parameter()
+    pathToRF  = luigi.Parameter()
 
     def requires(self):
-        return { "MCRes" : MCSSolverOpengmExact( MCProblem(self.PathToSeg, self.PathToRF) ),
-                "RAG" : RegionAdjacencyGraph(self.PathToSeg) }
+        return { "McNodes" : McSolverFusionMoves( McProblem(self.pathToSeg, self.pathToRF) ),
+                "Rag" : StackedRegionAdjacencyGraph(self.pathToSeg),
+                "Seg" : ExternalSegmentation(self.pathToSeg)}
 
     def run(self):
 
-        # get the projection of a multicut result to the segmentation
-        rag = self.input()["RAG"].read()
-        mc_res = self.input()["MCRes"].read()
+        inp = self.input()
+        rag = inp["Rag"].read()
+        mcNodes = inp["McNodes"].read()
+        seg = inp["Seg"]
 
-        assert mc_res.shape[0] == rag.nodeNum
+        seg.open()
+        shape = seg.shape
+
+        assert mcNodes.shape[0] == rag.numberOfNodes
 
         # get rid of 0 because we don't want it as segment label because it is reserved for the ignore label
-        if 0 in mc_res:
-            mc_res += 1
+        if 0 in mcNodes:
+            mcNodes += 1
 
-        self.output().write( rag.projectLabelsToBaseGraph(mc_res.astype(np.uint32)) )
+        segOut = self.output()
+        segOut.open(seg.shape)
+
+        nifty.graph.rag.projectScalarNodeDataToPixels(rag, mcNodes, segOut.get() ) # nWorkers = -1, could also set this...
 
 
     def output(self):
-        #save_path = os.path.join( PipelineParameter().cache,
-        #        "MCSegmentation_" + os.path.split(self.PathToSeg)[1][:-3] + ".h5" )
-        #return HDF5Target( save_path )
         save_path = os.path.join( PipelineParameter().cache, "MulticutSegmentation.h5" )
-        return HDF5Target( save_path )
+        return HDF5VolumeTarget( save_path, np.uint32 )
 
 
 class BlockwiseMulticutSegmentation(luigi.Task):
 
-    PathToSeg = luigi.Parameter()
-    PathToRF  = luigi.Parameter()
+    pathToSeg = luigi.Parameter()
+    pathToRF  = luigi.Parameter()
 
     def requires(self):
-        return { "MCRes" : BlockwiseMulticutSolver( self.PathToSeg, self.PathToRF ),
-                "RAG" : RegionAdjacencyGraph(self.PathToSeg) }
+        return { "McNodes" : BlockwiseMulticutSolver( self.pathToSeg, self.pathToRF ),
+                "Rag" : RegionAdjacencyGraph(self.pathToSeg),
+                "Seg" : ExternalSegmentation(self.pathToSeg)}
 
     def run(self):
 
-        # get the projection of a multicut result to the segmentation
-        rag = self.input()["RAG"].read()
-        mc_res = self.input()["MCRes"].read()
+        inp = self.input()
+        rag = inp["Rag"].read()
+        mcNodes = inp["McNodes"].read()
+        seg = inp["Seg"]
 
-        assert mc_res.shape[0] == rag.nodeNum
+        seg.open()
+        shape = seg.shape
+
+        assert mcNodes.shape[0] == rag.numberOfNodes
 
         # get rid of 0 because we don't want it as segment label because it is reserved for the ignore label
-        if 0 in mc_res:
-            mc_res += 1
+        if 0 in mcNodes:
+            mcNodes += 1
 
-        self.output().write( rag.projectLabelsToBaseGraph(mc_res.astype(np.uint32)) )
+        segOut = self.output()
+        segOut.open(seg.shape)
+
+        nifty.graph.rag.projectScalarNodeDataToPixels(rag, mcNodes, segOut.get() ) # nWorkers = -1, could also set this...
+
 
 
     def output(self):
-        #save_path = os.path.join( PipelineParameter().cache,
-        #        "BlockwiseMulitcutSegmentation_" + os.path.split(self.PathToSeg)[1][:-3] + ".h5" )
-        #return HDF5Target( save_path )
         save_path = os.path.join( PipelineParameter().cache, "BlockwiseMulticutSegmentation.h5" )
-        return HDF5Target( save_path )
-
-
-
+        return HDF5VolumeTarget( save_path, np.uint32 )

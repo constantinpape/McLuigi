@@ -3,10 +3,12 @@
 
 import luigi
 
-from dataTasks import RegionAdjacencyGraph
+import os
+import time
+
+from dataTasks import StackedRegionAdjacencyGraph
 from learningTasks import EdgeProbabilitiesFromExternalRF
-from miscTasks import EdgeIndications
-from customTargets import HDF5Target
+from customTargets import HDF5DataTarget
 
 from pipelineParameter import PipelineParameter
 from toolsLuigi import config_logger
@@ -15,143 +17,66 @@ import logging
 import json
 
 import numpy as np
-import vigra
-import os
-import time
+import nifty
 
 # init the workflow logger
 workflow_logger = logging.getLogger(__name__)
 config_logger(workflow_logger)
 
-class MCSSolverOpengmFusionMoves(luigi.Task):
-
-    Problem = luigi.TaskParameter()
-
-    def requires(self):
-        return Problem
-
-    def run(self):
-        import opengm
-
-        # read the mc parameter
-        with open(PipelineParameter().MCConfigFile, 'r') as f:
-            mc_config = json.load(f)
-
-        mc_problem = self.input().read()
-
-        uv_ids = mc_problem[:,:2]
-        edge_costs = mc_problem[:,2]
-
-        n_var = uv_ids.max() + 1
-
-        workflow_logger.info("Solving MC Problem with " + str(n_var) + " number of variables")
-
-        # set up the opengm model
-        states = np.ones(n_var) * n_var
-        gm = opengm.gm(states)
-
-        # potts model
-        potts_shape = [n_var, n_var]
-
-        potts = opengm.pottsFunctions(potts_shape, np.zeros_like( edge_costs ), edge_costs )
-
-        # potts model to opengm function
-        fids_b = gm.addFunctions(potts)
-
-        gm.addFactors(fids_b, uv_ids)
-
-        pparam = opengm.InfParam(seedFraction = mc_config["SeedFraction"])
-        parameter = opengm.InfParam(generator = 'randomizedWatershed',
-                                    proposalParam = pparam,
-                                    numStopIt = mc_config["NumItStop"],
-                                    numIt = mc_configonfig["NumIt"])
-
-        inf = opengm.inference.IntersectionBased(gm, parameter=parameter)
-
-        t_inf = time.time()
-        inf.infer()
-        t_inf = time.time() - t_inf
-
-        workflow_loggerinfo("Inference with fusin moves solver in " + str(t_inf) + " s")
-
-        res_node = inf.arg()
-
-        # projection to edge result, don't really need it
-        # if necessary at some point, make extra task and recover
-
-        #ru = res_node[uv_ids[:,0]]
-        #rv = res_node[uv_ids[:,1]]
-        #res_edge = ru!=rv
-
-        e_glob = gm.evaluate(res_node)
-
-        workflow_logger.info("Energy of the solution " + str(e_glob) )
-
-        self.output().write(res_node)
-
-
-    def output(self):
-        save_path = os.path.join( PipelineParameter().cache, "MCSSolverOpengmFusionMoves.h5")
-        return HDF5Target( save_path )
-
-
 class MCSSolverNiftyFusionMoves(luigi.Task):
 
-    Problem = luigi.TaskParameter()
+    problem = luigi.TaskParameter()
 
     def requires(self):
-        return Problem
+        return self.problem
 
     def run(self):
-        import nifty
 
         # read the mc parameter
         with open(PipelineParameter().MCConfigFile, 'r') as f:
             mc_config = json.load(f)
 
-        # TODO use the parameters for initialising the solver!
-        mc_problem = self.input().read()
+        mcProblem = self.input().read()
 
-        uv_ids = mc_problem[:,:2]
-        edge_costs = mc_problem[:,2]
+        uvIds     = mcProblem[:,:2]
+        edgeCosts = mcProblem[:,2]
+        nVariables = uvIds.max() + 1
 
-        n_var = uv_ids.max() + 1
+        g = nifty.graph.UndirectedGraph(int(nVariables))
+        g.insertEdges(uvIds)
 
-        g =  nifty.graph.UndirectedGraph(int(n_var))
-        g.insertEdges(uv_ids)
+        assert g.numberOfEdges == edgeCosts.shape[0]
 
-        assert g.numberOfEdges == edge_costs.shape[0]
-        assert g.numberOfEdges == uv_ids.shape[0]
+        obj = nifty.graph.multicut.multicutObjective(g, edgeCosts)
 
-        obj = nifty.graph.multicut.multicutObjective(g, edge_costs)
+        workflow_logger.info("Solving multicut problem with %i number of variables" % (nVariables,))
+        workflow_logger.info("Using the fusion moves solver from nifty")
 
-        workflow_logger.info("Solving MC Problem with " + str(n_var) + " number of variables")
-        workflow_logger.info("Using nifty fusionmoves")
+        greedy = obj.greedyAdditiveFactory().create(obj)
 
-        greedy=nifty.greedyAdditiveFactory().create(obj)
-        ret = greedy.optimize()
-        workflow_logger.info("Energy greedy " +  str(obj.evalNodeLabels(ret)) )
+        t_inf = time.time() - t_inf
+        ret    = greedy.optimize()
+        workflow_logger.info("Energy of the greedy solution" +  str(obj.evalNodeLabels(ret)) )
 
-        t_inf = time.time()
-
-        ilpFac = nifty.multicutIlpFactory(ilpSolver='cplex',verbose=0,
+        ilpFac = obj.multicutIlpFactory(ilpSolver='cplex',verbose=0,
             addThreeCyclesConstraints=True,
             addOnlyViolatedThreeCyclesConstraints=True
         )
-        factory = nifty.fusionMoveBasedFactory(
-            verbose=1,
-            fusionMove=nifty.fusionMoveSettings(mcFactory=ilpFac),
-            proposalGen=nifty.watershedProposals(sigma=10,seedFraction=0.01),
-            numberOfIterations=100,
-            numberOfParallelProposals=20,
-            stopIfNoImprovement=4,
-            fuseN=2,
-        )
-        solver = factory.create(obj)
-        ret = solver.optimize(ret)
 
+        solver = obj.fusionMoveBasedFactory(
+            verbose=mc_config["verbose"],
+            fusionMove=obj.fusionMoveSettings(mcFactory=ilpFac),
+            proposalGen=obj.watershedProposals(sigma=mc_config["sigmaFusion"],seedFraction=mc_config["seedFraction"]),
+            numberOfIterations=mc_config["numIt"],
+            numberOfParallelProposals=mc_config["numParallelProposals"],
+            numberOfThreads=mc_config["numThreadsFusion"],
+            stopIfNoImprovement=mc_config["numItStop"],
+            fuseN=mc_config["numFuse"],
+        ).create(obj)
+
+        ret = solver.optimize(nodeLabels=ret)
         t_inf = time.time() - t_inf
-        workflow_loggerinfo("Inference with fusin moves solver in " + str(t_inf) + " s")
+        workflow_loggerinfo("Inference with exact solver in %i s" % (t_inf,))
 
         # projection to edge result, don't really need it
         # if necessary at some point, make extra task and recover
@@ -160,128 +85,57 @@ class MCSSolverNiftyFusionMoves(luigi.Task):
         #rv = res_node[uv_ids[:,1]]
         #res_edge = ru!=rv
 
-        workflow_logger.info("Energy of the solution " + str(obj.evalNodeLabels(ret)) )
+        workflow_logger.info("Energy of the solution %i" % (obj.evalNodeLabels(ret), ) )
 
         self.output().write(ret)
 
 
+
     def output(self):
         save_path = os.path.join( PipelineParameter().cache, "MCSSolverOpengmFusionMoves.h5")
-        return HDF5Target( save_path )
+        return HDF5DataTarget( save_path )
 
 
-class MCSSolverOpengmExact(luigi.Task):
+# FIXME nifty exact does not work responsibly for all problems!
+class McSolverExact(luigi.Task):
 
-    Problem = luigi.TaskParameter()
-
-    def requires(self):
-        return self.Problem
-
-    def run(self):
-        import opengm
-
-        mc_problem = self.input().read()
-
-        uv_ids = mc_problem[:,:2]
-        edge_costs = mc_problem[:,2]
-
-        n_var = uv_ids.max() + 1
-
-        workflow_logger.info("Solving MC Problem with " + str(n_var) + " number of variables")
-
-        # set up the opengm model
-        states = np.ones(n_var) * n_var
-        gm = opengm.gm(states)
-
-        # potts model
-        potts_shape = [n_var, n_var]
-
-        potts = opengm.pottsFunctions(potts_shape, np.zeros_like( edge_costs ), edge_costs )
-
-        # potts model to opengm function
-        fids_b = gm.addFunctions(potts)
-
-        gm.addFactors(fids_b, uv_ids)
-
-        # the workflow, we use
-        wf = "(IC)(CC-IFD)"
-
-        # TODO incorporate verbosity into logging
-        param = opengm.InfParam( workflow = wf, verbose = False,
-                verboseCPLEX = False, numThreads = 4 )
-
-        inf = opengm.inference.Multicut(gm, parameter=param)
-        t_inf = time.time()
-        inf.infer()
-        t_inf = time.time() - t_inf
-
-        workflow_logger.info("Inference with exact solver in " + str(t_inf) + " s")
-
-        res_node = inf.arg()
-
-        # projection to edge result, don't really need it
-        # if necessary at some point, make extra task and recover
-
-        #ru = res_node[uv_ids[:,0]]
-        #rv = res_node[uv_ids[:,1]]
-        #res_edge = ru!=rv
-
-        e_glob = gm.evaluate(res_node)
-
-        workflow_logger.info("Energy of the solution " + str(e_glob) )
-
-        self.output().write(res_node)
-
-
-    def output(self):
-        save_path = os.path.join( PipelineParameter().cache, "MCSSolverOpengmExact.h5")
-        return HDF5Target( save_path )
-
-
-class MCSSolverNiftyExact(luigi.Task):
-
-    Problem = luigi.TaskParameter()
+    problem = luigi.TaskParameter()
 
     def requires(self):
-        return Problem
+        return self.problem
 
     def run(self):
-        import nifty
 
         # read the mc parameter
         with open(PipelineParameter().MCConfigFile, 'r') as f:
             mc_config = json.load(f)
 
         # TODO use the parameters for initialising the solver!
-        mc_problem = self.input().read()
+        mcProblem = self.input().read()
 
-        uv_ids = mc_problem[:,:2]
-        edge_costs = mc_problem[:,2]
+        uvIds     = mcProblem[:,:2]
+        edgeCosts = mcProblem[:,2]
+        nVariables = uvIds.max() + 1
 
-        n_var = uv_ids.max() + 1
+        g = nifty.graph.UndirectedGraph(int(nVariables))
+        g.insertEdges(uvIds)
 
-        g =  nifty.graph.UndirectedGraph(int(n_var))
-        g.insertEdges(uv_ids)
+        assert g.numberOfEdges == edgeCosts.shape[0]
 
-        assert g.numberOfEdges == edge_costs.shape[0]
-        assert g.numberOfEdges == uv_ids.shape[0]
+        obj = nifty.graph.multicut.multicutObjective(g, edgeCosts)
 
-        obj = nifty.graph.multicut.multicutObjective(g, edge_costs)
+        workflow_logger.info("Solving multicut problem with %i number of variables" % (nVariables,))
+        workflow_logger.info("Using the exact solver from nifty")
 
-        workflow_logger.info("Solving MC Problem with " + str(n_var) + " number of variables")
-        workflow_logger.info("Using nifty exact")
-
-        t_inf = time.time()
-
-        factory = nifty.multicutIlpFactory(ilpSolver='cplex',verbose=0,
+        solver = obj.multicutIlpFactory(ilpSolver='cplex',verbose=0,
             addThreeCyclesConstraints=True,
             addOnlyViolatedThreeCyclesConstraints=True
-        )
-        solver = factory.create(obj)
-        ret = solver.optimize(ret)
+        ).create(obj)
 
+        t_inf = time.time()
+        ret = solver.optimize()
         t_inf = time.time() - t_inf
-        workflow_loggerinfo("Inference with exact solver in " + str(t_inf) + " s")
+        workflow_loggerinfo("Inference with exact solver in %i s" % (t_inf,))
 
         # projection to edge result, don't really need it
         # if necessary at some point, make extra task and recover
@@ -290,7 +144,7 @@ class MCSSolverNiftyExact(luigi.Task):
         #rv = res_node[uv_ids[:,1]]
         #res_edge = ru!=rv
 
-        workflow_logger.info("Energy of the solution " + str(obj.evalNodeLabels(ret)) )
+        workflow_logger.info("Energy of the solution %i" % (obj.evalNodeLabels(ret), ) )
 
         self.output().write(ret)
 
@@ -301,15 +155,14 @@ class MCSSolverNiftyExact(luigi.Task):
 
 
 # get weights and uvids of the MC problem
-class MCProblem(luigi.Task):
+class McProblem(luigi.Task):
 
-    PathToSeg = luigi.Parameter()
-    PathToRF  = luigi.Parameter()
+    pathToSeg = luigi.Parameter()
+    pathToRF  = luigi.Parameter()
 
     def requires(self):
-        return { "EdgeProbs" : EdgeProbabilitiesFromExternalRF(self.PathToRF),
-                "RAG" : RegionAdjacencyGraph(self.PathToSeg),
-                "EdgeIndications" : EdgeIndications(self.PathToSeg) }
+        return { "EdgeProbabilities" : EdgeProbabilitiesFromExternalRF(self.pathToRF),
+                "Rag" : StackedRegionAdjacencyGraph(self.pathToSeg) }
 
     def run(self):
 
@@ -317,19 +170,14 @@ class MCProblem(luigi.Task):
         with open(PipelineParameter().MCConfigFile, 'r') as f:
             mc_config = json.load(f)
 
-        rag = self.input()["RAG"].read()
+        inp = self.input()
+        rag = inp["Rag"].read()
+        probs = inp["EdgeProbabilities"].read()
 
-        # get the uvids
-        uv_ids = np.sort( rag.uvIds(), axis = 1 )
-
-        assert uv_ids.max() + 1 == rag.nodeNum, str(uv_ids.max() + 1)  + " , " + str(rag.nodeNum)
-
-        # get the edge costs
+        uvIds = rag.uvIds
 
         # scale the probabilities
         # this is pretty arbitrary, it used to be 1. / n_tress, but this does not make that much sense for sklearn impl
-        probs = self.input()["EdgeProbs"].read()
-
         p_min = 0.001
         p_max = 1. - p_min
         probs = (p_max - p_min) * probs + p_min
@@ -343,9 +191,10 @@ class MCProblem(luigi.Task):
         weighting_scheme = mc_config["WeightingScheme"]
         weight           = mc_config["Weight"]
 
+        # TODO need the size of the edges for weighting!
         workflow_logger.info("Weighting edge costs with scheme " + weighting_scheme + " and weight " + str(weight) )
         if weighting_scheme == "z":
-            edges_size = rag.edgeLengths()
+            edges_size = rag.numberOfEdges
             edge_indications = self.input()["EdgeIndications"].read()
             assert edges_size.shape[0] == edge_costs.shape[0]
             assert edge_indications.shape[0] == edge_costs.shape[0]
@@ -357,7 +206,7 @@ class MCProblem(luigi.Task):
             edge_costs[edge_indications == 0] = np.multiply(w, edge_costs[edge_indications == 0])
 
         elif weighting_scheme == "xyz":
-            edges_size =rag.edgeLengths()
+            edges_size = rag.numberOfEdges
             edge_indications = self.input()["EdgeIndications"].read()
             assert edges_size.shape[0] == edge_costs.shape[0]
             assert edge_indications.shape[0] == edge_costs.shape[0]
@@ -370,6 +219,7 @@ class MCProblem(luigi.Task):
             edge_costs[edge_indications == 1] = np.multiply(w_xy, edge_costs[edge_indications == 1])
 
         elif weighting_scheme == "all":
+            edges_size =rag.edgeLengths()
             edges_size = rag.edgeLengths()
             assert edges_size.shape[0] == edge_costs.shape[0]
 

@@ -1,10 +1,15 @@
 {
-    "Beta"   : 0.5,
-    "WeightingScheme" : "z",
-    "Weight" : 16,
-    "SeedFraction" : 0.005,
-    "NumIt" : 2500,
-    "NumItStop" : 10,
-    "BlockSize" : [512, 512, 50],
-    "BlockOverlap" : [20,20,4]
+    "verbose" : 0,
+    "sigmaFusion" : 10,
+    "numParallelProposals" : 1,
+    "numThreadsFusion" : 1,
+    "numFuse" : 2,
+    "beta"   : 0.5,
+    "weightingScheme" : "z",
+    "weight" : 16,
+    "seedFraction" : 0.005,
+    "numIt" : 2500,
+    "numItStop" : 10,
+    "blockSize" : [512, 512, 50],
+    "blockOverlap" : [20,20,4]
 }

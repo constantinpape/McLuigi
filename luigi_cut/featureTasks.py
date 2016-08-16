@@ -5,7 +5,7 @@ import luigi
 
 from customTargets import HDF5DataTarget
 from dataTasks import InputData, StackedRegionAdjacencyGraph, ExternalSegmentation
-from miscTasks import EdgeIndications
+#from miscTasks import EdgeIndications
 
 from pipelineParameter import PipelineParameter
 from toolsLuigi import config_logger
@@ -69,7 +69,6 @@ def get_local_features():
     return feature_tasks
 
 
-# TODO implement in nifty
 class RegionFeatures(luigi.Task):
 
     pathToInput = luigi.Parameter()
