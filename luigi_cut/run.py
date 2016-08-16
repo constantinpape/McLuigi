@@ -6,6 +6,7 @@ import json
 
 from workflowTasks import MulticutSegmentation, BlockwiseMulticutSegmentation
 from featureTasks import EdgeFeatures
+from dataTasks import RagTask
 
 from pipelineParameter import PipelineParameter
 from toolsLuigi import config_logger
@@ -34,7 +35,6 @@ if __name__ == '__main__':
 
     # TODO get central scheduler running
     luigi.run(["--local-scheduler",
-        "--PathToInput", inputs["data"],
-        "--PathToSeg", inputs["seg"]],
-        main_task_cls = EdgeFeatures)
+        "--pathToSeg", inputs["seg"]],
+        main_task_cls = RagTask)
         #main_task_cls = MulticutSegmentation)

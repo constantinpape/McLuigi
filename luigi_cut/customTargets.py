@@ -3,12 +3,18 @@ from luigi.file import LocalFileSystem
 
 import logging
 
-import vigra
-import cPickle as pickle
 import os
+import numpy as np
+import cPickle as pickle
+
+import nifty
+import vigra
 
 
-class ChunkedTarget(FileSystemTarget):
+class HDF5VolumeTarget(FileSystemTarget):
+    """
+    Target for volumetric data larger than RAM
+    """
     fs = LocalFileSystem()
 
     def makedirs(self):
@@ -23,26 +29,73 @@ class ChunkedTarget(FileSystemTarget):
             except OSError:
                 pass
 
-    def __init__(self, path):
-        super(ChunkedTarget, self).__init__(path)
+    def __init__(self, path, dtype, key = "data", shape = None):
+        super(HDF5VolumeTarget, self).__init__(path)
+        self.key = key
+        self.dtype = dtype
+        self.shape = shape
 
-    def open(self, key = "data", mode = vigra.HDF5Mode.Default):
-        self.array = vigra.ChunkedArrayHDF5(str(self.path), key, mode = mode)
+    def open(self):
+        # open an existing hdf5 file
+        if os.path.exists(self.path):
+            h5_file = nifty.hdf5.openFile(self.path)
+            # set the dtype #TODO (could we do this in a more elegant way?)
+            if self.dtype == np.float32:
+                self.array = nifty.hdf5.Hdf5ArrayFloat32(h5_file, key)
+            elif self.dtype == np.float64:
+                self.array = nifty.hdf5.Hdf5ArrayFloat64(h5_file, key)
+            elif self.dtype == np.uint8:
+                self.array = nifty.hdf5.Hdf5ArrayUInt8(h5_file, key)
+            elif self.dtype == np.uint32:
+                self.array = nifty.hdf5.Hdf5ArrayUInt32(h5_file, key)
+            elif self.dtype == np.uint64:
+                self.array = nifty.hdf5.Hdf5ArrayUInt64(h5_file, key)
+            else:
+                raise RuntimeError("Datatype %s not supported!" % (str(dtype),))
+        # create a new file
+        else:
+            self.makedirs()
+            h5_file = nifty.hdf5.createFile(self.path)
+            # shape and chunk shape
+            assert self.shape != None, "HDF5VolumeTarget needs to be initialised with a shape, when creating a new file"
+            # TODO need to fix this for non-sliced data
+            chunk_shape = [min(self.shape[0], 512), min(self.shape[1], 512), 1]
+
+            # set the accordingly #TODO (could we do this in a more elegant way?)
+            if self.dtype == np.float32:
+                self.array = nifty.hdf5.Hdf5ArrayFloat32(h5_file, key)
+            elif self.dtype == np.float64:
+                self.array = nifty.hdf5.Hdf5ArrayFloat64(h5_file, key)
+            elif self.dtype == np.uint8:
+                self.array = nifty.hdf5.Hdf5ArrayUInt8(h5_file, key)
+            elif self.dtype == np.uint32:
+                self.array = nifty.hdf5.Hdf5ArrayUInt32(h5_file, key)
+            elif self.dtype == np.uint64:
+                self.array = nifty.hdf5.Hdf5ArrayUInt64(h5_file, key)
+            else:
+                raise RuntimeError("Datatype %s not supported!" % (str(dtype),))
+
 
     def write(self, start, data):
         if not os.path.exists(self.path):
             self.makedirs()
-        self.array.commitSubarray(start, data)
+        self.array.writeSubarray(start, data)
 
     def shape(self):
         return self.array.shape
 
     def read(self, start, stop):
-        return self.array.checkoutSubarray(start, stop)
+        return self.array.readSubarray(start, stop)
+
+    def get(self):
+        return self.array
 
 
-# vigra impl
-class HDF5Target(FileSystemTarget):
+# TODO this is not really necessary and it should be possible to do it all with the nifty target
+class HDF5DataTarget(FileSystemTarget):
+    """
+    Target for in ram data
+    """
     fs = LocalFileSystem()
 
     def makedirs(self):
@@ -57,18 +110,18 @@ class HDF5Target(FileSystemTarget):
             except OSError:
                 pass
 
-    def __init__(self, path):
-        super(HDF5Target, self).__init__(path)
+    def __init__(self, path, key = "data"):
+        super(HDF5DataTarget, self).__init__(path)
+        self.key = key
 
-    def open(self, mode='r'):
+    def open(self):
         raise AttributeError("Not implemented")
 
-    def write(self, data, key = 'data', compression = 'gzip'):
-        self.makedirs()
-        vigra.writeHDF5(data, self.path, key, compression = compression)
+    def write(self):
+        vigra.writeHDF5(self.path, self.key)
 
-    def read(self, key = 'data'):
-        return vigra.readHDF5(self.path, key)
+    def read(self):
+        return vigra.readHDF5(self.path, self.key)
 
 
 class PickleTarget(FileSystemTarget):
@@ -102,7 +155,9 @@ class PickleTarget(FileSystemTarget):
             return pickle.load(f)
 
 
-class RagTarget(FileSystemTarget):
+# serializeing the nifty rag
+# TODO have to serialize a lot more for the stacked rag -> better to do this from cpp
+class StackedRagTarget(FileSystemTarget):
     fs = LocalFileSystem()
 
     def makedirs(self):
@@ -123,11 +178,17 @@ class RagTarget(FileSystemTarget):
     def open(self, mode='r'):
         raise AttributeError("Not implemented")
 
-    def write(self, rag):
-        #FIXME
-        #assert isinstance(rag, vigra.graphs.regionAdjacencyGraph)
+    def write(self, rag, labelsPath, labelsKey = "data"):
         self.makedirs()
-        rag.writeHDF5(self.path, "data")
+        deserialization = rag.serialize()
+        vigra.writeHDF5(self.path, deserialization, "data")
+        vigra.writeHDF5(self.path, labelsPath, "labelsPath")
+        vigra.writeHDF5(self.path, labelskey, "labelsKey")
 
     def read(self):
-        return vigra.graphs.loadGridRagHDF5(self.path, "data")
+        # create the rag
+        labelsPath = vigra.readHDF5(self.path, "labelsPath")
+        labelsKey = vigra.readHDF5(self.path, "labelsKey")
+        rag = nifty.graph.rag.chunkedLabelsGridRagSliced(labelsPath, labelsKey, forDeserialization = True)
+        rag.deserialize(vigra.readHDF5(self.path, "data"))
+        return rag

@@ -44,38 +44,29 @@ def get_local_features():
     if not isinstance(input_data, list):
         input_data = [input_data,]
 
-    filter_library = feat_params["filter_library"]
-    assert filter_library in ("vigra", "fastfilters"), filter_library
-    anisotropy  = feat_params["anisotropy"]
-    filternames = feat_params["filternames"]
-    sigmas = feat_params["sigmas"]
-    features2d = feat_params["features2d"]
-
     # TODO check for invalid keys
     if "raw" in features:
         # by convention we assume that the raw data is given as 0th
-        feature_tasks.append( EdgeFeatures(input_data[0], inputs["seg"], filter_library,
-                filternames, sigmas, anisotropy) )
+        feature_tasks.append( EdgeFeatures(input_data[0], inputs["seg"]) #, filternames, sigmas) )
         workflow_logger.debug("Calculating Edge Features from raw input: " + input_data[0])
     if "prob" in features:
         # by convention we assume that the membrane probs are given as 1st
-        feature_tasks.append( EdgeFeatures(input_data[1], inputs["seg"], filter_library,
-                filternames, sigmas, anisotropy) )
+        feature_tasks.append( EdgeFeatures(input_data[1], inputs["seg"] ) #, filternames, sigmas) )
         workflow_logger.debug("Calculating Edge Features from probability maps: " + input_data[1])
-    if "reg" in features:
-        # by convention we calculate region features only on the raw data (0th input)
-        # TODO should try it on probmaps. For big data we might spare shipping the raw data!
-        feature_tasks.append( RegionFeatures(input_data[0], inputs["seg"]) )
-        workflow_logger.debug("Calculating Region Features")
-    if "topo" in features:
-        # by convention we calculate region features only on the raw data (0th input)
-        feature_tasks.append( TopologyFeatures(inputs["seg"], features2d ) )
-        workflow_logger.debug("Calculating Topology Features")
+    #if "reg" in features:
+    #    # by convention we calculate region features only on the raw data (0th input)
+    #    # TODO should try it on probmaps. For big data we might spare shipping the raw data!
+    #    feature_tasks.append( RegionFeatures(input_data[0], inputs["seg"]) )
+    #    workflow_logger.debug("Calculating Region Features")
+    #if "topo" in features:
+    #    # by convention we calculate region features only on the raw data (0th input)
+    #    feature_tasks.append( TopologyFeatures(inputs["seg"], features2d ) )
+    #    workflow_logger.debug("Calculating Topology Features")
 
     return feature_tasks
 
 
-#def region_features(self, seg_id, inp_id, uv_ids, lifted_nh):
+# TODO implement in nifty
 class RegionFeatures(luigi.Task):
 
     PathToInput = luigi.Parameter()
@@ -184,7 +175,7 @@ class RegionFeatures(luigi.Task):
         return HDF5Target( os.path.join(
             PipelineParameter().cache, "RegionFeatures.h5" ) )
 
-
+# TODO in nifty ??
 class TopologyFeatures(luigi.Task):
 
     PathToSeg = luigi.Parameter()
@@ -282,107 +273,29 @@ class TopologyFeatures(luigi.Task):
         return HDF5Target( os.path.join( PipelineParameter().cache, "TopologyFeatures.h5" ) )
 
 
+# TODO adjust for nifty
 class EdgeFeatures(luigi.Task):
 
     # input over which filters are calculated and features accumulated
-    PathToInput = luigi.Parameter()
+    pathToInput = luigi.Parameter()
     # current oversegmentation
-    PathToSeg = luigi.Parameter()
-    FilterLibrary = luigi.Parameter(default = "vigra")
-    FilterNames = luigi.ListParameter(default = [ "gaussianSmoothing", "hessianOfGaussianEigenvalues", "laplacianOfGaussian"] )
-    Sigmas = luigi.ListParameter(default = [1.6, 4.2, 8.3] )
-    Anisotropy = luigi.Parameter(default = 25.)
+    pathToSeg = luigi.Parameter()
+
+    # For now we can't set these any more
+    #filterNames = luigi.ListParameter(default = [ "gaussianSmoothing", "hessianOfGaussianEigenvalues", "laplacianOfGaussian"] )
+    #sigmas = luigi.ListParameter(default = [1.6, 4.2, 8.3] )
 
     def requires(self):
-        return RegionAdjacencyGraph(self.PathToSeg), InputDataChunked(self.PathToInput)
+        return StackedRegionAdjacencyGraph(self.PathToSeg), InputData(self.PathToInput)
 
     def run(self):
 
-        # TODO blockwise, chunked, presmoothing
-        def calculate_filter(data, filter_library, filter_name, sigma, anisotropy):
-
-            assert filter_library in ("vigra", "fastfilters"), filter_library
-            # svens filters
-            if filter_library == "fastfilters":
-                import fastfilters
-                eval_filter = eval( ".".join( ["fastfilters", filter_name] ) )
-
-            else:
-                eval_filter = eval( ".".join( ["vigra", "filters", filter_name] ) )
-
-            # calculate filter purely in 2d
-            if anisotropy > PipelineParameter().MaxAniso:
-                workflow_logger.debug("Filter calculation in 2d")
-
-                # code parallelized
-
-                from concurrent import futures
-
-                t_filt_pure = time.time()
-                #with futures.ThreadPoolExecutor(max_workers = PipelineParameter().nThreads) as executor:
-                with futures.ThreadPoolExecutor(max_workers = 8) as executor:
-                    tasks = []
-                    for z in xrange(data.shape[2]):
-                        tasks.append( executor.submit(eval_filter, data[:,:,z], sigma ) )
-                workflow_logger.debug("Pure calculation time: " + str(time.time() - t_filt_pure))
-
-                res = [task.result() for task in tasks]
-
-                # TODO this is not really efficient !
-
-                if res[0].ndim == 2:
-                    res = [re[:,:,None] for re in res]
-                elif res[0].ndim == 3:
-                    res = [re[:,:,None,:] for re in res]
-
-                res = np.concatenate( res, axis = 2)
-
-            else:
-                workflow_logger.debug("Filter calculation in 3d")
-                if anisotropy > 1.:
-                    sig = (sigma, sigma, sigma / anisotropy)
-                else:
-                    sig = sigma
-
-                res = eval_filter( data, sig )
-
-            return res
-
+        rag = self.input()[0].read()
+        self.input()[1].open()
+        data = self.input()[1].get()
 
         t_feats = time.time()
-
-        edge_features = []
-        rag = self.input()[0].read()
-        inp = self.input()[1]
-        inp.open()
-        data = inp.read((0,0,0), inp.shape())
-
-        for filter_name in self.FilterNames:
-            for sigma in self.Sigmas:
-
-                t_filt = time.time()
-                workflow_logger.info("Calculation of " + filter_name + " for sigma: " + str(sigma)  )
-                filt = calculate_filter(data, self.FilterLibrary, filter_name, sigma, self.Anisotropy)
-                workflow_logger.info("Filter calculation in "+ str( time.time() - t_filt))
-
-                t_acc = time.time()
-                if len(filt.shape) == 3:
-                    # let RAG do the work
-                    grid_graph_edge_indicator = vigra.graphs.implicitMeanEdgeMap(rag.baseGraph, filt)
-                    edge_features.append( rag.accumulateEdgeStatistics( grid_graph_edge_indicator) )
-
-                elif len(filt.shape) == 4:
-                    for c in range(filt.shape[3]):
-                        grid_graph_edge_indicator = vigra.graphs.implicitMeanEdgeMap(
-                                rag.baseGraph, filt[:,:,:,c] )
-                        edge_features.append(rag.accumulateEdgeStatistics(grid_graph_edge_indicator))
-
-        edge_features = np.concatenate( edge_features, axis = 1)
-        assert edge_features.shape[0] == rag.edgeNum, str(edge_features.shape[0]) + " , " +str(rag.edgeNum)
-        workflow_logger.info("Accumulation over the edges in " + str(time.time() - t_acc))
-
-        edge_features = np.nan_to_num(edge_features)
-
+        edge_features = np.nan_to_num( nifty.graph.rag.accumulateEdgeStatisticsFromFilters(rag, data) ) # nthreads
         t_feats = time.time() - t_feats
         workflow_logger.info("Calculated Edge Features in: " + str(t_feats) + " s")
 
@@ -394,4 +307,4 @@ class EdgeFeatures(luigi.Task):
         #seg_name = os.path.split(self.PathToSeg)[1][:-3]
         #return HDF5Target( os.path.join( PipelineParameter().cache,
         #    "EdgeFeatures_" + inp_name + "_" + seg_name + ".h5" ) )
-        return HDF5Target( os.path.join( PipelineParameter().cache, "EdgeFeatures.h5" ) )
+        return HDF5DataTarget( os.path.join( PipelineParameter().cache, "EdgeFeatures.h5" ) )
