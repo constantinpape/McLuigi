@@ -216,7 +216,7 @@ class BlockwiseMulticutSolver(luigi.Task):
         workflow_logger.info("Nodes: From " + str(n_nodes) + " to " + str(n_nodes_new) )
         workflow_logger.info("Edges: From " + str(uv_ids.shape[0]) + " to " + str(n_edges_new) )
 
-        res_node_new = fusion_moves_nifty( uv_ids_new, costs_new, "reduced global", 20 )
+        res_node_new = fusion_moves( uv_ids_new, costs_new, "reduced global")
 
         assert res_node_new.shape[0] == n_nodes_new
 
@@ -389,8 +389,8 @@ class BlockwiseSubSolver(luigi.Task):
         with futures.ThreadPoolExecutor(max_workers=nWorkers) as executor:
             tasks = []
             for id, sub_problem in enumerate(sub_problems):
-                tasks.append( executor.submit( fusion_moves_nifty, sub_problem[2],
-                    costs[sub_problem[0]], id, 1 ) )
+                tasks.append( executor.submit( fusion_moves, sub_problem[2],
+                    costs[sub_problem[0]], id ) )
         sub_results = [task.result() for task in tasks]
 
         #sub_results = []

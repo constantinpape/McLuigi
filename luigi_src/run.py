@@ -15,9 +15,9 @@ config_logger(workflow_logger)
 
 if __name__ == '__main__':
 
-    PipelineParameter().InputFile = "../config/input_config_blkws.json"
-    PipelineParameter().FeatureConfigFile = "../config/feature_config.json"
-    PipelineParameter().MCConfigFile = "../config/mc_config.json"
+    PipelineParameter().InputFile = "../config_fib25/input_config_fib25.json"
+    PipelineParameter().FeatureConfigFile = "../config_fib25/feature_config.json"
+    PipelineParameter().MCConfigFile = "../config_fib25/mc_config.json"
 
     with open(PipelineParameter().InputFile, 'r') as f:
         inputs = json.load(f)

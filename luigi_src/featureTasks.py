@@ -82,18 +82,13 @@ config_logger(workflow_logger)
 
 # TODO svens filters, blockwise, chunked, presmoothing
 # implement this as function, because we don't want to cache the filters!
-def calculate_filter(input_path, filter_library, filter_name, sigma, anisotropy):
+def calculate_filter(input_path, filter_name, sigma, anisotropy):
 
     inp = vigra.readHDF5(input_path, "data")
 
-    assert filter_library in ("vigra", "fastfilters"), filter_library
-    # svens filters
-    if filter_library == "fastfilters":
-        import fastfilters
-        eval_filter = eval( ".".join( ["fastfilters", filter_name] ) )
+    import fastfilters
+    eval_filter = eval( ".".join( ["fastfilters", filter_name] ) )
 
-    else:
-        eval_filter = eval( ".".join( ["vigra", "filters", filter_name] ) )
 
     workflow_logger.debug("Calculating " + filter_name + " on input from " + input_path +  " for anisotropy factor " + str(anisotropy))
 
@@ -145,8 +140,6 @@ def get_local_features():
     if not isinstance(input_data, list):
         input_data = [input_data,]
 
-    filter_library = feat_params["filter_library"]
-    assert filter_library in ("vigra", "fastfilters"), filter_library
     anisotropy  = feat_params["anisotropy"]
     filternames = feat_params["filternames"]
     sigmas = feat_params["sigmas"]
@@ -155,12 +148,12 @@ def get_local_features():
     # TODO check for invalid keys
     if "raw" in features:
         # by convention we assume that the raw data is given as 0th
-        feature_tasks.append( EdgeFeatures(input_data[0], inputs["seg"], filter_library,
+        feature_tasks.append( EdgeFeatures(input_data[0], inputs["seg"],
                 filternames, sigmas, anisotropy) )
         workflow_logger.debug("Calculating Edge Features from raw input: " + input_data[0])
     if "prob" in features:
         # by convention we assume that the membrane probs are given as 1st
-        feature_tasks.append( EdgeFeatures(input_data[1], inputs["seg"], filter_library,
+        feature_tasks.append( EdgeFeatures(input_data[1], inputs["seg"],
                 filternames, sigmas, anisotropy) )
         workflow_logger.debug("Calculating Edge Features from probability maps: " + input_data[1])
     if "reg" in features:
@@ -389,7 +382,6 @@ class EdgeFeatures(luigi.Task):
     PathToInput = luigi.Parameter()
     # current oversegmentation
     PathToSeg = luigi.Parameter()
-    FilterLibrary = luigi.Parameter(default = "vigra")
     FilterNames = luigi.ListParameter(default = [ "vigra.filters.gaussianSmoothing", "vigra.filters.hessianOfGaussianEigenvalues", "vigra.filters.laplacianOfGaussian"] )
     Sigmas = luigi.ListParameter(default = [1.6, 4.2, 8.3] )
     Anisotropy = luigi.Parameter(default = 25.)
@@ -405,7 +397,7 @@ class EdgeFeatures(luigi.Task):
         rag = self.input()[0].read()
         for filter_name in self.FilterNames:
             for sigma in self.Sigmas:
-                filt =  caclulate_filtercalculate_filter(self.PathToInput, self.FilterLibrary, filter_name, sigma, self.Anisotropy)
+                filt =  calculate_filter(self.PathToInput, filter_name, sigma, self.Anisotropy)
 
                 if len(filt.shape) == 3:
                     # let RAG do the work

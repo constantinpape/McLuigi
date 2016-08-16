@@ -308,8 +308,8 @@ class MCProblem(luigi.Task):
 
     def requires(self):
         return { "EdgeProbs" : EdgeProbabilitiesFromExternalRF(self.PathToRF),
-                "RAG" : RegionAdjacencyGraph(self.PathToSeg),
-                "EdgeIndications" : EdgeIndications(self.PathToSeg) }
+                "RAG" : RegionAdjacencyGraph(self.PathToSeg)}
+                #"EdgeIndications" : EdgeIndications(self.PathToSeg) }
 
     def run(self):
 
