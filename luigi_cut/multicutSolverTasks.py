@@ -54,7 +54,7 @@ class McSolverFusionMoves(luigi.Task):
 
         greedy = obj.greedyAdditiveFactory().create(obj)
 
-        t_inf = time.time() - t_inf
+        t_inf = time.time()
         ret    = greedy.optimize()
         workflow_logger.info("Energy of the greedy solution" +  str(obj.evalNodeLabels(ret)) )
 
@@ -76,7 +76,7 @@ class McSolverFusionMoves(luigi.Task):
 
         ret = solver.optimize(nodeLabels=ret)
         t_inf = time.time() - t_inf
-        workflow_loggerinfo("Inference with exact solver in %i s" % (t_inf,))
+        workflow_logger.info("Inference with fusion move solver in %i s" % (t_inf,))
 
         # projection to edge result, don't really need it
         # if necessary at some point, make extra task and recover
@@ -88,7 +88,6 @@ class McSolverFusionMoves(luigi.Task):
         workflow_logger.info("Energy of the solution %i" % (obj.evalNodeLabels(ret), ) )
 
         self.output().write(ret)
-
 
 
     def output(self):
@@ -135,7 +134,7 @@ class McSolverExact(luigi.Task):
         t_inf = time.time()
         ret = solver.optimize()
         t_inf = time.time() - t_inf
-        workflow_loggerinfo("Inference with exact solver in %i s" % (t_inf,))
+        workflow_logger.info("Inference with exact solver in %i s" % (t_inf,))
 
         # projection to edge result, don't really need it
         # if necessary at some point, make extra task and recover
@@ -151,7 +150,7 @@ class McSolverExact(luigi.Task):
 
     def output(self):
         save_path = os.path.join( PipelineParameter().cache, "McSoverExact.h5")
-        return HDF5Target( save_path )
+        return HDF5DataTarget( save_path )
 
 
 # get weights and uvids of the MC problem
@@ -174,7 +173,7 @@ class McProblem(luigi.Task):
         rag = inp["Rag"].read()
         probs = inp["EdgeProbabilities"].read()
 
-        uvIds = rag.uvIds
+        uvIds = rag.uvIds()
 
         # scale the probabilities
         # this is pretty arbitrary, it used to be 1. / n_tress, but this does not make that much sense for sklearn impl
@@ -193,11 +192,10 @@ class McProblem(luigi.Task):
 
         workflow_logger.info("Weighting edge costs with scheme " + weighting_scheme + " and weight " + str(weight) )
         if weighting_scheme == "z":
-            # FIXME edge lens are zero, although they do work in toy example
             edgeLens = np.array(rag.edgeLengths)
             assert edgeLens.shape[0] == edge_costs.shape[0], str(edgeLens.shape[0]) + " , " + str(edge_costs.shape[0])
 
-            edgeTransition = rag.numberOfInSliceEdges
+            edgeTransition = rag.totalNumberOfInSliceEdges
 
             z_max = float( np.max( edgeLens[edgeTransition:] ) )
             # we only weight the z edges !
@@ -208,7 +206,7 @@ class McProblem(luigi.Task):
             edgeLens = np.array(rag.edgeLengths)
             assert edgesLen.shape[0] == edge_costs.shape[0]
 
-            edgeTransition = rag.numberOfInSliceEdges
+            edgeTransition = rag.totalNumberOfInSliceEdges
 
             z_max = float( np.max( edgeLens[edgeTransition:] ) )
             xy_max = float( np.max( edgeLens[:edgeTransition] ) )
@@ -225,14 +223,14 @@ class McProblem(luigi.Task):
             w  = weight * edgeLens / edge_max
             edge_costs = np.multiply(w, edge_costs)
 
-        assert edge_costs.shape[0] == uv_ids.shape[0]
+        assert edge_costs.shape[0] == uvIds.shape[0]
         assert np.isfinite( edge_costs.min() ), str(edge_costs.min())
         assert np.isfinite( edge_costs.max() ), str(edge_costs.max())
 
         # write concatenation of uvids and edge costs
-        self.output().write( np.concatenate( [uv_ids, edge_costs[:,None]], axis = 1 ) )
+        self.output().write( np.concatenate( [uvIds, edge_costs[:,None]], axis = 1 ) )
 
 
     def output(self):
-        save_path = os.path.join( PipelineParameter().cache, "MCProblem.h5" )
+        save_path = os.path.join( PipelineParameter().cache, "McProblem.h5" )
         return HDF5DataTarget( save_path )
