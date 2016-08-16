@@ -169,20 +169,22 @@ class DenseGroundtruth(luigi.Task):
     dtype = luigi.Parameter(default = np.uint32)
 
     def requires(self):
-        return ExternalSegmentation(path, dtype, key)
+        return ExternalSegmentation(self.path, self.key, self.dtype )
 
     def run(self):
 
-        gt_array = self.input()
+        gt = self.input()
+        gt.open()
         # FIXME this is only feasible for small enough data, for larger data we need blockwise connected components
-        gt = vigra.analysis.labelVolumeWithBackground( gt_array.read([0,0,0], gt_array.shape) )
-        self.output().open()
-        self.output().write( [0,0,0], gt)
+        gt_labeled = vigra.analysis.labelVolumeWithBackground( gt.read([0,0,0], gt.shape) )
+
+        out = self.output()
+        out.open(gt.shape)
+        out.write( [0,0,0], gt_labeled)
 
     def output(self):
-        save_path = os.path.join( PipelineParameter().cache,
-                os.path.split(self.path)[1] )
-        return HDF5VolumeTarget( save_path, key, dtype )
+        save_path = os.path.join( PipelineParameter().cache, os.path.split(self.path)[1][:-3] + "_labeled.h5" )
+        return HDF5VolumeTarget( save_path, self.dtype )
 
 
 class StackedRegionAdjacencyGraph(luigi.Task):

@@ -247,7 +247,10 @@ class EdgeFeatures(luigi.Task):
     def output(self):
         return HDF5DataTarget( os.path.join( PipelineParameter().cache, "EdgeFeatures.h5" ) )
 
+
 # TODO in nifty ??
+# the edgeLens are implemented, rest will be more tricky and is not that helpful anyway...
+
 #class TopologyFeatures(luigi.Task):
 #
 #    PathToSeg = luigi.Parameter()

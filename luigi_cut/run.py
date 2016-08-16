@@ -4,9 +4,10 @@ import os
 import logging
 import json
 
-#from workflowTasks import MulticutSegmentation, BlockwiseMulticutSegmentation
+from workflowTasks import MulticutSegmentation, BlockwiseMulticutSegmentation
 from featureTasks import EdgeFeatures, RegionFeatures
 from dataTasks import StackedRegionAdjacencyGraph, ExternalSegmentationLabeled
+from learningTasks import SingleRandomForestFromGt
 
 from pipelineParameter import PipelineParameter
 from toolsLuigi import config_logger
@@ -36,6 +37,6 @@ if __name__ == '__main__':
     # TODO get central scheduler running
     luigi.run(["--local-scheduler",
         #"--pathToInput", inputs["data"][0],
-        "--pathToSeg", inputs["seg"]],
-        #main_task_cls = StackedRegionAdjacencyGraph)
-        main_task_cls = ExternalSegmentationLabeled)
+        "--pathToSeg", inputs["seg"],
+        "--pathToRF", inputs["rf"]],
+        main_task_cls = MulticutSegmentation)

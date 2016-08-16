@@ -5,7 +5,7 @@ import luigi
 
 from multicutSolverTasks import McProblem, McSolverExact, McSolverFusionMoves
 from blockwiseMulticutTasks import BlockwiseMulticutSolver
-from dataTasks import StackedRegionAdjacencyGraph
+from dataTasks import StackedRegionAdjacencyGraph, ExternalSegmentation
 from customTargets import HDF5VolumeTarget
 
 from pipelineParameter import PipelineParameter
