@@ -2,39 +2,34 @@ import luigi
 import os
 import numpy as np
 
-from dataTasks import RegionAdjacencyGraph
-from customTargets import HDF5Target
+from dataTasks import StackedRegionAdjacencyGraph
+from customTargets import HDF5DataTarget
 from pipelineParameter import PipelineParameter
 
 
+# we don't really need this anymore, because we can only just use edgeId > rag.numberOfInnerSliceEdges
 class EdgeIndications(luigi.Task):
 
-    PathToSeg = luigi.Parameter()
+    pathToSeg = luigi.Parameter()
+    keyToSeg = luigi.Parameter(default = "data")
 
     def requires(self):
-        return RegionAdjacencyGraph(self.PathToSeg)
+        return StackedRegionAdjacencyGraph(self.pathToSeg, self.keyToSeg)
 
     def run(self):
         rag = self.input().read()
-        n_edges = rag.edgeNum
-        edge_indications = np.zeros(n_edges)
-        # TODO get rid of this loop
-        for edge_id in range( n_edges ):
-            edge_coords = rag.edgeCoordinates(edge_id)
-            z_coords = edge_coords[:,2]
-            z = np.unique(z_coords)
-            assert z.size == 1, "Edge indications can only be calculated for flat superpixel" + str(z)
-            # check whether we have a z or a xy edge
-            if z - int(z) == 0.:
-                # xy-edge!
-                edge_indications[edge_id] = 1
-            else:
-                # z-edge!
-                edge_indications[edge_id] = 0
+        nEdges = rag.numberOfEdges
+        nInner = rag.numberOfInSliceEdges
+        nOuter = rag.numberOfInBetweenSliceEdges
+
+        assert nInner + nOuter == nEdges, "Number of inner (%i) + outer (%i) edges must match total number of edges (%i)" % (nInner, nOuter, nEdges)
+
+        edgeIndications = np.ones(nEdges, dtype = np.uint8)
+
+        # inner / xy edges are indicated with a 1, outer / z edges with a 0
+        edgeIndications[nInner:] = 0
+
         self.output().write(edge_indications)
 
     def output(self):
-        #seg_name = os.path.split(self.PathToSeg)[1][:-3]
-        #return HDF5Target( os.path.join( PipelineParameter().cache,
-        #    "EdgeIndications_" + seg_name + ".h5" ) )
         return HDF5Target( os.path.join( PipelineParameter().cache, "EdgeIndications.h5" ) )
