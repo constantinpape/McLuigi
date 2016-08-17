@@ -10,6 +10,6 @@
     "seedFraction" : 0.005,
     "numIt" : 2500,
     "numItStop" : 10,
-    "blockSize" : [512, 512, 50],
-    "blockOverlap" : [20,20,4]
+    "blockSize" : [50,512,512],
+    "blockOverlap" : [4,20,20]
 }

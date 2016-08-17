@@ -63,7 +63,7 @@ class BlockwiseMulticutSegmentation(luigi.Task):
 
     def requires(self):
         return { "McNodes" : BlockwiseMulticutSolver( self.pathToSeg, self.pathToRF ),
-                "Rag" : RegionAdjacencyGraph(self.pathToSeg),
+                "Rag" : StackedRegionAdjacencyGraph(self.pathToSeg),
                 "Seg" : ExternalSegmentation(self.pathToSeg)}
 
     def run(self):
@@ -86,7 +86,6 @@ class BlockwiseMulticutSegmentation(luigi.Task):
         segOut.open(seg.shape)
 
         nifty.graph.rag.projectScalarNodeDataToPixels(rag, mcNodes, segOut.get() ) # nWorkers = -1, could also set this...
-
 
 
     def output(self):

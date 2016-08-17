@@ -38,5 +38,7 @@ if __name__ == '__main__':
     luigi.run(["--local-scheduler",
         #"--pathToInput", inputs["data"][0],
         "--pathToSeg", inputs["seg"],
+        #"--pathToGt", inputs["gt"]],
         "--pathToRF", inputs["rf"]],
-        main_task_cls = MulticutSegmentation)
+        main_task_cls = BlockwiseMulticutSegmentation)
+        #main_task_cls = SingleRandomForestFromGt)
