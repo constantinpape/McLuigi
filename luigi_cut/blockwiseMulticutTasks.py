@@ -8,7 +8,7 @@ from dataTasks import StackedRegionAdjacencyGraph, ExternalSegmentation
 from multicutSolverTasks import McProblem#, McSolverFusionMoves, MCSSolverOpengmExact
 from customTargets import HDF5DataTarget
 
-from toolsLuigi import UnionFind, config_logger
+from toolsLuigi import UnionFind, config_logger, get_blocks
 
 import os
 import logging
@@ -215,60 +215,8 @@ class BlockwiseSubSolver(luigi.Task):
         block_size    = mc_config["blockSize"]
         block_overlap = mc_config["blockOverlap"]
 
-        # TODO encapsulate and possibly use some vigra / nifty function here!
-        s_z = block_size[0]
-        assert s_z < seg.shape[0], str(s_z) + " , " + str(seg.shape[0])
-        s_y = block_size[1]
-        assert s_y < seg.shape[1], str(s_y) + " , " + str(seg.shape[1])
-        s_x = block_size[2]
-        assert s_x < seg.shape[2], str(s_x) + " , " + str(seg.shape[2])
-
-        o_z = block_overlap[0]
-        o_y = block_overlap[1]
-        o_x = block_overlap[2]
-
-        n_z = int( np.ceil( float( seg.shape[0] ) / s_z ) )
-        n_y = int( np.ceil( float( seg.shape[1] ) / s_y ) )
-        n_x = int( np.ceil( float( seg.shape[2] ) / s_x ) )
-
-        n_blocks = n_x * n_y * n_z
-
-        workflow_logger.info("Fitting " + str(n_blocks) + " blocks of size " + str(block_size) + " into shape " + str(seg.shape) + " additional overlaps: " + str(block_overlap))
-
-        block_begins = []
-        block_ends   = []
-        for z in xrange(n_z):
-
-            # z range
-            start_z = z * s_z
-            if z != 0:
-                start_z -= o_z
-            end_z = (z + 1) * s_z + o_z
-            if end_z > seg.shape[0]:
-                end_z = seg.shape[0]
-
-            for y in xrange(n_y):
-
-                # Y range
-                start_y = y * s_y
-                if y != 0:
-                    start_y -= o_y
-                end_y = (y + 1) * s_y + o_y
-                if end_y > seg.shape[1]:
-                    end_y = seg.shape[1]
-
-                for x in xrange(n_x):
-
-                    # x range
-                    start_x = x * s_x
-                    if x != 0:
-                        start_x -= o_x
-                    end_x = (x + 1) * s_x + o_x
-                    if end_x > seg.shape[2]:
-                        end_x = seg.shape[2]
-
-                    block_begins.append( [start_z,start_y,start_x] )
-                    block_ends.append(   [end_z,end_y,end_x] )
+        # TODO this function is implemented VERY ugly, best to replace this with vigra or nifty functionality
+        block_begins, block_ends = get_blocks(seg.shape, block_size, block_overlap)
 
         #nWorkers = 1
         nWorkers = min( n_blocks, PipelineParameter().nThreads )
@@ -296,10 +244,6 @@ class BlockwiseSubSolver(luigi.Task):
                 tasks.append( executor.submit( fusion_moves, sub_problem[2],
                     costs[sub_problem[0]], id, 1 ) )
         sub_results = [task.result() for task in tasks]
-
-        #sub_results = []
-        #for id, sub_problem in enumerate(sub_problems):
-        #    sub_results.append( fusion_moves(sub_problem[2], costs[sub_problem[0]], id) )
 
         t_inf_total = time.time() - t_inf_total
         workflow_logger.info( "Inference time total for subproblems " + str(t_inf_total)  + " s")
@@ -333,5 +277,3 @@ class BlockwiseSubSolver(luigi.Task):
 
     def output(self):
         return HDF5DataTarget(os.path.join( PipelineParameter().cache, "BlockwiseSubSolver.h5" ) )
-
-

@@ -60,8 +60,48 @@ class EdgeProbabilitiesFromSingleRandomForest(luigi.Task):
         self.output().write(probs)
 
     def output(self):
-        save_path = os.path.join( PipelineParameter().cache, "EdgeProbabilities.h5"  )
+        save_path = os.path.join( PipelineParameter().cache, "EdgeProbabilitiesFromSingleRandomForest.h5"  )
         return HDF5DataTarget( save_path  )
+
+
+class EdgeProbabilitiesFromTwoRandomForests(luigi.Task):
+
+    randomForestXyTask = luigi.TaskParameter()
+    randomForestZTask = luigi.TaskParameter()
+    pathToSeg = luigi.Parameter()
+
+    def requires(self):
+        # This way of generating the features is quite hacky, but it is the
+        # least ugly way I could come up with till now.
+        # and as long as we only use the pipeline for deploymeny it should be alright
+        feature_tasks = get_local_features()
+        return {"rfXy" : self.randomForestXyTask, "rfZ" : self.randomForestZTask, "features" : feature_tasks, "rag" : StackedRegionAdjacencyGraph(self.pathToSeg)}
+
+    def run(self):
+
+        t_pred = time.time()
+
+        rf_xy = self.input()["rfXy"].read()
+        rf_z  = self.input()["rfXy"].read()
+
+        features = np.concatenate( [feat.read() for feat in self.input()["features"]], axis = 1 )
+
+        transitionEdge = rag.totalNumberOfInSliceEdges
+
+        t_pred = time.time()
+        probs_xy = rf_xy.predict_proba(features[transitionEdge:])[:,1]
+        probs_z  = rf_z.predict_proba(features[:transitionEdge])[:,1]
+        t_pred = time.time() - t_pred
+        workflow_logger.info("Predicted RF in: " + str(t_pred) + " s")
+
+        probs = np.concatenate([probs_xy, probs_z], axis = 0)
+
+        self.output().write(probs)
+
+    def output(self):
+        save_path = os.path.join( PipelineParameter().cache, "EdgeProbabilitiesFromTwoRandomForests.h5"  )
+        return HDF5DataTarget( save_path  )
+
 
 
 # TODO fuzzy mapping in nifty ?!
@@ -122,11 +162,103 @@ class SingleRandomForestFromGt(luigi.Task):
         # TODO rf options - we shouldn't train to full purity etc. - pretty inefficient...
         # + OOB
         rf = RandomForestClassifier(n_jobs = PipelineParameter().nThreads)
+
+        t_learn = time.time()
         rf.fit(features, gt)
+        t_learn = time.time() - t_learn
+        workflow_logger.info("Learned RF in: " + str(t_learn) + " s")
 
         self.output().write(rf)
 
 
     def output(self):
         save_path = os.path.join( PipelineParameter().cache, "SingleRandomForestFromGt.pkl"  )
+        return PickleTarget(save_path)
+
+
+class RandomForestsZFromGt(luigi.Task):
+
+    pathToSeg = luigi.Parameter()
+    pathToGt  = luigi.Parameter()
+
+    def requires(self):
+        # This way of generating the features is quite hacky, but it is the
+        # least ugly way I could come up with till now.
+        # and as long as we only use the pipeline for deploymeny it should be alright
+        feature_tasks = get_local_features()
+        return {"rag" : StackedRegionAdjacencyGraph(self.pathToSeg), "gt" : EdgeGroundtruth(self.pathToSeg, self.pathToGt), "features" : feature_tasks}
+
+
+    def run(self):
+
+        inp = self.input()
+        gt = inp["gt"].read()
+        features = np.concatenate( [feat.read() for feat in inp["features"]], axis = 1 )
+        rag = inp["rag"].read()
+
+        assert features.shape[0] == gt.shape[0], str(features.shape[0]) + " , " + str(gt.shape[0])
+
+        transitionEdge = rag.totalNumberOfInSliceEdges
+
+        features_z = features[transitionEdge:]
+        gt_z = gt[transitionEdge:]
+
+        # TODO rf options - we shouldn't train to full purity etc. - pretty inefficient...
+        # + OOB
+        rf_z = RandomForestClassifier(n_jobs = PipelineParameter().nThreads)
+
+        t_learn = time.time()
+        rf_z.fit(features_z, gt_z)
+        t_learn = time.time() - t_learn
+        workflow_logger.info("Learned Random Forest on z edges in: " + str(t_learn) + " s")
+
+        self.output().write(rf)
+
+
+    def output(self):
+        save_path = os.path.join( PipelineParameter().cache, "RandomForestZFromGt.pkl"  )
+        return PickleTarget(save_path)
+
+
+class RandomForestsXyFromGt(luigi.Task):
+
+    pathToSeg = luigi.Parameter()
+    pathToGt  = luigi.Parameter()
+
+    def requires(self):
+        # This way of generating the features is quite hacky, but it is the
+        # least ugly way I could come up with till now.
+        # and as long as we only use the pipeline for deploymeny it should be alright
+        feature_tasks = get_local_features()
+        return {"rag" : StackedRegionAdjacencyGraph(self.pathToSeg), "gt" : EdgeGroundtruth(self.pathToSeg, self.pathToGt), "features" : feature_tasks}
+
+
+    def run(self):
+
+        inp = self.input()
+        gt = inp["gt"].read()
+        features = np.concatenate( [feat.read() for feat in inp["features"]], axis = 1 )
+        rag = inp["rag"].read()
+
+        assert features.shape[0] == gt.shape[0], str(features.shape[0]) + " , " + str(gt.shape[0])
+
+        transitionEdge = rag.totalNumberOfInSliceEdges
+
+        features_xy = features[:transitionEdge]
+        gt_xy = gt[:transitionEdge]
+
+        # TODO rf options - we shouldn't train to full purity etc. - pretty inefficient...
+        # + OOB
+        rf_xy = RandomForestClassifier(n_jobs = PipelineParameter().nThreads)
+
+        t_learn = time.time()
+        rf_xy.fit(features_xy, gt_xy)
+        t_learn = time.time() - t_learn
+        workflow_logger.info("Learned Random Forest on xy edges in: " + str(t_learn) + " s")
+
+        self.output().write(rf)
+
+
+    def output(self):
+        save_path = os.path.join( PipelineParameter().cache, "RandomForestXyFromGt.pkl"  )
         return PickleTarget(save_path)
