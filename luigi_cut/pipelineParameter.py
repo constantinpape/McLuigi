@@ -18,9 +18,9 @@ class PipelineParameter(object):
     __metaclass__ = Singleton
 
     def __init__(self):
+        # TODO this should also be read from some json...
         self.cache = "/tmp/mc_cache"
-        self.nThreads = 20
-        self.MaxAniso = 20.
+        self.nThreads = 40
         self.InputFile = ""
         self.FeatureConfigFile = ""
         self.MCConfigFile = ""
@@ -32,7 +32,3 @@ class PipelineParameter(object):
 
     #def set_n_threads(n_threads):
     #    self.n_threads = n_threads
-
-    #def set_max_aniso(max_aniso):
-    #    self.max_aniso = max_aniso
-

@@ -18,7 +18,7 @@ config_logger(workflow_logger)
 
 if __name__ == '__main__':
 
-    PipelineParameter().InputFile = "../config/input_config_chunked.json"
+    PipelineParameter().InputFile = "../config/input_config_blkwsC.json"
     PipelineParameter().FeatureConfigFile = "../config/feature_config.json"
     PipelineParameter().MCConfigFile = "../config/mc_config.json"
 
@@ -36,7 +36,6 @@ if __name__ == '__main__':
 
     # TODO get central scheduler running
     luigi.run(["--local-scheduler",
-        #"--pathToInput", inputs["data"][0],
         "--pathToSeg", inputs["seg"],
         #"--pathToGt", inputs["gt"]],
         "--pathToRF", inputs["rf"]],

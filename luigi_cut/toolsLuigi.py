@@ -1,4 +1,5 @@
 import logging
+import numpy as np
 
 # call this function to configure the logger
 # change the log file / log level if necessary
@@ -10,6 +11,11 @@ def config_logger(logger):
 
     logger.setLevel(logging.INFO)
     logger.addHandler(handler)
+
+# init the workflow logger
+workflow_logger = logging.getLogger(__name__)
+config_logger(workflow_logger)
+
 
 #
 # Implementation of a disjoint-set forest
@@ -99,7 +105,7 @@ class UnionFind(object):
 
 
 # aaaaah this is ugly
-def get_blocks(shape, block_size, block_overlap);
+def get_blocks(shape, block_size, block_overlap):
 
     s_z = block_size[0]
     assert s_z < shape[0], str(s_z) + " , " + str(shape[0])
@@ -155,4 +161,4 @@ def get_blocks(shape, block_size, block_overlap);
                 block_begins.append( [start_z,start_y,start_x] )
                 block_ends.append(   [end_z,end_y,end_x] )
 
-    return block_begins, block_ends
+    return n_blocks, block_begins, block_ends

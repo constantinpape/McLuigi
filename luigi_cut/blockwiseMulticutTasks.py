@@ -161,7 +161,9 @@ class BlockwiseMulticutSolver(luigi.Task):
         workflow_logger.info("Nodes: From " + str(n_nodes) + " to " + str(n_nodes_new) )
         workflow_logger.info("Edges: From " + str(uv_ids.shape[0]) + " to " + str(n_edges_new) )
 
-        res_node_new = fusion_moves( uv_ids_new, costs_new, "reduced global", 20 )
+        # FIXME parallelism makes it slower here -> why ?!
+        #res_node_new = fusion_moves( uv_ids_new, costs_new, "reduced global", 20 )
+        res_node_new = fusion_moves( uv_ids_new, costs_new, "reduced global", 1 )
 
         assert res_node_new.shape[0] == n_nodes_new
 
@@ -216,7 +218,7 @@ class BlockwiseSubSolver(luigi.Task):
         block_overlap = mc_config["blockOverlap"]
 
         # TODO this function is implemented VERY ugly, best to replace this with vigra or nifty functionality
-        block_begins, block_ends = get_blocks(seg.shape, block_size, block_overlap)
+        n_blocks, block_begins, block_ends = get_blocks(seg.shape, block_size, block_overlap)
 
         #nWorkers = 1
         nWorkers = min( n_blocks, PipelineParameter().nThreads )
