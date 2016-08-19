@@ -61,8 +61,10 @@ class BlockwiseMulticutSegmentation(luigi.Task):
     pathToSeg = luigi.Parameter()
     pathToRF  = luigi.Parameter()
 
+    numberOfLevels = luigi.Parameter(default = 2)
+
     def requires(self):
-        return { "McNodes" : BlockwiseMulticutSolver( self.pathToSeg, self.pathToRF ),
+        return { "McNodes" : BlockwiseMulticutSolver( self.pathToSeg, self.pathToRF, self.numberOfLevels ),
                 "Rag" : StackedRegionAdjacencyGraph(self.pathToSeg),
                 "Seg" : ExternalSegmentation(self.pathToSeg)}
 

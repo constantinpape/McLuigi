@@ -35,9 +35,12 @@ if __name__ == '__main__':
     workflow_logger.info("Writing cache to: " + inputs["cache"])
 
     # TODO get central scheduler running
+    # maybe replace this with a subprocess call, because this seems to be more flexible
     luigi.run(["--local-scheduler",
         "--pathToSeg", inputs["seg"],
         #"--pathToGt", inputs["gt"]],
+        #"--numberOfLevels", 1,
         "--pathToRF", inputs["rf"]],
+        #main_task_cls = MulticutSegmentation)
         main_task_cls = BlockwiseMulticutSegmentation)
         #main_task_cls = SingleRandomForestFromGt)

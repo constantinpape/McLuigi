@@ -113,18 +113,20 @@ class HDF5DataTarget(FileSystemTarget):
             except OSError:
                 pass
 
-    def __init__(self, path, key = "data"):
+    def __init__(self, path):
         super(HDF5DataTarget, self).__init__(path)
-        self.key = key
 
     def open(self):
         raise AttributeError("Not implemented")
 
-    def write(self, data):
-        vigra.writeHDF5(data, self.path, self.key)
+    def write(self, data, key = "data", compression = None):
+        if compression != None:
+            vigra.writeHDF5(data, self.path, key, compression = compression)
+        else:
+            vigra.writeHDF5(data, self.path, key)
 
-    def read(self):
-        return vigra.readHDF5(self.path, self.key)
+    def read(self, key = "data" ):
+        return vigra.readHDF5(self.path, key)
 
 
 class PickleTarget(FileSystemTarget):

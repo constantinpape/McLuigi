@@ -36,14 +36,12 @@ class McSolverFusionMoves(luigi.Task):
         with open(PipelineParameter().MCConfigFile, 'r') as f:
             mc_config = json.load(f)
 
-        mcProblem = self.input().read()
+        mcProblem = self.input()
 
-        uvIds     = mcProblem[:,:2]
-        edgeCosts = mcProblem[:,2]
-        nVariables = uvIds.max() + 1
+        g = nifty.graph.UndirectedGraph()
 
-        g = nifty.graph.UndirectedGraph(int(nVariables))
-        g.insertEdges(uvIds)
+        edgeCosts = mcProblem.read("costs")
+        g.deserialize(mcProblem.read("graph"))
 
         assert g.numberOfEdges == edgeCosts.shape[0]
 
@@ -109,15 +107,12 @@ class McSolverExact(luigi.Task):
         with open(PipelineParameter().MCConfigFile, 'r') as f:
             mc_config = json.load(f)
 
-        # TODO use the parameters for initialising the solver!
-        mcProblem = self.input().read()
+        mcProblem = self.input()
 
-        uvIds     = mcProblem[:,:2]
-        edgeCosts = mcProblem[:,2]
-        nVariables = uvIds.max() + 1
+        g = nifty.graph.UndirectedGraph()
 
-        g = nifty.graph.UndirectedGraph(int(nVariables))
-        g.insertEdges(uvIds)
+        edgeCosts = mcProblem.read("costs")
+        g.deserialize(mcProblem.read("graph"))
 
         assert g.numberOfEdges == edgeCosts.shape[0]
 
@@ -227,8 +222,16 @@ class McProblem(luigi.Task):
         assert np.isfinite( edge_costs.min() ), str(edge_costs.min())
         assert np.isfinite( edge_costs.max() ), str(edge_costs.max())
 
+        nVariables = uvIds.max() + 1
+        g = nifty.graph.UndirectedGraph(int(nVariables))
+        g.insertEdges(uvIds)
+
         # write concatenation of uvids and edge costs
-        self.output().write( np.concatenate( [uvIds, edge_costs[:,None]], axis = 1 ) )
+        out = self.output()
+
+        assert g.numberOfEdges == edge_costs.shape[0]
+        out.write( g.serialize(), "graph" )
+        out.write( edge_costs, "costs")
 
 
     def output(self):
