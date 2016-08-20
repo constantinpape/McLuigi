@@ -223,26 +223,18 @@ class ReducedProblem(luigi.Task):
         uvIds = g.uvIds()#.astype('uint32')
         costs  = problem.read("costs")
 
-        # TODO use something faster, maybe expose nifty ufd to python
         t_merge = time.time()
-        udf = UnionFind( numberOfNodes )
+        ufd = nifty.ufd.Ufd( numberOfNodes )
 
         mergeNodes = uvIds[cutEdges == 0]
 
         for uv in mergeNodes:
-            udf.merge(uv[0], uv[1])
+            ufd.merge(int(uv[0]), int(uv[1]))
 
-        # we need to get the result of the merging
-        new2oldNodes = udf.get_merge_result()
+        old2newNodes = ufd.elementLabeling()
+        new2oldNodes = ufd.representativesToSets()
         # number of nodes for the new problem
         numberOfNewNodes = len(new2oldNodes)
-
-        # find old to new nodes
-        old2newNodes = np.zeros( numberOfNodes, dtype = 'uint32' )
-        for setId in xrange( numberOfNewNodes ):
-            for nodeId in new2oldNodes[setId]:
-                assert nodeId < numberOfNodes, str(nodeId) + " , " + str(numberOfNodes)
-                old2newNodes[nodeId] = setId
 
         # find new edges and new edge weights
         activeEdges = np.where( cutEdges == 1 )[0]
@@ -252,10 +244,8 @@ class ReducedProblem(luigi.Task):
             node1 = old2newNodes[uvIds[edgeId,1]]
             # we have to be in different new nodes!
             assert node0 != node1, str(node0) + " , " + str(node1) + " @ edge: " + str(edgeId)
-            # need to order to always have the same keys
             uNew = min(node0, node1)
             vNew = max(node0, node1)
-            # need to check if have already come by this new edge
             if (uNew, vNew) in newEdges:
                 newEdges[(uNew,vNew)] += costs[edgeId]
             else:
