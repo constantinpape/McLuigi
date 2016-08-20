@@ -155,9 +155,9 @@ class BlockwiseMulticutSolver(luigi.Task):
         #reducedNodeResult = fusion_moves( reducedGraph, reducedCosts, "reduced global", 20 )
         reducedNodeResult = fusion_moves( reducedGraph, reducedCosts, "reduced global", 1 )
         t_inf = time.time() - t_inf
-        workflow_logger.info("Inference of reduced problem for the whole volume took: %d s" % (t_inf,))
+        workflow_logger.info("Inference of reduced problem for the whole volume took: %f s" % (t_inf,))
 
-        assert reducedNodeResult.shape[0] == len(new2old_last)
+        assert reducedNodeResult.shape[0] == len(reducedNew2Old)
 
         # project back to global problem through all hierarchy levels
         nodeResult = reducedNodeResult
@@ -218,6 +218,8 @@ class ReducedProblem(luigi.Task):
         g.deserialize(problem.read("graph"))
 
         numberOfNodes = g.numberOfNodes
+        numberOfEdges = g.numberOfEdges
+
         uvIds = g.uvIds()#.astype('uint32')
         costs  = problem.read("costs")
 
@@ -280,18 +282,18 @@ class ReducedProblem(luigi.Task):
                     global2new[global2newLast[oldNode]] = newNode
 
         t_merge = time.time() - t_merge
-        workflow_logger.info("Time for merging: %d s" % (t_merge))
+        workflow_logger.info("Time for merging: %f s" % (t_merge))
 
         workflow_logger.info("Merging of blockwise results reduced problemsize:" )
-        workflow_logger.info("Nodes: From " + str(n_nodes) + " to " + str(n_nodes_new) )
-        workflow_logger.info("Edges: From " + str(uv_ids.shape[0]) + " to " + str(n_edges_new) )
+        workflow_logger.info("Nodes: From %i to %i" % (numberOfNodes, numberOfNewNodes) )
+        workflow_logger.info("Edges: From %i to %i" % (numberOfEdges, numberOfNewEdges) )
 
         out = self.output()
         out.write(reducedGraph.serialize(), "graph")
-        out.write(costs_new, "costs")
+        out.write(newCosts, "costs")
         out.write(global2new, "global2new")
         # need to serialize this differently, because hdf5 can't natively save lists of lists
-        serializeNew2Old(out, new_to_old_nodes)
+        serializeNew2Old(out, new2oldNodes)
 
 
     def output(self):
@@ -321,8 +323,8 @@ class BlockwiseSubSolver(luigi.Task):
             nodeList = np.unique( globalSegmentation.read(blockBegin, blockEnd) )
             if self.level != 0:
                 # TODO no for loop !
-                for i in xrange(node_list.shape[0]):
-                    nodeList[i] = global2new[node_list[i]]
+                for i in xrange(nodeList.shape[0]):
+                    nodeList[i] = global2new[nodeList[i]]
             return nifty.graph.extractSubgraphFromNodes(globalGraph, nodeList)
 
         # Input
@@ -346,7 +348,7 @@ class BlockwiseSubSolver(luigi.Task):
         numberOfBlocks, blockBegins, blockEnds = get_blocks(seg.shape, self.blockSize, self.blockOverlaps)
 
         #nWorkers = 1
-        nWorkers = min( n_blocks, PipelineParameter().nThreads )
+        nWorkers = min( numberOfBlocks, PipelineParameter().nThreads )
 
         t_extract = time.time()
 
@@ -361,7 +363,7 @@ class BlockwiseSubSolver(luigi.Task):
         assert len(subProblems) == numberOfBlocks, str(len(subProblems)) + " , " + str(numberOfBlocks)
 
         t_extract = time.time() - t_extract
-        workflow_logger.info( "Extraction time for subproblems %d s" % (t_extract,) )
+        workflow_logger.info( "Extraction time for subproblems %f s" % (t_extract,) )
 
         t_inf_total = time.time()
 
@@ -373,7 +375,7 @@ class BlockwiseSubSolver(luigi.Task):
         subResults = [task.result() for task in tasks]
 
         t_inf_total = time.time() - t_inf_total
-        workflow_logger.info( "Inference time total for subproblems %s s" % (t_inf_total,))
+        workflow_logger.info( "Inference time total for subproblems %f s" % (t_inf_total,))
 
         cutEdges = np.zeros( numberOfEdges, dtype = np.uint8 )
 
@@ -383,7 +385,7 @@ class BlockwiseSubSolver(luigi.Task):
 
             # get the cut edges from the subproblem
             nodeResult = subResults[blockId]
-            subUvIds = subProblems[blockId][2]
+            subUvIds = subProblems[blockId][2].uvIds()
 
             ru = nodeResult[subUvIds[:,0]]
             rv = nodeResult[subUvIds[:,1]]
@@ -393,7 +395,7 @@ class BlockwiseSubSolver(luigi.Task):
             cutEdges[subProblems[blockId][0]] += edgeResult
 
             # add up outer edges
-            cut_edges[subProblems[blockId][1]] += 1
+            cutEdges[subProblems[blockId][1]] += 1
 
         # all edges which are cut at least once will be cut
         cutEdges[cutEdges >= 1] = 1

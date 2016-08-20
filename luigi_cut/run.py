@@ -18,7 +18,7 @@ config_logger(workflow_logger)
 
 if __name__ == '__main__':
 
-    PipelineParameter().InputFile = "../config/input_config_blkwsC.json"
+    PipelineParameter().InputFile = "../config/input_config_blkwsA.json"
     PipelineParameter().FeatureConfigFile = "../config/feature_config.json"
     PipelineParameter().MCConfigFile = "../config/mc_config.json"
 

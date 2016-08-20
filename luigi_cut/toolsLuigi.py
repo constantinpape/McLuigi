@@ -34,7 +34,7 @@ class Node(object):
 class UnionFind(object):
 
     def __init__(self, n_labels):
-        assert isinstance(n_labels, int), type(n_labels)
+        #assert isinstance(n_labels, int), type(n_labels)
         self.n_labels = n_labels
         self.nodes = [Node(n) for n in xrange(n_labels)]
 
