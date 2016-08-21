@@ -25,7 +25,7 @@ class MulticutSegmentation(luigi.Task):
     pathToRF  = luigi.Parameter()
 
     def requires(self):
-        return { "McNodes" : McSolverExact( McProblem(self.pathToSeg, self.pathToRF) ),
+        return { "McNodes" : McSolverFusionMoves( McProblem(self.pathToSeg, self.pathToRF) ),
                 "Rag" : StackedRegionAdjacencyGraph(self.pathToSeg),
                 "Seg" : ExternalSegmentation(self.pathToSeg)}
 

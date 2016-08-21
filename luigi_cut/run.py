@@ -41,6 +41,6 @@ if __name__ == '__main__':
         #"--pathToGt", inputs["gt"]],
         #"--numberOfLevels", 1,
         "--pathToRF", inputs["rf"]],
-        #main_task_cls = MulticutSegmentation)
-        main_task_cls = BlockwiseMulticutSegmentation)
+        main_task_cls = MulticutSegmentation)
+        #main_task_cls = BlockwiseMulticutSegmentation)
         #main_task_cls = SingleRandomForestFromGt)

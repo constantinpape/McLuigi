@@ -86,7 +86,12 @@ def fusion_moves(g, costs, blockId, parallelProposals):
 
     t_inf = time.time()
     ret = greedy.optimize()
-    ret = solver.optimize(nodeLabels=ret)
+
+    # test time limit
+    #visitor = obj.MulticutVerboseVisitor(100, 10) # print, timeLimit
+    #ret = solver.optimize(nodeLabels=ret, visitor = visitor)
+
+    #ret = solver.optimize(nodeLabels=ret)
     t_inf = time.time() - t_inf
 
     workflow_logger.debug("Inference for block " + str(blockId) + " with fusion moves solver in " + str(t_inf) + " s")

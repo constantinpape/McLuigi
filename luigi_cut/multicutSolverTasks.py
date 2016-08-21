@@ -47,7 +47,7 @@ class McSolverFusionMoves(luigi.Task):
 
         obj = nifty.graph.multicut.multicutObjective(g, edgeCosts)
 
-        workflow_logger.info("Solving multicut problem with %i number of variables" % (nVariables,))
+        workflow_logger.info("Solving multicut problem with %i number of variables" % (g.numberOfNodes,))
         workflow_logger.info("Using the fusion moves solver from nifty")
 
         greedy = obj.greedyAdditiveFactory().create(obj)
@@ -62,7 +62,8 @@ class McSolverFusionMoves(luigi.Task):
         )
 
         solver = obj.fusionMoveBasedFactory(
-            verbose=mc_config["verbose"],
+            #verbose=mc_config["verbose"],
+            verbose=2,
             fusionMove=obj.fusionMoveSettings(mcFactory=ilpFac),
             proposalGen=obj.watershedProposals(sigma=mc_config["sigmaFusion"],seedFraction=mc_config["seedFraction"]),
             numberOfIterations=mc_config["numIt"],
@@ -72,7 +73,13 @@ class McSolverFusionMoves(luigi.Task):
             fuseN=mc_config["numFuse"],
         ).create(obj)
 
+        ## test time limit
+        #visitor = obj.multicutVerboseVisitor(1, 1) # print, timeLimit
+        #print "Starting to optimize with time limit"
+        #ret = solver.optimize(nodeLabels=ret, visitor=visitor)
+
         ret = solver.optimize(nodeLabels=ret)
+
         t_inf = time.time() - t_inf
         workflow_logger.info("Inference with fusion move solver in %i s" % (t_inf,))
 
@@ -118,7 +125,7 @@ class McSolverExact(luigi.Task):
 
         obj = nifty.graph.multicut.multicutObjective(g, edgeCosts)
 
-        workflow_logger.info("Solving multicut problem with %i number of variables" % (nVariables,))
+        workflow_logger.info("Solving multicut problem with %i number of variables" % (g.numberOfNodes,))
         workflow_logger.info("Using the exact solver from nifty")
 
         solver = obj.multicutIlpFactory(ilpSolver='cplex',verbose=0,
@@ -127,7 +134,14 @@ class McSolverExact(luigi.Task):
         ).create(obj)
 
         t_inf = time.time()
+
+        # test time limit
+        #visitor = obj.multicutVerboseVisitor(100, 10) # print, timeLimit
+        #print "Starting to optimize with time limit"
+        #ret = solver.optimize(visitor = visitor)
+
         ret = solver.optimize()
+
         t_inf = time.time() - t_inf
         workflow_logger.info("Inference with exact solver in %i s" % (t_inf,))
 
@@ -144,7 +158,7 @@ class McSolverExact(luigi.Task):
 
 
     def output(self):
-        save_path = os.path.join( PipelineParameter().cache, "McSoverExact.h5")
+        save_path = os.path.join( PipelineParameter().cache, "McSolverExact.h5")
         return HDF5DataTarget( save_path )
 
 
