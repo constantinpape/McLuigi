@@ -32,7 +32,6 @@ class ExternalRandomForest(luigi.Task):
         return PickleTarget(self.RFPath)
 
 
-# TODO implement two random forests
 # TODO log times
 
 class EdgeProbabilitiesFromSingleRandomForest(luigi.Task):
@@ -53,7 +52,6 @@ class EdgeProbabilitiesFromSingleRandomForest(luigi.Task):
         rf = self.input()["rf"].read()
         features = np.concatenate( [feat.read() for feat in self.input()["features"]], axis = 1 )
         probs = rf.predict_proba(features)[:,1]
-
         t_pred = time.time() - t_pred
         workflow_logger.info("Predicted RF in: " + str(t_pred) + " s")
 
@@ -133,8 +131,58 @@ class EdgeGroundtruth(luigi.Task):
 
 
     def output(self):
-        save_path = os.path.join( PipelineParameter().cache, "EdgeGroundtruth.h5"  )
+        save_path = os.path.join( PipelineParameter().cache, "EdgeGroundtruth_%s.h5" % (self.pathToSeg)  )
         return HDF5DataTarget( save_path  )
+
+
+
+class SingleRandomForestFromMultipleInputs(luigi.Task):
+
+    pathsToSeg = luigi.ListParameter()
+    pathsToGt  = luigi.ListParameter()
+
+    def requires(self):
+        # This way of generating the features is quite hacky, but it is the
+        # least ugly way I could come up with till now.
+        # and as long as we only use the pipeline for deploymeny it should be alright
+        assert len(self.pathsToSeg) == len(self.pathsToGt)
+        feature_tasks = get_local_features_for_multiinp()
+        assert len(feature_tasks) == 2 * len(self.pathsToSeg)
+        gts = [EdgeGroundtruth(self.pathsToSeg[i], self.pathsToGt[i]) for i in xrange(len(self.pathsToSeg))]
+        return {"gts" : EdgeGroundtruth(self.pathToSeg, self.pathToGt), "features" : feature_tasks}
+
+    def run(self):
+
+        inp = self.input()
+        gt = inp["gts"].read()
+        gt = np.concatenate(gt)
+        features = inp["features"]
+        features_for_concat = []
+        for f in xrange(len(features)/2):
+            f_id0 = 2*f
+            f_id1 = 2*f + 1
+            features_for_concat.append( np.concatenate( features[f_id0].read(), features[f_id1].read() ), axis = 1 )
+        features = np.concatenate( [feat for feat in features_for_concat, axis = 0 )
+
+        assert features.shape[0] == gt.shape[0], str(features.shape[0]) + " , " + str(gt.shape[0])
+
+        # TODO rf options - we shouldn't train to full purity etc. - pretty inefficient...
+        # + OOB
+        rf = RandomForestClassifier(n_jobs = PipelineParameter().nThreads)
+
+        t_learn = time.time()
+        rf.fit(features, gt)
+        t_learn = time.time() - t_learn
+        workflow_logger.info("Learned RF in: " + str(t_learn) + " s")
+
+        self.output().write(rf)
+
+
+    def output(self):
+        save_path = os.path.join( PipelineParameter().cache, "SingleRandomForestFromMultipleInputs.pkl"  )
+        return PickleTarget(save_path)
+
+
 
 
 

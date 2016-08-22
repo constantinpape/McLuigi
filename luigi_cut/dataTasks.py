@@ -221,4 +221,4 @@ class StackedRegionAdjacencyGraph(luigi.Task):
 
 
     def output(self):
-        return StackedRagTarget( os.path.join(PipelineParameter().cache, "StackedRegionAdjacencyGraph.h5") )
+        return StackedRagTarget( os.path.join(PipelineParameter().cache, "StackedRegionAdjacencyGraph_%s.h5" % (self.pathToSeg,)) )

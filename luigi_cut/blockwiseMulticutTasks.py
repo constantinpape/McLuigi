@@ -88,7 +88,7 @@ def fusion_moves(g, costs, blockId, parallelProposals):
     ret = greedy.optimize()
 
     # test time limit
-    #visitor = obj.MulticutVerboseVisitor(100, 10) # print, timeLimit
+    #visitor = obj.multicutVerboseVisitor(100, 10) # print, timeLimit
     #ret = solver.optimize(nodeLabels=ret, visitor = visitor)
 
     #ret = solver.optimize(nodeLabels=ret)
@@ -315,12 +315,17 @@ class BlockwiseSubSolver(luigi.Task):
     def run(self):
 
         def extract_subproblems(globalSegmentation, globalGraph, blockBegin, blockEnd,  global2new):
+            # TODO better to implement this in cpp ?! -> nifty::hdf5
             nodeList = np.unique( globalSegmentation.read(blockBegin, blockEnd) )
             if self.level != 0:
                 # TODO no for loop !
                 for i in xrange(nodeList.shape[0]):
                     nodeList[i] = global2new[nodeList[i]]
+                nodeList = np.unique(nodeList)
             return nifty.graph.extractSubgraphFromNodes(globalGraph, nodeList)
+
+        #def extract_subproblems(globalGraph, blockBegin, blockEnd,  global2new):
+        #    return nifty.graph.extractSubgraphFromNodes(globalGraph, nodeList, global2new)
 
         # Input
         inp = self.input()
@@ -335,6 +340,7 @@ class BlockwiseSubSolver(luigi.Task):
         numberOfEdges = graph.numberOfEdges
 
         if self.level == 0:
+            # TODO this needs to be the identity for level 0
             global2newNodes = None
         else:
             global2newNodes = problem.read("global2new")

@@ -69,6 +69,47 @@ def get_local_features():
     return feature_tasks
 
 
+# read the feature configuration from PipelineParams.FeatureConfigFile
+# and return the corresponding feature tasks
+def get_local_features_for_multiinp():
+    # load the paths to input files
+    with open(PipelineParameter().InputFile, 'r') as f:
+        inputs = json.load(f)
+    # load the feature config
+    with open(PipelineParameter().FeatureConfigFile, 'r') as f:
+        feat_params = json.load(f)
+
+    feature_tasks = []
+    features = feat_params["features"]
+    if not isinstance(features, list):
+        features = [features,]
+
+    input_data = inputs["data"]
+    if not isinstance(input_data, list):
+        input_data = [input_data,]
+
+    segs = inputs["seg"]
+
+    assert len(input_data) == len(segs)
+
+    for i in xrange(len(segs)):
+        inp0 = 2*i
+        inp1 = 2*i + 1
+        if "raw" in features:
+            # by convention we assume that the raw data is given as 0th
+            feature_tasks.append( EdgeFeatures(input_data[inp0], segs[i]) ) #, filternames, sigmas) )
+            workflow_logger.debug("Calculating Edge Features from raw input: " + input_data[0])
+        if "prob" in features:
+            # by convention we assume that the membrane probs are given as 1st
+            feature_tasks.append( EdgeFeatures(input_data[inp1], segs[i] ) ) #, filternames, sigmas) )
+            workflow_logger.debug("Calculating Edge Features from probability maps: " + input_data[1])
+        if "reg" in features:
+            feature_tasks.append( RegionFeatures(input_data[inp0], segs[i]) )
+            workflow_logger.debug("Calculating Region Features")
+
+    return feature_tasks
+
+
 class RegionFeatures(luigi.Task):
 
     pathToInput = luigi.Parameter()
@@ -211,7 +252,7 @@ class RegionFeatures(luigi.Task):
 
 
     def output(self):
-        return HDF5DataTarget( os.path.join( PipelineParameter().cache, "RegionFeatures.h5" ) )
+        return HDF5DataTarget( os.path.join( PipelineParameter().cache, "RegionFeatures_%s.h5" % (self.pathToSeg) ) )
 
 
 class EdgeFeatures(luigi.Task):
@@ -245,7 +286,7 @@ class EdgeFeatures(luigi.Task):
 
 
     def output(self):
-        return HDF5DataTarget( os.path.join( PipelineParameter().cache, "EdgeFeatures.h5" ) )
+        return HDF5DataTarget( os.path.join( PipelineParameter().cache, "EdgeFeatures_%s_%s.h5" % (self.pathToSeg, self.pathToInput) ) )
 
 
 # TODO in nifty ??
