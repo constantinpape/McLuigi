@@ -90,7 +90,7 @@ def get_local_features_for_multiinp():
 
     segs = inputs["seg"]
 
-    assert len(input_data) == len(segs)
+    assert len(input_data) == 2*len(segs)
 
     for i in xrange(len(segs)):
         inp0 = 2*i
@@ -122,38 +122,6 @@ class RegionFeatures(luigi.Task):
 
     def run(self):
 
-        # get region statistics with the vigra region feature extractor
-        def extractRegionStatsSlice(dataSlice, segSlice, sliceMinNode, sliceMaxNode, statistics):
-
-            extractor = vigra.analysis.extractRegionFeatures(dataSlice, segSlice, features = statistics )
-
-            regionStatistics = []
-            regionCenters    = []
-
-            # the 'normal' region statistics
-            for statName in statistics[0:9]:
-                # only keep the nodes that are in this slice (others are zero anyway!)
-                stat = extractor[statName][sliceMinNode:sliceMaxNode]
-                if stat.ndim == 1:
-                    regionStatistics.append(stat[:,None])
-                else:
-                    regionStatistics.append(stat)
-
-            regionStatistics = np.concatenate(regionStatistics, axis = 1)
-
-            # the region center differences, that art treated seperately
-            for statName in statistics[9:11]:
-                # only keep the nodes that are in this slice (others are zero anyway!)
-                stat = extractor[statName][sliceMinNode:sliceMaxNode]
-                if stat.ndim == 1:
-                    regionCenters.append(stat[:,None])
-                else:
-                    regionCenters.append(stat)
-
-            regionCenters = np.concatenate(regionCenters, axis=1)
-
-            return (regionStatistics, regionCenters)
-
         import gc
 
         t_feats = time.time()
@@ -181,6 +149,45 @@ class RegionFeatures(luigi.Task):
                         "RegionRadii", "Skewness", "Sum",
                         "Variance", "Weighted<RegionCenter>", "RegionCenter"]
 
+
+        # get region statistics with the vigra region feature extractor for a single slice
+        def extractRegionStatsSlice(start, end, z):
+
+            minNode = minMaxNodeSlice[z,0]
+
+            dataSlice = data.read(start,end).squeeze().astype('float32')
+            segSlice  = seg.read(start,end).squeeze() - minNode
+
+            extractor = vigra.analysis.extractRegionFeatures(dataSlice, segSlice, features = statistics )
+
+            regionStatistics = []
+            regionCenters    = []
+
+            # the 'normal' region statistics
+            for statName in statistics[0:9]:
+                # only keep the nodes that are in this slice (others are zero anyway!)
+                stat = extractor[statName]
+                if stat.ndim == 1:
+                    regionStatistics.append(stat[:,None])
+                else:
+                    regionStatistics.append(stat)
+
+            regionStatistics = np.concatenate(regionStatistics, axis = 1)
+
+            # the region center differences, that art treated seperately
+            for statName in statistics[9:11]:
+                # only keep the nodes that are in this slice (others are zero anyway!)
+                stat = extractor[statName]
+                if stat.ndim == 1:
+                    regionCenters.append(stat[:,None])
+                else:
+                    regionCenters.append(stat)
+
+            regionCenters = np.concatenate(regionCenters, axis=1)
+
+            return (regionStatistics, regionCenters)
+
+
         nWorkers = min( shape[0], PipelineParameter().nThreads )
         #nWorkers = 1
         with futures.ThreadPoolExecutor(max_workers=nWorkers) as executor:
@@ -188,21 +195,19 @@ class RegionFeatures(luigi.Task):
             for z in xrange(shape[0]):
                 start = [z,0,0]
                 end   = [z+1,shape[1],shape[2]]
-                minNode = minMaxNodeSlice[z,0]
-                maxNode = minMaxNodeSlice[z,1]
-                tasks.append( executor.submit(extractRegionStatsSlice, data.read(start,end).squeeze(), seg.read(start,end).squeeze(),
-                    minNode, maxNode, statistics) )
+                tasks.append( executor.submit(extractRegionStatsSlice, start, end, z) )
 
         results = [task.result() for task in tasks]
 
         regionStatistics = np.zeros( (nNodes, results[0][0].shape[1]) )
         regionCenters    = np.zeros( (nNodes, results[0][1].shape[1]) )
 
+        # TODO should be vectorized or also done in parallel
         for z, res in enumerate(results):
             minNode    = minMaxNodeSlice[z,0]
             maxNode    = minMaxNodeSlice[z,1]
-            regionStatistics[minNode:maxNode] = res[0]
-            regionCenters[minNode:maxNode] = res[1]
+            regionStatistics[minNode:maxNode+1] = res[0]
+            regionCenters[minNode:maxNode+1] = res[1]
 
         # we actively delete stuff we don't need to free memory
         # because this may become memory consuming for lifted edges
@@ -252,7 +257,9 @@ class RegionFeatures(luigi.Task):
 
 
     def output(self):
-        return HDF5DataTarget( os.path.join( PipelineParameter().cache, "RegionFeatures_%s.h5" % (self.pathToSeg) ) )
+        segFile = os.path.split(self.pathToSeg)[1][:-3]
+        save_path = os.path.join( PipelineParameter().cache, "RegionFeatures_%s.h5" % (segFile,) )
+        return HDF5DataTarget( save_path )
 
 
 class EdgeFeatures(luigi.Task):
@@ -274,11 +281,16 @@ class EdgeFeatures(luigi.Task):
         inp = self.input()
         rag = inp[0].read()
 
+        #print rag.numberOfEdges
+        #print rag.totalNumberOfInSliceEdges
+        #print rag.totalNumberOfInBetweenSliceEdges
+        #quit()
+
         inp[1].open()
         data = inp[1].get()
 
         t_feats = time.time()
-        edge_features = np.nan_to_num( nifty.graph.rag.accumulateEdgeStatisticsFromFilters(rag, data) ) # nthreads
+        edge_features = nifty.graph.rag.accumulateEdgeFeaturesFromFilters(rag, data, -1) #, nthreads)
         t_feats = time.time() - t_feats
         workflow_logger.info("Calculated Edge Features in: " + str(t_feats) + " s")
 
@@ -286,7 +298,10 @@ class EdgeFeatures(luigi.Task):
 
 
     def output(self):
-        return HDF5DataTarget( os.path.join( PipelineParameter().cache, "EdgeFeatures_%s_%s.h5" % (self.pathToSeg, self.pathToInput) ) )
+        segFile = os.path.split(self.pathToSeg)[1][:-3]
+        inpFile = os.path.split(self.pathToInput)[1][:-3]
+        save_path = os.path.join( PipelineParameter().cache, "EdgeFeatures_%s_%s.h5" % (segFile,inpFile)  )
+        return HDF5DataTarget( save_path )
 
 
 # TODO in nifty ??

@@ -180,7 +180,7 @@ class McProblem(luigi.Task):
 
         inp = self.input()
         rag = inp["Rag"].read()
-        probs = inp["EdgeProbabilities"].read()
+        edgeCosts = inp["EdgeProbabilities"].read()
 
         uvIds = rag.uvIds()
 
@@ -188,12 +188,12 @@ class McProblem(luigi.Task):
         # this is pretty arbitrary, it used to be 1. / n_tress, but this does not make that much sense for sklearn impl
         p_min = 0.001
         p_max = 1. - p_min
-        probs = (p_max - p_min) * probs + p_min
+        edgeCosts = (p_max - p_min) * edgeCosts + p_min
 
         beta = mc_config["beta"]
 
         # probabilities to energies, second term is boundary bias
-        edge_costs = np.log( (1. - probs) / probs ) + np.log( (1. - beta) / beta )
+        edgeCosts = np.log( (1. - edgeCosts) / edgeCosts ) + np.log( (1. - beta) / beta )
 
         # weight edge costs
         weighting_scheme = mc_config["weightingScheme"]
@@ -201,19 +201,19 @@ class McProblem(luigi.Task):
 
         workflow_logger.info("Weighting edge costs with scheme " + weighting_scheme + " and weight " + str(weight) )
         if weighting_scheme == "z":
-            edgeLens = np.array(rag.edgeLengths)
-            assert edgeLens.shape[0] == edge_costs.shape[0], str(edgeLens.shape[0]) + " , " + str(edge_costs.shape[0])
+            edgeLens = rag.edgeLengths()
+            assert edgeLens.shape[0] == edgeCosts.shape[0], str(edgeLens.shape[0]) + " , " + str(edgeCosts.shape[0])
 
             edgeTransition = rag.totalNumberOfInSliceEdges
 
             z_max = float( np.max( edgeLens[edgeTransition:] ) )
             # we only weight the z edges !
             w = weight * edgeLens[edgeTransition:] / z_max
-            edge_costs[edgeTransition:] = np.multiply(w, edge_costs[edgeTransition:])
+            edgeCosts[edgeTransition:] = np.multiply(w, edgeCosts[edgeTransition:])
 
         elif weighting_scheme == "xyz":
-            edgeLens = np.array(rag.edgeLengths)
-            assert edgesLen.shape[0] == edge_costs.shape[0]
+            edgeLens = rag.edgeLengths()
+            assert edgesLen.shape[0] == edgeCosts.shape[0]
 
             edgeTransition = rag.totalNumberOfInSliceEdges
 
@@ -221,20 +221,20 @@ class McProblem(luigi.Task):
             xy_max = float( np.max( edgeLens[:edgeTransition] ) )
             w_z = weight * edgeLens[edgeTransition:] / z_max
             w_xy = weight * edgeLens[:edgeTransition] / xy_max
-            edge_costs[edgeTransition:] = np.multiply(w_z, edge_costs[edgeTransition:])
-            edge_costs[:edgeTransition] = np.multiply(w_xy, edge_costs[:edgeTransition])
+            edgeCosts[edgeTransition:] = np.multiply(w_z,  edgeCosts[edgeTransition:])
+            edgeCosts[:edgeTransition] = np.multiply(w_xy, edgeCosts[:edgeTransition])
 
         elif weighting_scheme == "all":
-            edgeLens = np.array(rag.edgeLengths)
-            assert edgesLen.shape[0] == edge_costs.shape[0]
+            edgeLens = rag.edgeLengths()
+            assert edgesLen.shape[0] == edgeCosts.shape[0]
 
             edge_max  = float( np.max( edgesLens) )
             w  = weight * edgeLens / edge_max
-            edge_costs = np.multiply(w, edge_costs)
+            edgeCosts = np.multiply(w, edgeCosts)
 
-        assert edge_costs.shape[0] == uvIds.shape[0]
-        assert np.isfinite( edge_costs.min() ), str(edge_costs.min())
-        assert np.isfinite( edge_costs.max() ), str(edge_costs.max())
+        assert edgeCosts.shape[0] == uvIds.shape[0]
+        assert np.isfinite( edgeCosts.min() ), str(edgeCosts.min())
+        assert np.isfinite( edgeCosts.max() ), str(edgeCosts.max())
 
         nVariables = uvIds.max() + 1
         g = nifty.graph.UndirectedGraph(int(nVariables))
@@ -243,9 +243,9 @@ class McProblem(luigi.Task):
         # write concatenation of uvids and edge costs
         out = self.output()
 
-        assert g.numberOfEdges == edge_costs.shape[0]
+        assert g.numberOfEdges == edgeCosts.shape[0]
         out.write( g.serialize(), "graph" )
-        out.write( edge_costs, "costs")
+        out.write( edgeCosts, "costs")
 
 
     def output(self):

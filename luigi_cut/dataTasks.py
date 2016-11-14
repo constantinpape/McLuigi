@@ -32,17 +32,10 @@ class InputData(luigi.Task):
     path = luigi.Parameter()
     key  = luigi.Parameter(default = "data")
     # the dtype, should either be float32 or uint8
-    dtype = luigi.Parameter(default = np.float32)
+    dtype = luigi.Parameter(default = "float32")
 
     def run(self):
-        f = h5py.File(self.path, 'r')
-        assert key in f.keys(), key + " , " + f.keys()
-        dset = f[key]
-        # TODO is this ok ?
-        if self.dtype != f.dtype:
-            print "InputData task, loading data from", self.path
-            print "Changing dtype from", self.dtype, "to", f.dtype
-            self.dtype = dset.dtype
+        pass
 
 
     def output(self):
@@ -52,6 +45,15 @@ class InputData(luigi.Task):
         :return: Target output
         :rtype: object( :py:class: HDF5Target)
         """
+
+        f = h5py.File(self.path, 'r')
+        assert self.key in f.keys(), self.key + " , " + f.keys()
+        dset = f[self.key]
+
+        if np.dtype(self.dtype) != np.dtype(dset.dtype):
+            workflow_logger.debug("InputData task, loading data from %s" % (self.path,) )
+            workflow_logger.debug("Changing dtype from %s to %s" % (self.dtype,dset.dtype) )
+            self.dtype = dset.dtype
 
         return HDF5VolumeTarget(self.path, self.dtype, self.key)
 
@@ -66,22 +68,30 @@ class ExternalSegmentation(luigi.Task):
     path = luigi.Parameter()
     key  = luigi.Parameter(default = "data")
     # the dtype, should either be uint32 or uint64
-    dtype = luigi.Parameter(default = np.uint32)
+    dtype = luigi.Parameter(default = "uint32")
 
     def run(self):
-
-        f = h5py.File(self.path, 'r')
-        assert key in f.keys(), key + " , " + f.keys()
-        dset = f[key]
-        # TODO is this ok ?
-        if self.dtype != dset.dtype:
-            print "ExternalSegmentation task, loading data from", self.path
-            print "Changing dtype from", self.dtype, "to", dset.dtype
-            self.dtype = dset.dtype
+        pass
 
 
     def output(self):
-        return HDF5VolumeTarget(self.path, self.dtype, self.key )
+        """
+        Returns the target output.
+
+        :return: Target output
+        :rtype: object( :py:class: HDF5Target)
+        """
+
+        f = h5py.File(self.path, 'r')
+        assert self.key in f.keys(), self.key + " , " + f.keys()
+        dset = f[self.key]
+
+        if np.dtype(self.dtype) != np.dtype(dset.dtype):
+            workflow_logger.debug("InputData task, loading data from %s" % (self.path,) )
+            workflow_logger.debug("Changing dtype from %s to %s" % (self.dtype,dset.dtype) )
+            self.dtype = dset.dtype
+
+        return HDF5VolumeTarget(self.path, self.dtype, self.key)
 
 
 
@@ -95,7 +105,7 @@ class ExternalSegmentationLabeled(luigi.Task):
     pathToSeg = luigi.Parameter()
     keyToSeg  = luigi.Parameter(default = "data")
     # the dtype, should either be uint32 or uint64
-    dtype = luigi.Parameter(default = np.uint32)
+    dtype = luigi.Parameter(default = "uint32")
 
     def requires(self):
         return ExternalSegmentation(self.pathToSeg, self.keyToSeg, self.dtype )
@@ -152,6 +162,15 @@ class ExternalSegmentationLabeled(luigi.Task):
 
 
     def output(self):
+        f = h5py.File(self.path, 'r')
+        assert self.key in f.keys(), self.key + " , " + f.keys()
+        dset = f[self.key]
+
+        if np.dtype(self.dtype) != np.dtype(dset.dtype):
+            workflow_logger.debug("InputData task, loading data from %s" % (self.path,) )
+            workflow_logger.debug("Changing dtype from %s to %s" % (self.dtype,dset.dtype) )
+            self.dtype = dset.dtype
+
         save_path = os.path.join( PipelineParameter().cache,
                 os.path.split(self.pathToSeg)[1][:-3] + "_labeled.h5" )
         return HDF5VolumeTarget( save_path, self.dtype )
@@ -207,12 +226,22 @@ class StackedRegionAdjacencyGraph(luigi.Task):
 
         seg.open()
         shape = seg.shape
+
+        print shape
+
         seg_last = seg.read( [shape[0]-1,0,0], shape )
 
         n_labels = seg_last.max() + 1
 
+        print "NumberOfLabels:", n_labels
+
+        #print
+        #print "Cache Settings:"
+        #print nifty.hdf5.getCacheSettings(seg.get())
+        #print
+
         t_rag = time.time()
-        rag = nifty.graph.rag.gridRagStacked2DHdf5( seg.get(), n_labels) # nThreads = -1, could also make this accessible
+        rag = nifty.graph.rag.gridRagStacked2DHdf5( seg.get(), n_labels, numberOfThreads = -1) # nThreads = -1, could also make this accessible
         t_rag = time.time() - t_rag
 
         workflow_logger.info("Computed RAG in " + str(t_rag) + " s")
@@ -221,4 +250,6 @@ class StackedRegionAdjacencyGraph(luigi.Task):
 
 
     def output(self):
-        return StackedRagTarget( os.path.join(PipelineParameter().cache, "StackedRegionAdjacencyGraph_%s.h5" % (self.pathToSeg,)) )
+        segFile = os.path.split(self.pathToSeg)[1][:-3]
+        save_path = "StackedRegionAdjacencyGraph_%s.h5" % (segFile,)
+        return StackedRagTarget( os.path.join(PipelineParameter().cache, save_path) )

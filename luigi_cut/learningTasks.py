@@ -4,7 +4,7 @@
 import luigi
 
 from customTargets import PickleTarget, HDF5DataTarget
-from featureTasks import get_local_features
+from featureTasks import get_local_features,get_local_features_for_multiinp
 from dataTasks import DenseGroundtruth, ExternalSegmentation, StackedRegionAdjacencyGraph
 
 from pipelineParameter import PipelineParameter
@@ -31,8 +31,6 @@ class ExternalRandomForest(luigi.Task):
     def output(self):
         return PickleTarget(self.RFPath)
 
-
-# TODO log times
 
 class EdgeProbabilitiesFromSingleRandomForest(luigi.Task):
 
@@ -131,7 +129,8 @@ class EdgeGroundtruth(luigi.Task):
 
 
     def output(self):
-        save_path = os.path.join( PipelineParameter().cache, "EdgeGroundtruth_%s.h5" % (self.pathToSeg)  )
+        segFile = os.path.split(self.pathToSeg)[1][:-3]
+        save_path = os.path.join( PipelineParameter().cache, "EdgeGroundtruth_%s.h5" % (segFile,)  )
         return HDF5DataTarget( save_path  )
 
 
@@ -149,29 +148,41 @@ class SingleRandomForestFromMultipleInputs(luigi.Task):
         feature_tasks = get_local_features_for_multiinp()
         assert len(feature_tasks) == 2 * len(self.pathsToSeg)
         gts = [EdgeGroundtruth(self.pathsToSeg[i], self.pathsToGt[i]) for i in xrange(len(self.pathsToSeg))]
-        return {"gts" : EdgeGroundtruth(self.pathToSeg, self.pathToGt), "features" : feature_tasks}
+        return {"gts" : gts, "features" : feature_tasks}
 
     def run(self):
 
         inp = self.input()
-        gt = inp["gts"].read()
-        gt = np.concatenate(gt)
+
+        gts = inp["gts"]
         features = inp["features"]
-        features_for_concat = []
+
+        feats = []
+        gt = []
+
+        assert len(features) / 2 == len(gts)
+
+        # TODO rewrite this, I don't have a clue what is going on here...
         for f in xrange(len(features)/2):
             f_id0 = 2*f
             f_id1 = 2*f + 1
-            features_for_concat.append( np.concatenate( features[f_id0].read(), features[f_id1].read() ), axis = 1 )
-        features = np.concatenate( [feat for feat in features_for_concat, axis = 0 )
 
-        assert features.shape[0] == gt.shape[0], str(features.shape[0]) + " , " + str(gt.shape[0])
+            feats.append( np.concatenate( [features[f_id0].read(), features[f_id1].read() ], axis = 1 ) )
+            gt.append(gts[f].read())
+
+            assert feats[-1].shape[0] == gt[-1].shape[0]
+
+        feats = np.concatenate( feats, axis = 0 )
+        gt    = np.concatenate( gt )
+
+        assert feats.shape[0] == gt.shape[0], str(feats.shape[0]) + " , " + str(gt.shape[0])
 
         # TODO rf options - we shouldn't train to full purity etc. - pretty inefficient...
         # + OOB
-        rf = RandomForestClassifier(n_jobs = PipelineParameter().nThreads)
+        rf = RandomForestClassifier(n_jobs = PipelineParameter().nThreads, n_estimators = 100)
 
         t_learn = time.time()
-        rf.fit(features, gt)
+        rf.fit(feats, gt)
         t_learn = time.time() - t_learn
         workflow_logger.info("Learned RF in: " + str(t_learn) + " s")
 
