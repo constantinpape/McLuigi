@@ -314,18 +314,25 @@ class BlockwiseSubSolver(luigi.Task):
 
     def run(self):
 
+        #def extract_subproblems(globalSegmentation, globalGraph, blockBegin, blockEnd,  global2new):
+        #    # TODO better to implement this in cpp ?! -> nifty::hdf5
+        #    nodeList = np.unique( globalSegmentation.read(blockBegin, blockEnd) )
+        #    if self.level != 0:
+        #        # TODO no for loop !
+        #        for i in xrange(nodeList.shape[0]):
+        #            nodeList[i] = global2new[nodeList[i]]
+        #        nodeList = np.unique(nodeList)
+        #    return nifty.graph.extractSubgraphFromNodes(globalGraph, nodeList)
+
         def extract_subproblems(globalSegmentation, globalGraph, blockBegin, blockEnd,  global2new):
-            # TODO better to implement this in cpp ?! -> nifty::hdf5
-            nodeList = np.unique( globalSegmentation.read(blockBegin, blockEnd) )
+            blockShape = [1,blockEnd[1]-blockBegin[1],blockEnd[2]-blockBegin[2]]
+            nodeList = nifty.hdf5.uniqueValuesInSubvolume(globalSegmentation.get(), blockBegin, blockEnd, blockShape)#, 1)
             if self.level != 0:
                 # TODO no for loop !
-                for i in xrange(nodeList.shape[0]):
+                for i in xrange(len(nodeList)):
                     nodeList[i] = global2new[nodeList[i]]
                 nodeList = np.unique(nodeList)
             return nifty.graph.extractSubgraphFromNodes(globalGraph, nodeList)
-
-        #def extract_subproblems(globalGraph, blockBegin, blockEnd,  global2new):
-        #    return nifty.graph.extractSubgraphFromNodes(globalGraph, nodeList, global2new)
 
         # Input
         inp = self.input()
@@ -340,7 +347,6 @@ class BlockwiseSubSolver(luigi.Task):
         numberOfEdges = graph.numberOfEdges
 
         if self.level == 0:
-            # TODO this needs to be the identity for level 0
             global2newNodes = None
         else:
             global2newNodes = problem.read("global2new")
@@ -353,7 +359,7 @@ class BlockwiseSubSolver(luigi.Task):
 
         t_extract = time.time()
 
-        with futures.ThreadPoolExecutor(max_workers=nWorkers) as executor:
+        with futures.ThreadPoolExecutor(max_workers=1) as executor:
             tasks = []
             for blockId in xrange(numberOfBlocks):
                 workflow_logger.debug( "Block id " + str(blockId) + " start " + str(blockBegins[blockId]) + " end " + str(blockEnds[blockId]) )

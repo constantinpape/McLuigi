@@ -30,7 +30,10 @@ config_logger(workflow_logger)
 
 # read the feature configuration from PipelineParams.FeatureConfigFile
 # and return the corresponding feature tasks
-def get_local_features():
+def get_local_features(xyOnly = False, zOnly = False):
+
+    assert not (xyOnly and zOnly)
+
     # load the paths to input files
     with open(PipelineParameter().InputFile, 'r') as f:
         inputs = json.load(f)
@@ -38,10 +41,17 @@ def get_local_features():
     with open(PipelineParameter().FeatureConfigFile, 'r') as f:
         feat_params = json.load(f)
 
-    feature_tasks = []
-    features = feat_params["features"]
+    if xyOnly:
+        features = feat_params["featuresXY"]
+    elif zOnly:
+        features = feat_params["featuresZ"]
+    else:
+        features = feat_params["features"]
+
     if not isinstance(features, list):
         features = [features,]
+
+    feature_tasks = []
 
     input_data = inputs["data"]
     if not isinstance(input_data, list):
@@ -56,6 +66,14 @@ def get_local_features():
         # by convention we assume that the membrane probs are given as 1st
         feature_tasks.append( EdgeFeatures(input_data[1], inputs["seg"] ) ) #, filternames, sigmas) )
         workflow_logger.debug("Calculating Edge Features from probability maps: " + input_data[1])
+    if "affinitiesXY" in features:
+        # by convention we assume that the xy - affinity channel is given as 1st input
+        feature_tasks.append( EdgeFeatures(input_data[1], inputs["seg"] ) ) #, filternames, sigmas) )
+        workflow_logger.debug("Calculating Edge Features from xy affinity maps: " + input_data[1])
+    if "affinitiesZ" in features:
+        # by convention we assume that the z - affinity channel is given as 2nd input
+        feature_tasks.append( EdgeFeatures(input_data[2], inputs["seg"] ) ) #, filternames, sigmas) )
+        workflow_logger.debug("Calculating Edge Features from z affinity maps: " + input_data[2])
     if "reg" in features:
         # by convention we calculate region features only on the raw data (0th input)
         # TODO should try it on probmaps. For big data we might spare shipping the raw data!
@@ -71,7 +89,10 @@ def get_local_features():
 
 # read the feature configuration from PipelineParams.FeatureConfigFile
 # and return the corresponding feature tasks
-def get_local_features_for_multiinp():
+def get_local_features_for_multiinp(xyOnly = False, zOnly = False):
+
+    assert not (xyOnly and zOnly)
+
     # load the paths to input files
     with open(PipelineParameter().InputFile, 'r') as f:
         inputs = json.load(f)
@@ -79,8 +100,12 @@ def get_local_features_for_multiinp():
     with open(PipelineParameter().FeatureConfigFile, 'r') as f:
         feat_params = json.load(f)
 
-    feature_tasks = []
-    features = feat_params["features"]
+    if xyOnly:
+        features = feat_params["featuresXY"]
+    elif zOnly:
+        features = feat_params["featuresZ"]
+    else:
+        features = feat_params["features"]
     if not isinstance(features, list):
         features = [features,]
 
@@ -90,21 +115,37 @@ def get_local_features_for_multiinp():
 
     segs = inputs["seg"]
 
-    assert len(input_data) == 2*len(segs)
+    nInpPerSeg = len(input_data) / len(segs)
 
+    feature_tasks = []
     for i in xrange(len(segs)):
-        inp0 = 2*i
-        inp1 = 2*i + 1
+        inp0 = nInpPerSeg*i
+        inp1 = nInpPerSeg*i + 1
+        inp2 = nInpPerSeg*i + 2
+
+        feature_tasks.append([])
+
         if "raw" in features:
             # by convention we assume that the raw data is given as 0th
-            feature_tasks.append( EdgeFeatures(input_data[inp0], segs[i]) ) #, filternames, sigmas) )
-            workflow_logger.debug("Calculating Edge Features from raw input: " + input_data[0])
+            feature_tasks[i].append( EdgeFeatures(input_data[inp0], segs[i]) ) #, filternames, sigmas) )
+            workflow_logger.debug("Calculating Edge Features from raw input: " + input_data[inp0])
         if "prob" in features:
+            assert nInpPerSeg == 2
             # by convention we assume that the membrane probs are given as 1st
-            feature_tasks.append( EdgeFeatures(input_data[inp1], segs[i] ) ) #, filternames, sigmas) )
-            workflow_logger.debug("Calculating Edge Features from probability maps: " + input_data[1])
+            feature_tasks[i].append( EdgeFeatures(input_data[inp1], segs[i] ) ) #, filternames, sigmas) )
+            workflow_logger.debug("Calculating Edge Features from probability maps: " + input_data[inp1])
+        if "affinitiesXY" in features:
+            assert nInpPerSeg == 3
+            # by convention we assume that the xy - affinity channel is given as 1st input
+            feature_tasks[i].append( EdgeFeatures(input_data[inp1], segs[i] ) ) #, filternames, sigmas) )
+            workflow_logger.debug("Calculating Edge Features from xy affinity maps: " + input_data[inp1])
+        if "affinitiesZ" in features:
+            assert nInpPerSeg == 3
+            # by convention we assume that the z - affinity channel is given as 2nd input
+            feature_tasks[i].append( EdgeFeatures(input_data[inp2], segs[i] ) ) #, filternames, sigmas) )
+            workflow_logger.debug("Calculating Edge Features from z affinity maps: " + input_data[inp2])
         if "reg" in features:
-            feature_tasks.append( RegionFeatures(input_data[inp0], segs[i]) )
+            feature_tasks[i].append( RegionFeatures(input_data[inp0], segs[i]) )
             workflow_logger.debug("Calculating Region Features")
 
     return feature_tasks

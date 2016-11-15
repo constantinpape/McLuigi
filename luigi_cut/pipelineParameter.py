@@ -24,6 +24,7 @@ class PipelineParameter(object):
         self.InputFile = ""
         self.FeatureConfigFile = ""
         self.MCConfigFile = ""
+        self.EdgeClassifierConfigFile = ""
 
     ## TODO checks...
     ## TODO this is not pythonic, overload some __ stuff instead

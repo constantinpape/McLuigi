@@ -22,10 +22,11 @@ import nifty
 class MulticutSegmentation(luigi.Task):
 
     pathToSeg = luigi.Parameter()
-    pathToRF  = luigi.Parameter()
+    pathsToClassifier  = luigi.ListParameter()
+    dtype = luigi.Parameter(default = 'uint32')
 
     def requires(self):
-        return { "McNodes" : McSolverFusionMoves( McProblem(self.pathToSeg, self.pathToRF) ),
+        return { "McNodes" : McSolverFusionMoves( McProblem(self.pathToSeg, self.pathsToClassifier) ),
                 "Rag" : StackedRegionAdjacencyGraph(self.pathToSeg),
                 "Seg" : ExternalSegmentation(self.pathToSeg)}
 
@@ -44,6 +45,9 @@ class MulticutSegmentation(luigi.Task):
         # get rid of 0 because we don't want it as segment label because it is reserved for the ignore label
         if 0 in mcNodes:
             mcNodes += 1
+
+        if np.dtype(self.dtype) != np.dtype(mcNodes.dtype):
+            self.dtype = mcNodes.dtype
 
         segOut = self.output()
         segOut.open(seg.shape)
@@ -53,18 +57,19 @@ class MulticutSegmentation(luigi.Task):
 
     def output(self):
         save_path = os.path.join( PipelineParameter().cache, "MulticutSegmentation.h5" )
-        return HDF5VolumeTarget( save_path, np.uint32 )
+        return HDF5VolumeTarget( save_path, self.dtype )
 
 
 class BlockwiseMulticutSegmentation(luigi.Task):
 
     pathToSeg = luigi.Parameter()
-    pathToRF  = luigi.Parameter()
+    pathsToClassifier  = luigi.ListParameter()
 
+    self.dtype = luigi.Parameter(default = 'uint32')
     numberOfLevels = luigi.Parameter(default = 2)
 
     def requires(self):
-        return { "McNodes" : BlockwiseMulticutSolver( self.pathToSeg, self.pathToRF, self.numberOfLevels ),
+        return { "McNodes" : BlockwiseMulticutSolver( self.pathToSeg, self.pathsToClassifier, self.numberOfLevels ),
                 "Rag" : StackedRegionAdjacencyGraph(self.pathToSeg),
                 "Seg" : ExternalSegmentation(self.pathToSeg)}
 
@@ -84,6 +89,9 @@ class BlockwiseMulticutSegmentation(luigi.Task):
         if 0 in mcNodes:
             mcNodes += 1
 
+        if np.dtype(self.dtype) != np.dtype(mcNodes.dtype):
+            self.dtype = mcNodes.dtype
+
         segOut = self.output()
         segOut.open(seg.shape)
 
@@ -92,4 +100,4 @@ class BlockwiseMulticutSegmentation(luigi.Task):
 
     def output(self):
         save_path = os.path.join( PipelineParameter().cache, "BlockwiseMulticutSegmentation.h5" )
-        return HDF5VolumeTarget( save_path, np.uint32 )
+        return HDF5VolumeTarget( save_path, self.dtype )

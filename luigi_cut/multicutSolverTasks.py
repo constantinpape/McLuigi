@@ -7,7 +7,7 @@ import os
 import time
 
 from dataTasks import StackedRegionAdjacencyGraph
-from learningTasks import EdgeProbabilitiesFromSingleRandomForest, ExternalRandomForest
+from learningTasks import EdgeProbabilities
 from customTargets import HDF5DataTarget
 
 from pipelineParameter import PipelineParameter
@@ -166,10 +166,12 @@ class McSolverExact(luigi.Task):
 class McProblem(luigi.Task):
 
     pathToSeg = luigi.Parameter()
-    pathToRF  = luigi.Parameter()
+    # this can either contain a single path (classifier trained for xy - and z - edges jointly)
+    # or two paths (classfier trained for xy - edges + classifier trained for z - edges separately)
+    pathsToClassifier  = luigi.ListParameter()
 
     def requires(self):
-        return { "EdgeProbabilities" : EdgeProbabilitiesFromSingleRandomForest( ExternalRandomForest(self.pathToRF)),
+        return { "EdgeProbabilities" : EdgeProbabilities(self.pathToSeg, self.pathsToClassifier),
                 "Rag" : StackedRegionAdjacencyGraph(self.pathToSeg) }
 
     def run(self):

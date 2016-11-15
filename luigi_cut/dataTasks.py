@@ -46,14 +46,14 @@ class InputData(luigi.Task):
         :rtype: object( :py:class: HDF5Target)
         """
 
-        f = h5py.File(self.path, 'r')
-        assert self.key in f.keys(), self.key + " , " + f.keys()
-        dset = f[self.key]
+        with h5py.File(self.path, 'r') as f:
+            assert self.key in f.keys(), self.key + " , " + f.keys()
+            dset = f[self.key]
 
-        if np.dtype(self.dtype) != np.dtype(dset.dtype):
-            workflow_logger.debug("InputData task, loading data from %s" % (self.path,) )
-            workflow_logger.debug("Changing dtype from %s to %s" % (self.dtype,dset.dtype) )
-            self.dtype = dset.dtype
+            if np.dtype(self.dtype) != np.dtype(dset.dtype):
+                workflow_logger.debug("InputData task, loading data from %s" % (self.path,) )
+                workflow_logger.debug("Changing dtype from %s to %s" % (self.dtype,dset.dtype) )
+                self.dtype = dset.dtype
 
         return HDF5VolumeTarget(self.path, self.dtype, self.key)
 
@@ -82,14 +82,15 @@ class ExternalSegmentation(luigi.Task):
         :rtype: object( :py:class: HDF5Target)
         """
 
-        f = h5py.File(self.path, 'r')
-        assert self.key in f.keys(), self.key + " , " + f.keys()
-        dset = f[self.key]
+        assert os.path.exists(self.path), self.path
+        with h5py.File(self.path, 'r') as f:
+            assert self.key in f.keys(), self.key + " , " + f.keys()
+            dset = f[self.key]
 
-        if np.dtype(self.dtype) != np.dtype(dset.dtype):
-            workflow_logger.debug("InputData task, loading data from %s" % (self.path,) )
-            workflow_logger.debug("Changing dtype from %s to %s" % (self.dtype,dset.dtype) )
-            self.dtype = dset.dtype
+            if np.dtype(self.dtype) != np.dtype(dset.dtype):
+                workflow_logger.debug("InputData task, loading data from %s" % (self.path,) )
+                workflow_logger.debug("Changing dtype from %s to %s" % (self.dtype,dset.dtype) )
+                self.dtype = dset.dtype
 
         return HDF5VolumeTarget(self.path, self.dtype, self.key)
 
