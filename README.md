@@ -25,6 +25,7 @@ Missing:
 
 * Get central scheduler running.
 * Doc + Examples
+* Proper installer via setup.py/ conda
 
 
 [//]: <> (## TODO then)
