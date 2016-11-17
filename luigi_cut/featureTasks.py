@@ -41,12 +41,7 @@ def get_local_features(xyOnly = False, zOnly = False):
     with open(PipelineParameter().FeatureConfigFile, 'r') as f:
         feat_params = json.load(f)
 
-    if xyOnly:
-        features = feat_params["featuresXY"]
-    elif zOnly:
-        features = feat_params["featuresZ"]
-    else:
-        features = feat_params["features"]
+    features = feat_params["features"]
 
     if not isinstance(features, list):
         features = [features,]
@@ -62,23 +57,28 @@ def get_local_features(xyOnly = False, zOnly = False):
         # by convention we assume that the raw data is given as 0th
         feature_tasks.append( EdgeFeatures(input_data[0], inputs["seg"]) ) #, filternames, sigmas) )
         workflow_logger.debug("Calculating Edge Features from raw input: " + input_data[0])
+
     if "prob" in features:
         # by convention we assume that the membrane probs are given as 1st
         feature_tasks.append( EdgeFeatures(input_data[1], inputs["seg"] ) ) #, filternames, sigmas) )
         workflow_logger.debug("Calculating Edge Features from probability maps: " + input_data[1])
-    if "affinitiesXY" in features:
+
+    if "affinitiesXY" in features and not zOnly: # specific XY - features -> we keep only these
         # by convention we assume that the xy - affinity channel is given as 1st input
-        feature_tasks.append( EdgeFeatures(input_data[1], inputs["seg"] ) ) #, filternames, sigmas) )
+        feature_tasks.append( EdgeFeatures(input_data[1], inputs["seg"], keepOnlyXY = True ) ) #, filternames, sigmas) )
         workflow_logger.debug("Calculating Edge Features from xy affinity maps: " + input_data[1])
-    if "affinitiesZ" in features:
+
+    if "affinitiesZ" in features and not xyOnly: # specific Z - features -> we keep only these
         # by convention we assume that the z - affinity channel is given as 2nd input
-        feature_tasks.append( EdgeFeatures(input_data[2], inputs["seg"] ) ) #, filternames, sigmas) )
+        feature_tasks.append( EdgeFeatures(input_data[2], inputs["seg"], keepOnlyZ = True ) ) #, filternames, sigmas) )
         workflow_logger.debug("Calculating Edge Features from z affinity maps: " + input_data[2])
+
     if "reg" in features:
         # by convention we calculate region features only on the raw data (0th input)
         # TODO should try it on probmaps. For big data we might spare shipping the raw data!
         feature_tasks.append( RegionFeatures(input_data[0], inputs["seg"]) )
         workflow_logger.debug("Calculating Region Features")
+
     #if "topo" in features:
     #    # by convention we calculate region features only on the raw data (0th input)
     #    feature_tasks.append( TopologyFeatures(inputs["seg"], features2d ) )
@@ -100,12 +100,7 @@ def get_local_features_for_multiinp(xyOnly = False, zOnly = False):
     with open(PipelineParameter().FeatureConfigFile, 'r') as f:
         feat_params = json.load(f)
 
-    if xyOnly:
-        features = feat_params["featuresXY"]
-    elif zOnly:
-        features = feat_params["featuresZ"]
-    else:
-        features = feat_params["features"]
+    features = feat_params["features"]
     if not isinstance(features, list):
         features = [features,]
 
@@ -129,21 +124,25 @@ def get_local_features_for_multiinp(xyOnly = False, zOnly = False):
             # by convention we assume that the raw data is given as 0th
             feature_tasks[i].append( EdgeFeatures(input_data[inp0], segs[i]) ) #, filternames, sigmas) )
             workflow_logger.debug("Calculating Edge Features from raw input: " + input_data[inp0])
+
         if "prob" in features:
             assert nInpPerSeg == 2
             # by convention we assume that the membrane probs are given as 1st
             feature_tasks[i].append( EdgeFeatures(input_data[inp1], segs[i] ) ) #, filternames, sigmas) )
             workflow_logger.debug("Calculating Edge Features from probability maps: " + input_data[inp1])
-        if "affinitiesXY" in features:
+
+        if "affinitiesXY" in features and not zOnly:
             assert nInpPerSeg == 3
             # by convention we assume that the xy - affinity channel is given as 1st input
-            feature_tasks[i].append( EdgeFeatures(input_data[inp1], segs[i] ) ) #, filternames, sigmas) )
+            feature_tasks[i].append( EdgeFeatures(input_data[inp1], segs[i], keepOnlyXY = True ) ) #, filternames, sigmas) )
             workflow_logger.debug("Calculating Edge Features from xy affinity maps: " + input_data[inp1])
-        if "affinitiesZ" in features:
+
+        if "affinitiesZ" in features and not xyOnly:
             assert nInpPerSeg == 3
             # by convention we assume that the z - affinity channel is given as 2nd input
-            feature_tasks[i].append( EdgeFeatures(input_data[inp2], segs[i] ) ) #, filternames, sigmas) )
+            feature_tasks[i].append( EdgeFeatures(input_data[inp2], segs[i], keepOnlyZ = True ) ) #, filternames, sigmas) )
             workflow_logger.debug("Calculating Edge Features from z affinity maps: " + input_data[inp2])
+
         if "reg" in features:
             feature_tasks[i].append( RegionFeatures(input_data[inp0], segs[i]) )
             workflow_logger.debug("Calculating Region Features")
@@ -309,6 +308,9 @@ class EdgeFeatures(luigi.Task):
     pathToInput = luigi.Parameter()
     # current oversegmentation
     pathToSeg = luigi.Parameter()
+    keepOnlyXY = luigi.BoolParameter(default = False)
+    keepOnlyZ = luigi.BoolParameter(default = False)
+
 
     # For now we can't set these any more
     #filterNames = luigi.ListParameter(default = [ "gaussianSmoothing", "hessianOfGaussianEigenvalues", "laplacianOfGaussian"] )
@@ -322,16 +324,21 @@ class EdgeFeatures(luigi.Task):
         inp = self.input()
         rag = inp[0].read()
 
-        #print rag.numberOfEdges
-        #print rag.totalNumberOfInSliceEdges
-        #print rag.totalNumberOfInBetweenSliceEdges
-        #quit()
+        assert not(self.keepOnlyXY and self.keepOnlyZ)
 
         inp[1].open()
         data = inp[1].get()
 
         t_feats = time.time()
+
         edge_features = nifty.graph.rag.accumulateEdgeFeaturesFromFilters(rag, data, -1) #, nthreads)
+        if self.keepOnlyXY:
+            transitionEdge = rag.totalNumberOfInSliceEdges
+            edge_features = edge_features[:transitionEdge]
+        if self.keepOnlyZ:
+            transitionEdge = rag.totalNumberOfInSliceEdges
+            edge_features = edge_features[transitionEdge:]
+
         t_feats = time.time() - t_feats
         workflow_logger.info("Calculated Edge Features in: " + str(t_feats) + " s")
 

@@ -8,7 +8,7 @@ from dataTasks import StackedRegionAdjacencyGraph, ExternalSegmentation
 from multicutSolverTasks import McProblem#, McSolverFusionMoves, MCSSolverOpengmExact
 from customTargets import HDF5DataTarget
 
-from toolsLuigi import UnionFind, config_logger, get_blocks
+from toolsLuigi import config_logger, get_blocks, replace
 
 import os
 import logging
@@ -112,22 +112,24 @@ class BlockwiseMulticutSolver(luigi.Task):
     def requires(self):
         globalProblem = McProblem( self.pathToSeg, self.pathToRF)
 
-        # for now, we hardcode the block overlaps here and don't change it throughout the different hierarchy levels.
-        # in the end, this sould also be a parameter (and maybe even change in the different hierarchy levels)
-        blockOverlap = [4,20,20]
-        # nested block hierarchy TODO make it possible to set this more explicit.
+        # read the mc parameter
+        with open(PipelineParameter().MCConfigFile, 'r') as f:
+            mc_config = json.load(f)
 
-        # 1st hierarchy level: 50 x 512 x 512 blocks (hardcoded for now)
-        initialBlockSize = [50,512,512]
+        # block size in first hierarchy level
+        initialBlockShape = mc_config["blockShape"]
+
+        # block overlap, for now same for each hierarchy lvl
+        blockOverlap = mc_config["blockOverlap"]
 
         problemHierarchy = [globalProblem,]
         blockFactor = 1
         for l in xrange(self.numberOflevels):
-            levelBlocksize = map( lambda x: x*blockFactor, initialBlockSize)
-            workflow_logger.info("Scheduling reduced problem for level " + str(l) + " with block size: " + str(levelBlocksize))
+            levelBlockShape = map( lambda x: x*blockFactor, initialBlockShape)
+            workflow_logger.info("Scheduling reduced problem for level " + str(l) + " with block shape: " + str(levelBlockShape))
             # TODO check that we don't get larger than the actual shape here
             problemHierarchy.append( ReducedProblem(self.pathToSeg, problemHierarchy[-1],
-                levelBlocksize , blockOverlap, l) )
+                levelBlockShape , blockOverlap, l) )
             blockFactor *= 2
 
         return problemHierarchy
@@ -203,13 +205,13 @@ class ReducedProblem(luigi.Task):
     pathToSeg = luigi.Parameter()
     problem   = luigi.TaskParameter()
 
-    blockSize     = luigi.ListParameter()
-    blockOverlaps = luigi.ListParameter()
+    blockShape     = luigi.ListParameter()
+    blockOverlap = luigi.ListParameter()
 
     level = luigi.Parameter()
 
     def requires(self):
-        return {"subSolution" : BlockwiseSubSolver( self.pathToSeg, self.problem, self.blockSize, self.blockOverlaps, self.level ),
+        return {"subSolution" : BlockwiseSubSolver( self.pathToSeg, self.problem, self.blockShape, self.blockOverlap, self.level ),
                 "problem" : self.problem }
 
 
@@ -232,49 +234,64 @@ class ReducedProblem(luigi.Task):
         ufd = nifty.ufd.Ufd( numberOfNodes )
 
         mergeNodes = uvIds[cutEdges == 0]
-
-        for uv in mergeNodes:
-            ufd.merge(int(uv[0]), int(uv[1]))
+        ufd.merge(mergeNodes)
 
         old2newNodes = ufd.elementLabeling()
         new2oldNodes = ufd.representativesToSets()
         # number of nodes for the new problem
         numberOfNewNodes = len(new2oldNodes)
 
-        # find new edges and new edge weights
-        activeEdges = np.where( cutEdges == 1 )[0]
-        newEdges = {}
-        for edgeId in activeEdges:
-            node0 = old2newNodes[uvIds[edgeId,0]]
-            node1 = old2newNodes[uvIds[edgeId,1]]
-            # we have to be in different new nodes!
-            assert node0 != node1, str(node0) + " , " + str(node1) + " @ edge: " + str(edgeId)
-            uNew = min(node0, node1)
-            vNew = max(node0, node1)
-            if (uNew, vNew) in newEdges:
-                newEdges[(uNew,vNew)] += costs[edgeId]
-            else:
-                newEdges[(uNew,vNew)]  = costs[edgeId]
+        # find new edges and edge weights (vectorized)
+        uvIdsNew = np.sort( old2newNodes[ uvIds[cutEdges==1] ], axis = 1)
 
-        numberOfNewEdges = len( newEdges )
-        uvIdsNew = np.array( newEdges.keys() )
+        uvIdsUnique = np.ascontiguousarray(uvIdsNew).view( np.dtype((np.void, uvIdsNew.itemsize * uvIdsNew.shape[1])) )
+        _, uniqueIdx, inverseIdx = np.unique(uvIdsUnique, return_index = True, return_inverse = True)
+        uvIdsNew = uvIdsNew[uniqueIdx]
+        numberOfNewEdges = uvIdsNew.shape[0]
+
+        costs = costs[cutEdges==1]
+        newCosts = np.zeros(numberOfNewEdges)
+        assert inverseIdx.shape[0] == costs.shape[0]
+
+        # TODO vectorize this too
+        for i, invIdx in enumerate(inverseIdx):
+            newCosts[invIdx] += costs[i]
+
+        assert newCosts.shape[0] == numberOfNewEdges
+
+        # find new edges and new edge weights (for loop)
+        #activeEdges = np.where( cutEdges == 1 )[0]
+        #newEdges = {}
+        #for edgeId in activeEdges:
+        #    node0 = old2newNodes[uvIds[edgeId,0]]
+        #    node1 = old2newNodes[uvIds[edgeId,1]]
+        #    # we have to be in different new nodes!
+        #    assert node0 != node1, str(node0) + " , " + str(node1) + " @ edge: " + str(edgeId)
+        #    uNew = min(node0, node1)
+        #    vNew = max(node0, node1)
+        #    if (uNew, vNew) in newEdges:
+        #        newEdges[(uNew,vNew)] += costs[edgeId]
+        #    else:
+        #        newEdges[(uNew,vNew)]  = costs[edgeId]
+        #
+        #numberOfNewEdges = len( newEdges )
+        #uvIdsNew = np.array( newEdges.keys() )
+        #newCosts = np.array( newEdges.values() )
 
         reducedGraph = nifty.graph.UndirectedGraph(numberOfNewNodes)
         reducedGraph.insertEdges(uvIdsNew)
-
-        assert uvIdsNew.shape[0] == numberOfNewEdges, str(uvIdsNew.shape[0]) + " , " + str(numberOfNewEdges)
-        # this should have the correct order
-        newCosts = np.array( newEdges.values() )
 
         if self.level == 0:
             global2new = old2newNodes
 
         else:
-            global2newLast = problem.read("global2new")
+            global2newLast = problem.read("global2new").astype(np.uint32)
             global2new = np.zeros_like( global2newLast, dtype = np.uint32)
+            #TODO vectorize  completely
+            #newNodes = np.arange(numberOfNewNodes, dtype = np.uint32)
+            #global2new[ global2newLast[new2oldNodes[newNodes]] ] = newNodes
             for newNode in xrange(numberOfNewNodes):
-                for oldNode in new2oldNodes[newNode]:
-                    global2new[global2newLast[oldNode]] = newNode
+                global2new[ global2newLast[new2oldNodes[newNode]] ] = newNode
 
         t_merge = time.time() - t_merge
         workflow_logger.info("Time for merging: %f s" % (t_merge))
@@ -292,7 +309,7 @@ class ReducedProblem(luigi.Task):
 
 
     def output(self):
-        blcksize_str = "_".join( map( str, list(self.blockSize) ) )
+        blcksize_str = "_".join( map( str, list(self.blockShape) ) )
         save_name = "ReducedProblem_" + blcksize_str + ".h5"
         save_path = os.path.join( PipelineParameter().cache, save_name)
         return HDF5DataTarget( save_path )
@@ -304,8 +321,8 @@ class BlockwiseSubSolver(luigi.Task):
     pathToSeg = luigi.Parameter()
     problem   = luigi.TaskParameter()
 
-    blockSize     = luigi.ListParameter()
-    blockOverlaps = luigi.ListParameter()
+    blockShape     = luigi.ListParameter()
+    blockOverlap = luigi.ListParameter()
 
     level = luigi.Parameter()
 
@@ -313,26 +330,6 @@ class BlockwiseSubSolver(luigi.Task):
         return { "seg" : ExternalSegmentation(self.pathToSeg), "problem" : self.problem }
 
     def run(self):
-
-        #def extract_subproblems(globalSegmentation, globalGraph, blockBegin, blockEnd,  global2new):
-        #    # TODO better to implement this in cpp ?! -> nifty::hdf5
-        #    nodeList = np.unique( globalSegmentation.read(blockBegin, blockEnd) )
-        #    if self.level != 0:
-        #        # TODO no for loop !
-        #        for i in xrange(nodeList.shape[0]):
-        #            nodeList[i] = global2new[nodeList[i]]
-        #        nodeList = np.unique(nodeList)
-        #    return nifty.graph.extractSubgraphFromNodes(globalGraph, nodeList)
-
-        def extract_subproblems(globalSegmentation, globalGraph, blockBegin, blockEnd,  global2new):
-            blockShape = [1,blockEnd[1]-blockBegin[1],blockEnd[2]-blockBegin[2]]
-            nodeList = nifty.hdf5.uniqueValuesInSubvolume(globalSegmentation.get(), blockBegin, blockEnd, blockShape)#, 1)
-            if self.level != 0:
-                # TODO no for loop !
-                for i in xrange(len(nodeList)):
-                    nodeList[i] = global2new[nodeList[i]]
-                nodeList = np.unique(nodeList)
-            return nifty.graph.extractSubgraphFromNodes(globalGraph, nodeList)
 
         # Input
         inp = self.input()
@@ -351,21 +348,38 @@ class BlockwiseSubSolver(luigi.Task):
         else:
             global2newNodes = problem.read("global2new")
 
-        # TODO this function is implemented VERY ugly, best to replace this with vigra or nifty functionality
-        numberOfBlocks, blockBegins, blockEnds = get_blocks(seg.shape, self.blockSize, self.blockOverlaps)
+        # function for subproblem extraction
+        def extract_subproblem(blockBegin, blockEnd):
+            nodeList = np.unique( seg.read(blockBegin, blockEnd) )
+            if self.level != 0:
+                nodeList = np.unique( global2newNodes[nodeList] )
+            return graph.extractSubgraphFromNodes(nodeList)
+
+        blocking = nifty.tools.blocking( roiBegin = [0L,0L,0L], roiEnd = seg.shape, blockShape = self.blockShape )
+        numberOfBlocks = blocking.numberOfBlocks
+        blockOverlap = list(self.blockOverlap)
 
         #nWorkers = 1
         nWorkers = min( numberOfBlocks, PipelineParameter().nThreads )
 
         t_extract = time.time()
 
-        with futures.ThreadPoolExecutor(max_workers=1) as executor:
+        # sequential for debugging
+        #subProblems = []
+        #for blockId in xrange(numberOfBlocks):
+        #    block = blocking.getBlockWithHalo(blockId, self.blockOverlap).outerBlock
+        #    blockBegin, blockEnd = block.begin, block.end
+        #    subProblems.append( extract_subproblem( blockBegin, blockEnd ) )
+
+        # parallel
+        with futures.ThreadPoolExecutor(max_workers=nWorkers) as executor:
             tasks = []
             for blockId in xrange(numberOfBlocks):
-                workflow_logger.debug( "Block id " + str(blockId) + " start " + str(blockBegins[blockId]) + " end " + str(blockEnds[blockId]) )
-                tasks.append( executor.submit( extract_subproblems, seg, graph, blockBegins[blockId], blockEnds[blockId], global2newNodes ) )
-
-        subProblems = [task.result() for task in tasks]
+                block = blocking.getBlockWithHalo(blockId, blockOverlap).outerBlock
+                blockBegin, blockEnd = block.begin, block.end
+                workflow_logger.debug( "Block id " + str(blockId) + " start " + str(blockBegin) + " end " + str(blockEnd) )
+                tasks.append( executor.submit( extract_subproblem, blockBegin, blockEnd ) )
+            subProblems = [task.result() for task in tasks]
 
         assert len(subProblems) == numberOfBlocks, str(len(subProblems)) + " , " + str(numberOfBlocks)
 
@@ -373,6 +387,11 @@ class BlockwiseSubSolver(luigi.Task):
         workflow_logger.info( "Extraction time for subproblems %f s" % (t_extract,) )
 
         t_inf_total = time.time()
+
+        # sequential for debugging
+        #subResults = []
+        #for blockId, subProblem in enumerate(subProblems):
+        #    subResults.append( fusion_moves( subProblem[2], costs[subProblem[0]], blockId, 1 ) )
 
         with futures.ThreadPoolExecutor(max_workers=nWorkers) as executor:
             tasks = []
@@ -411,7 +430,7 @@ class BlockwiseSubSolver(luigi.Task):
 
 
     def output(self):
-        blcksize_str = "_".join( map( str, list(self.blockSize) ) )
+        blcksize_str = "_".join( map( str, list(self.blockShape) ) )
         save_name = "BlockwiseSubSolver_" + blcksize_str + ".h5"
         save_path = os.path.join( PipelineParameter().cache, save_name)
         return HDF5DataTarget( save_path )

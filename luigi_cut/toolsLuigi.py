@@ -162,3 +162,10 @@ def get_blocks(shape, block_size, block_overlap):
                 block_ends.append(   [end_z,end_y,end_x] )
 
     return n_blocks, block_begins, block_ends
+
+
+# numpy.replace: replcaces the values in array according to dict
+def replace(array, dict_like):
+    replace_keys, replace_vals = np.array(list(zip( *sorted(dict_like.items() ))))
+    indices = np.digitize(array, replace_keys, right = True)
+    return replace_vals[indices]

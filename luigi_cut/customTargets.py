@@ -9,6 +9,7 @@ import cPickle as pickle
 
 import nifty
 import vigra
+import h5py
 
 
 class HDF5VolumeTarget(FileSystemTarget):
@@ -145,6 +146,11 @@ class HDF5DataTarget(FileSystemTarget):
 
     def read(self, key = "data" ):
         return vigra.readHDF5(self.path, key)
+
+    def shape(self, key = "data"):
+        with h5py.File(self.path) as f:
+            shape = f[key].shape
+        return shape
 
 
 class PickleTarget(FileSystemTarget):

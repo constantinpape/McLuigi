@@ -45,11 +45,11 @@ class EdgeProbabilities(luigi.Task):
 
         if cf_config["separateEdgeClassification"]:
             assert len(self.classifierPaths) == 2
-            feature_tasks = [get_local_features(xyOnly=True),get_local_features(zOnly=True)]
 
         else:
             assert len(self.classifierPaths) == 1
-            feature_tasks = get_local_features()
+
+        feature_tasks = get_local_features()
 
         cf_tasks = [ExternalClassifier(cfp) for cfp in self.classifierPaths]
         return {"cfs" : cf_tasks, "features" : feature_tasks, "rag" : StackedRegionAdjacencyGraph(self.pathToSeg)}
@@ -70,10 +70,35 @@ class EdgeProbabilities(luigi.Task):
             cf_z  = inp["cfs"][1].read()
 
             rag = inp["rag"].read()
-            transitionEdge = rag.totalNumberOfInSliceEdges
-            featuresXY = np.concatenate( [feat.read()[:transitionEdge] for feat in inp["features"][0]], axis = 1 )
-            featuresZ  = np.concatenate( [feat.read()[transitionEdge:] for feat in inp["features"][1]], axis = 1 )
 
+            nEdges   = rag.numberOfEdges
+            nXYEdges = rag.totalNumberOfInSliceEdges
+            nZEdges  = nEdges - nXYEdges
+
+            features = inp["features"]
+            featuresXY = []
+            featuresZ  =[]
+
+            for feat in features:
+                nFeats = feat.shape()[0]
+
+                if nFeats == nEdges:
+                    actualFeats = feat.read()
+                    featuresXY.append(actualFeats[:nXYEdges])
+                    featuresZ.append(actualFeats[:nZEdges])
+
+                elif nFeats == nXYEdges:
+                    featuresXY.append(feat.read())
+
+                elif nFeats == nZEdges:
+                    featuresZ.append(feat.read())
+
+                else:
+                    raise RuntimeError("Number of features: " + str(nFeats) + " does not match number of edges (Total: " + str(nEdges) + ", XY: " + str(nXYEdges) + ", Z: " + str(nZEdges) + " )")
+
+
+            featuresXY = np.concatenate( featuresXY, axis = 1 )
+            featuresZ  = np.concatenate( featuresZ , axis = 1 )
 
             t_pred = time.time()
             if cf_config["useXGBoost"]:
