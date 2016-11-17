@@ -1,33 +1,32 @@
-# LuigiCut
+# McLuigi
 
-Implementation of Multicut Workflow based on luigi.
-This is mostly for deployment purposes. 
-Still under development and quite unstable.
+Multicut workflow for large connectomics data.
+Using luigi https://github.com/spotify/luigi for pipelining and caching processing steps.
+Most of the computations are done out-of-core using hdf5 as backend and implementations from nifty
+https://github.com/DerThorsten/nifty.
 
 ## Features
 
 Implemented:
 
-* Edge Features, Region Features, Topology Features
-* RF Prediction
+* Generating Oversemgentation  (wsdt)
+* Edge Features, Region Features
+* RF / XGB Learning
+* RF / XGB Prediction
 * MC Solver
 * Blockwise MC Solver
 
-Missing (and don't know what we actually want here yet):
+Missing:
 
-* Generating Oversemgentation 
-* RF Learning
 * Lifted Multicut
+* Pipeline for isotropic data.
 
-## TODO next
+## TODOs
 
-* Consistent caching names (for now just the task name) -> understand caching better.
 * Get central scheduler running.
-* Move parallelisation of blockwise stuff to scheduler, if possible.
-* Backend for chunked h5.
-* Chunked and blockwise processing.
+* Doc + Examples
 
-## TODO then
 
-* Data Backends: DVID, tiff ?
-* Computational Backends: Spark, DVIDSparkServices
+[//]: <> (## TODO then)
+[//]: <> (Data Backends: DVID, tiff ?)
+[//]: <>  (Computational Backends: Spark, DVIDSparkServices)

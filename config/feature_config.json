@@ -1,4 +1,5 @@
 {
+    "filter_library": "fastfilters",
     "features": ["prob","reg","topo"],
     "filternames":["gaussianSmoothing","hessianOfGaussianEigenvalues","laplacianOfGaussian"],
     "anisotropy":25,

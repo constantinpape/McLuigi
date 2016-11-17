@@ -5,6 +5,9 @@ import logging
 import json
 
 from workflowTasks import MulticutSegmentation, BlockwiseMulticutSegmentation
+from featureTasks import EdgeFeatures, RegionFeatures
+from dataTasks import StackedRegionAdjacencyGraph, ExternalSegmentationLabeled
+from learningTasks import SingleRandomForestFromGt
 
 from pipelineParameter import PipelineParameter
 from toolsLuigi import config_logger
@@ -28,12 +31,15 @@ if __name__ == '__main__':
     for i, data_file in enumerate(inputs["data"]):
         workflow_logger.info("Input data nr. " + str(i) + ": " + data_file )
     workflow_logger.info("Segmentation input: " + inputs["seg"])
-    workflow_logger.info("Random Forest input: " + inputs["rf"])
+    #workflow_logger.info("Random Forest input: " + inputs["rf"])
     workflow_logger.info("Writing cache to: " + inputs["cache"])
 
     # TODO get central scheduler running
     luigi.run(["--local-scheduler",
-        "--PathToSeg", inputs["seg"],
-        "--PathToRF", inputs["rf"]],
-        main_task_cls = BlockwiseMulticutSegmentation)
-        #main_task_cls = MulticutSegmentation)
+        "--pathToSeg", inputs["seg"],
+        #"--pathToGt", inputs["gt"]],
+        #"--numberOfLevels", 1,
+        "--pathToRF", inputs["rf"]],
+        main_task_cls = MulticutSegmentation)
+        #main_task_cls = BlockwiseMulticutSegmentation)
+        #main_task_cls = SingleRandomForestFromGt)

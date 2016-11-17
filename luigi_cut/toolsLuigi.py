@@ -1,4 +1,5 @@
 import logging
+import numpy as np
 
 # call this function to configure the logger
 # change the log file / log level if necessary
@@ -10,6 +11,11 @@ def config_logger(logger):
 
     logger.setLevel(logging.INFO)
     logger.addHandler(handler)
+
+# init the workflow logger
+workflow_logger = logging.getLogger(__name__)
+config_logger(workflow_logger)
+
 
 #
 # Implementation of a disjoint-set forest
@@ -28,7 +34,7 @@ class Node(object):
 class UnionFind(object):
 
     def __init__(self, n_labels):
-        assert isinstance(n_labels, int), type(n_labels)
+        #assert isinstance(n_labels, int), type(n_labels)
         self.n_labels = n_labels
         self.nodes = [Node(n) for n in xrange(n_labels)]
 
@@ -96,3 +102,70 @@ class UnionFind(object):
             res.sort()
 
         return merge_result
+
+
+# aaaaah this is ugly
+def get_blocks(shape, block_size, block_overlap):
+
+    s_z = block_size[0]
+    assert s_z < shape[0], str(s_z) + " , " + str(shape[0])
+    s_y = block_size[1]
+    assert s_y < shape[1], str(s_y) + " , " + str(shape[1])
+    s_x = block_size[2]
+    assert s_x < shape[2], str(s_x) + " , " + str(shape[2])
+
+    o_z = block_overlap[0]
+    o_y = block_overlap[1]
+    o_x = block_overlap[2]
+
+    n_z = int( np.ceil( float( shape[0] ) / s_z ) )
+    n_y = int( np.ceil( float( shape[1] ) / s_y ) )
+    n_x = int( np.ceil( float( shape[2] ) / s_x ) )
+
+    n_blocks = n_x * n_y * n_z
+
+    workflow_logger.info("Fitting " + str(n_blocks) + " blocks of size " + str(block_size) + " into shape " + str(shape) + " additional overlaps: " + str(block_overlap))
+
+    block_begins = []
+    block_ends   = []
+    for z in xrange(n_z):
+
+        # z range
+        start_z = z * s_z
+        if z != 0:
+            start_z -= o_z
+        end_z = (z + 1) * s_z + o_z
+        if end_z > shape[0]:
+            end_z = shape[0]
+
+        for y in xrange(n_y):
+
+            # Y range
+            start_y = y * s_y
+            if y != 0:
+                start_y -= o_y
+            end_y = (y + 1) * s_y + o_y
+            if end_y > shape[1]:
+                end_y = shape[1]
+
+            for x in xrange(n_x):
+
+                # x range
+                start_x = x * s_x
+                if x != 0:
+                    start_x -= o_x
+                end_x = (x + 1) * s_x + o_x
+                if end_x > shape[2]:
+                    end_x = shape[2]
+
+                block_begins.append( [start_z,start_y,start_x] )
+                block_ends.append(   [end_z,end_y,end_x] )
+
+    return n_blocks, block_begins, block_ends
+
+
+# numpy.replace: replcaces the values in array according to dict
+def replace(array, dict_like):
+    replace_keys, replace_vals = np.array(list(zip( *sorted(dict_like.items() ))))
+    indices = np.digitize(array, replace_keys, right = True)
+    return replace_vals[indices]
