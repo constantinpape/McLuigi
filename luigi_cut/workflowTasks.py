@@ -66,7 +66,7 @@ class BlockwiseMulticutSegmentation(luigi.Task):
     pathsToClassifier  = luigi.ListParameter()
 
     dtype = luigi.Parameter(default = 'uint32')
-    numberOfLevels = luigi.Parameter(default = 2)
+    numberOfLevels = luigi.IntParameter(default = 2)
 
     def requires(self):
         return { "McNodes" : BlockwiseMulticutSolver( self.pathToSeg, self.pathsToClassifier, self.numberOfLevels ),

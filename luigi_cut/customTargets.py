@@ -144,6 +144,11 @@ class HDF5DataTarget(FileSystemTarget):
         else:
             vigra.writeHDF5(data, self.path, key)
 
+    def writeVlen(self, data, key = 'data'):
+        with h5py.File(self.path) as f:
+            dt = h5py.special_dtype(vlen=np.dtype(data[0].dtype))
+            ds = f.create_dataset(key, data = data, dtype = dt)
+
     def read(self, key = "data" ):
         return vigra.readHDF5(self.path, key)
 

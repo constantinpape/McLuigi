@@ -33,27 +33,6 @@ workflow_logger = logging.getLogger(__name__)
 config_logger(workflow_logger)
 
 
-# serialization and deserialization for list of lists with hdf5
-
-def serializeNew2Old(out, new2old):
-    # we can't serialize the whole list of list, so we do it in this ugly manner...
-    for i, nList in enumerate(new2old):
-        out.write(nList, "new2old/" + str(i))
-
-
-def deserializeNew2Old(inp):
-    new2old = []
-    nodeIndex = 0
-    while True:
-        try:
-            new2old.append( inp.read("new2old/" + str(nodeIndex) ) )
-            nodeIndex += 1
-        except KeyError:
-            break
-    return new2old
-
-
-
 # TODO use Fusionmoves task instead
 def fusion_moves(g, costs, blockId, parallelProposals):
 
@@ -154,7 +133,7 @@ class BlockwiseMulticutSolver(luigi.Task):
         reducedGraph.deserialize( reducedProblem.read("graph") )
         reducedCosts = reducedProblem.read("costs")
 
-        reducedNew2Old = deserializeNew2Old(reducedProblem)
+        reducedNew2Old = reducedProblem.read("new2old")
         assert len(reducedNew2Old) == reducedGraph.numberOfNodes, str(len(reducedNew2Old)) + " , " + str(reducedGraph.numberOfNodes)
 
         # FIXME parallelism makes it slower here -> investigate this further and discuss with thorsten!
@@ -174,7 +153,7 @@ class BlockwiseMulticutSolver(luigi.Task):
 
             nextProblem = problems[l]
             if l != 0:
-                nextNew2old = deserializeNew2Old( nextProblem )
+                nextNew2old = nextProblem.read("new2old")
                 nextNumberOfNodes = len( nextNew2old )
             else:
                 nextNumberOfNodes = globalNumberOfNodes
@@ -304,8 +283,9 @@ class ReducedProblem(luigi.Task):
         out.write(reducedGraph.serialize(), "graph")
         out.write(newCosts, "costs")
         out.write(global2new, "global2new")
-        # need to serialize this differently, because hdf5 can't natively save lists of lists
-        serializeNew2Old(out, new2oldNodes)
+        # need to serialize this differently, due to list of list
+        new2oldNodes = np.array([np.array(n2o) for n2o in new2oldNodes])
+        out.writeVlen(new2oldNodes, "new2old")
 
 
     def output(self):
