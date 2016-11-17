@@ -26,8 +26,3 @@ Missing:
 * Get central scheduler running.
 * Doc + Examples
 * Proper installer via setup.py/ conda
-
-
-[//]: <> (## TODO then)
-[//]: <> (Data Backends: DVID, tiff ?)
-[//]: <>  (Computational Backends: Spark, DVIDSparkServices)
