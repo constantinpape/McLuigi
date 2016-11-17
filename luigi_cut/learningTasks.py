@@ -22,8 +22,7 @@ import json
 workflow_logger = logging.getLogger(__name__)
 config_logger(workflow_logger)
 
-# load external random forest from pickle file
-# TODO feature checks at some point...
+# load external classifier from pickle file
 class ExternalClassifier(luigi.Task):
 
     ClassifierPath = luigi.Parameter()
@@ -129,7 +128,7 @@ class EdgeProbabilities(luigi.Task):
                 xgb_mat = xgb.DMatrix(features)
                 probs = cf.predict(xgb_mat)[:,1]
             else:
-                probs = rf.predict_proba(features)[:,1]
+                probs = cf.predict_proba(features)[:,1]
 
             t_pred = time.time() - t_pred
             workflow_logger.info("Predicted RF in: " + str(t_pred) + " s")
@@ -248,7 +247,8 @@ class SingleClassifierFromGt(luigi.Task):
                 verbose = 2
 
             cf = RandomForestClassifier(n_jobs = PipelineParameter().nThreads,
-                n_estimators = cf_config['sklearnNtrees'], verbose = verbose)
+                n_estimators = cf_config['sklearnNtrees'], verbose = verbose,
+                max_depth = cf_config['sklearnMaxDepth'], min_samples_leaf = cf_config['sklearnMinSamplesLeaf'], bootstrap = cf_config['sklearnBootstrap'])
             cf.fit(features, gt)
 
         t_learn = time.time() - t_learn
@@ -364,7 +364,8 @@ class SingleClassifierFromMultipleInputs(luigi.Task):
                 verbose = 2
 
             cf = RandomForestClassifier(n_jobs = PipelineParameter().nThreads,
-                n_estimators = cf_config['sklearnNtrees'], verbose = verbose)
+                n_estimators = cf_config['sklearnNtrees'], verbose = verbose,
+                max_depth = cf_config['sklearnMaxDepth'], min_samples_leaf = cf_config['sklearnMinSamplesLeaf'], bootstrap = cf_config['sklearnBootstrap'])
             cf.fit(feats, gt)
 
         t_learn = time.time() - t_learn

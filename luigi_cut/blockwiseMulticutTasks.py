@@ -301,7 +301,7 @@ class BlockwiseSubSolver(luigi.Task):
     pathToSeg = luigi.Parameter()
     problem   = luigi.TaskParameter()
 
-    blockShape     = luigi.ListParameter()
+    blockShape   = luigi.ListParameter()
     blockOverlap = luigi.ListParameter()
 
     level = luigi.Parameter()

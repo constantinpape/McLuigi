@@ -126,7 +126,7 @@ def get_local_features_for_multiinp(xyOnly = False, zOnly = False):
             workflow_logger.debug("Calculating Edge Features from raw input: " + input_data[inp0])
 
         if "prob" in features:
-            assert nInpPerSeg == 2
+            #assert nInpPerSeg == 2
             # by convention we assume that the membrane probs are given as 1st
             feature_tasks[i].append( EdgeFeatures(input_data[inp1], segs[i] ) ) #, filternames, sigmas) )
             workflow_logger.debug("Calculating Edge Features from probability maps: " + input_data[inp1])
