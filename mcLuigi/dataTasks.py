@@ -5,7 +5,7 @@ import luigi
 from customTargets import HDF5VolumeTarget, StackedRagTarget
 
 from pipelineParameter import PipelineParameter
-from toolsLuigi import config_logger
+from tools import config_logger
 
 import logging
 

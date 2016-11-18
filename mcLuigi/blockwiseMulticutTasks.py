@@ -8,7 +8,7 @@ from dataTasks import StackedRegionAdjacencyGraph, ExternalSegmentation
 from multicutSolverTasks import McProblem#, McSolverFusionMoves, MCSSolverOpengmExact
 from customTargets import HDF5DataTarget
 
-from toolsLuigi import config_logger, get_blocks, replace
+from tools import config_logger
 
 import os
 import logging

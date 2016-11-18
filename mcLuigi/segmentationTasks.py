@@ -3,7 +3,7 @@ import luigi
 from dataTasks import ExternalInputData
 
 from pipelineParameter import PipelineParameter
-from toolsLuigi import config_logger
+from tools import config_logger
 
 from wsdt import WsdtSegmentation
 

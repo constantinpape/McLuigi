@@ -8,7 +8,7 @@ from dataTasks import InputData, StackedRegionAdjacencyGraph, ExternalSegmentati
 #from miscTasks import EdgeIndications
 
 from pipelineParameter import PipelineParameter
-from toolsLuigi import config_logger
+from tools import config_logger
 
 import logging
 import json
@@ -348,7 +348,12 @@ class EdgeFeatures(luigi.Task):
     def output(self):
         segFile = os.path.split(self.pathToSeg)[1][:-3]
         inpFile = os.path.split(self.pathToInput)[1][:-3]
-        save_path = os.path.join( PipelineParameter().cache, "EdgeFeatures_%s_%s.h5" % (segFile,inpFile)  )
+        save_path = os.path.join( PipelineParameter().cache, "EdgeFeatures_%s_%s" % (segFile,inpFile)  )
+        if self.keepOnlyXY:
+            save_path += '_xy'
+        if self.keepOnlyZ:
+            save_path += '_z'
+        save_path += '.h5'
         return HDF5DataTarget( save_path )
 
 

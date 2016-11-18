@@ -8,7 +8,7 @@ from featureTasks import get_local_features,get_local_features_for_multiinp
 from dataTasks import DenseGroundtruth, ExternalSegmentation, StackedRegionAdjacencyGraph
 
 from pipelineParameter import PipelineParameter
-from toolsLuigi import config_logger
+from tools import config_logger
 
 import logging
 
@@ -246,7 +246,7 @@ class SingleClassifierFromGt(luigi.Task):
             if cf_config['verbose']:
                 verbose = 2
 
-            cf = RandomForestClassifier(n_jobs = PipelineParameter().nThreads,
+            cf = RandomForestClassifier(n_jobs = cf_config['sklearnNJobs'],
                 n_estimators = cf_config['sklearnNtrees'], verbose = verbose,
                 max_depth = cf_config['sklearnMaxDepth'], min_samples_leaf = cf_config['sklearnMinSamplesLeaf'], bootstrap = cf_config['sklearnBootstrap'])
             cf.fit(features, gt)
@@ -363,7 +363,7 @@ class SingleClassifierFromMultipleInputs(luigi.Task):
             if cf_config['verbose']:
                 verbose = 2
 
-            cf = RandomForestClassifier(n_jobs = PipelineParameter().nThreads,
+            cf = RandomForestClassifier(n_jobs = cf_config['sklearnNJobs'],
                 n_estimators = cf_config['sklearnNtrees'], verbose = verbose,
                 max_depth = cf_config['sklearnMaxDepth'], min_samples_leaf = cf_config['sklearnMinSamplesLeaf'], bootstrap = cf_config['sklearnBootstrap'])
             cf.fit(feats, gt)

@@ -11,7 +11,7 @@ from learningTasks import EdgeProbabilities
 from customTargets import HDF5DataTarget
 
 from pipelineParameter import PipelineParameter
-from toolsLuigi import config_logger
+from tools import config_logger
 
 import logging
 import json

@@ -9,7 +9,7 @@ from dataTasks import StackedRegionAdjacencyGraph, ExternalSegmentation
 from customTargets import HDF5VolumeTarget
 
 from pipelineParameter import PipelineParameter
-from toolsLuigi import config_logger
+from tools import config_logger
 
 import logging
 import json
