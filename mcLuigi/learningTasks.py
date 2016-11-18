@@ -165,6 +165,9 @@ class EdgeGroundtruth(luigi.Task):
 
         edgeGt = (uGt != vGt).astype(np.uint8)
 
+        assert (np.unique(edgeGt) == np.array([0,1])).all(), str(np.unique(edgeGt))
+        assert edgeGt.shape[0] == uvIds.shape[0]
+
         self.output().write(edgeGt)
 
 
