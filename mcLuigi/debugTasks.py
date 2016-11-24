@@ -105,9 +105,12 @@ class VigraRag(luigi.Task):
         return ExternalSegmentation(self.pathToSeg)
 
     def run(self):
+
         seg = self.input()
         seg.open()
         seg = seg.read([0L,0L,0L],seg.shape)
+        seg = seg.T
+
         rag = vigra.graphs.regionAdjacencyGraph(vigra.graphs.gridGraph(seg.shape), seg)
         self.output().write(rag)
 
@@ -121,10 +124,8 @@ class NiftyToVigraEdges(luigi.Task):
     pathToSeg = luigi.Parameter()
     keyToSeg = luigi.Parameter(default = "data")
 
-    # not really necessary right now, but maybe the rag syntax will change
     def requires(self):
         return {"vigraRag" : VigraRag(self.pathToSeg), "niftyRag" : StackedRegionAdjacencyGraph(self.pathToSeg)}
-
 
     def run(self):
 
@@ -139,13 +140,15 @@ class NiftyToVigraEdges(luigi.Task):
         assert nEdges == vrag.edgeNum, str(nEdges) + " , " + str(vrag.edgeNum)
 
         edgeDict = np.zeros(nEdges, dtype = 'uint32' )
-        uvIds = vrag.uvIds()
+        uvIds = np.sort(vrag.uvIds(), axis = 1)
 
         for v_id in xrange(nEdges):
             n_id = int(nrag.findEdge(uvIds[v_id,0],uvIds[v_id,1]))
             assert n_id >= 0, " , ".join([str(n_id),str(v_id),str(uvIds[v_id,0]),str(uvIds[v_id,1])])
             assert n_id < nEdges
             edgeDict[n_id] = v_id
+
+        assert (uvIds[edgeDict] == nrag.uvIds()).all()
 
         self.output().write(edgeDict)
 
@@ -191,6 +194,8 @@ class EdgeFeaturesVigra(luigi.Task):
         data = inp["data"]
         data.open()
         data = data.read([0L,0L,0L],data.shape)
+
+        data = data.T
 
         import fastfilters
         filter_names = [ "fastfilters.gaussianSmoothing",
@@ -255,10 +260,12 @@ class RegionFeaturesVigra(luigi.Task):
         data = inp["data"]
         data.open()
         data = data.read([0L,0L,0L],data.shape)
+        data = data.T
 
         seg = inp["seg"]
         seg.open()
         seg = seg.read([0L,0L,0L],seg.shape)
+        seg = seg.T
 
         # list of the region statistics, that we want to extract
         statistics =  [ "Count", "Kurtosis", #"Histogram",
@@ -335,4 +342,37 @@ class RegionFeaturesVigra(luigi.Task):
     def output(self):
         segFile = os.path.split(self.pathToSeg)[1][:-3]
         save_path = os.path.join( PipelineParameter().cache, "EdgeFeaturesVigra_%s.h5" % (segFile,)  )
+        return HDF5DataTarget( save_path )
+
+
+class McPromblemVigraFromFile(luigi.Task):
+
+    pathToSeg = luigi.Parameter()
+    pathToVigraWeights = luigi.Parameter(
+        default = '/home/constantin/Work/home_hdd/cache/cremi/sample_A_val_small/probs_to_energies_0_-2597982656216043428.h5')
+
+    def requires(self):
+        return NiftyToVigraEdges(self.pathToSeg), StackedRegionAdjacencyGraph(self.pathToSeg)
+
+    def run(self):
+        n2vEdges = self.input()[0].read()
+        weights = vigra.readHDF5(self.pathToVigraWeights, 'data')
+        weights = weights[n2vEdges]
+
+        rag = self.input()[1].read()
+        uvIds = rag.uvIds()
+        nVariables = uvIds.max() + 1
+
+        g = nifty.graph.UndirectedGraph(int(nVariables))
+        g.insertEdges(uvIds)
+
+        out = self.output()
+
+        assert g.numberOfEdges == weights.shape[0]
+        out.write( g.serialize(), "graph" )
+        out.write( weights, "costs")
+
+    def output(self):
+        segFile = os.path.split(self.pathToSeg)[1][:-3]
+        save_path = os.path.join( PipelineParameter().cache, "McProblemVigraFromFile_%s.h5" % (segFile,)  )
         return HDF5DataTarget( save_path )

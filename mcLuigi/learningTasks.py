@@ -84,7 +84,7 @@ class EdgeProbabilities(luigi.Task):
                 if nFeats == nEdges:
                     actualFeats = feat.read()
                     featuresXY.append(actualFeats[:nXYEdges])
-                    featuresZ.append(actualFeats[:nZEdges])
+                    featuresZ.append(actualFeats[nXYEdges:])
 
                 elif nFeats == nXYEdges:
                     featuresXY.append(feat.read())
@@ -200,24 +200,49 @@ class SingleClassifierFromGt(luigi.Task):
 
         inp = self.input()
         gt = inp["gt"].read()
-        features = np.concatenate( [feat.read() for feat in inp["features"]], axis = 1 )
+        feature_tasks = inp["features"]
 
         if self.learnXYOnly:
             workflow_logger.info("Learning classfier for xy edges.")
+
             rag = inp["rag"].read()
+            nEdges = rag.numberOfEdges
             transitionEdge = rag.totalNumberOfInSliceEdges
-            features = features[:transitionEdge]
+
             gt = gt[:transitionEdge]
+
+            features = []
+            for feat_task in feature_tasks:
+                feat = feat_task.read()
+                if feat.shape[0] == nEdges:
+                    feat = feat[:transitionEdge]
+                elif feat.shape[0] != transitionEdge:
+                    raise RuntimeError("Number of features %i does not fit total number of edges %i or number of xy edges %i" % (feat.shape, nEdges, transitionEdge))
+                features.append(feat)
+            features = np.concatenate(features, axis = 1)
 
         elif self.learnZOnly:
             workflow_logger.info("Learning classfier for z edges.")
+
             rag = inp["rag"].read()
+            nEdges = rag.numberOfEdges
             transitionEdge = rag.totalNumberOfInSliceEdges
-            features = features[transitionEdge:]
+
             gt = gt[transitionEdge:]
+
+            features = []
+            for feat_task in feature_tasks:
+                feat = feat_task.read()
+                if feat.shape[0] == nEdges:
+                    feat = feat[transitionEdge:]
+                elif feat.shape[0] != nEdges - transitionEdge:
+                    raise RuntimeError("Number of features %i does not fit total number of edges %i or number of z edges %i" % (feat.shape, nEdges, nEdges - transitionEdge))
+                features.append(feat)
+            features = np.concatenate(features, axis = 1)
 
         else:
             workflow_logger.info("Learning classfier for all edges.")
+            features = np.concatenate( [feat.read() for feat in feature_tasks], axis = 1 )
 
         assert features.shape[0] == gt.shape[0], str(features.shape[0]) + " , " + str(gt.shape[0])
 
@@ -304,39 +329,69 @@ class SingleClassifierFromMultipleInputs(luigi.Task):
 
         inp = self.input()
 
-        gts = inp["gts"]
-        features = inp["features"]
+        gt_tasks = inp["gts"]
+        feature_tasks = inp["features"]
+        rag_tasks = inp["rag"]
 
-        feats = []
+        assert len(feature_tasks) == len(gt_tasks)
+
+        features = []
         gt = []
 
-        assert len(features) == len(gts)
+        for i in xrange(len(gt_tasks)):
 
-        for i in xrange(len(gts)):
-
-            feats_i = np.concatenate( [feat.read() for feat in features[i] ], axis = 1 )
-            gt_i = gts[i].read()
+            feat_tasks_i = feature_tasks[i]
+            gt_i = gt_tasks[i].read()
 
             if self.learnXYOnly:
-                rag = inp["rags"][i].read()
+
+                rag = rag_tasks[i].read()
+                nEdges = rag.numberOfEdges
                 transitionEdge = rag.totalNumberOfInSliceEdges
-                feats_i = feats_i[:transitionEdge]
+
                 gt_i = gt_i[:transitionEdge]
 
+                features_i = []
+                for feat_task in feat_tasks_i:
+                    feat = feat_tasks_i.read()
+                    if feat.shape[0] == nEdges:
+                        feat = feat[:transitionEdge]
+                    elif feat.shape[0] != transitionEdge:
+                        raise RuntimeError("Number of features %i does not fit total number of edges %i or number of xy edges %i" % (feat.shape, nEdges, transitionEdge))
+                    features_i.append(feat)
+                features_i = np.concatenate(features_i, axis = 1)
+
             elif self.learnZOnly:
-                rag = inp["rags"][i].read()
+
+                rag = rag_tasks[i].read()
+                nEdges = rag.numberOfEdges
                 transitionEdge = rag.totalNumberOfInSliceEdges
-                feats_i = feats_i[transitionEdge:]
+
                 gt_i = gt_i[transitionEdge:]
 
-            assert feats_i.shape[0] == gt_i.shape[0]
-            feats.append(feats_i)
+                features_i = []
+                for feat_task in feature_tasks_i:
+                    feat = feat_task.read()
+                    if feat.shape[0] == nEdges:
+                        feat = feat[transitionEdge:]
+                    elif feat.shape[0] != nEdges - transitionEdge:
+                        raise RuntimeError("Number of features %i does not fit total number of edges %i or number of z edges %i" % (feat.shape, nEdges, nEdges - transitionEdge))
+                    features_i.append(feat)
+                features_i = np.concatenate(features_i, axis = 1)
+
+            else:
+                workflow_logger.info("Learning classfier for all edges.")
+                features_i = np.concatenate( [feat.read() for feat in feature_tasks_i], axis = 1 )
+
+            assert features_i.shape[0] == gt_i.shape[0]
+
+            features.append(features_i)
             gt.append(gt_i)
 
-        feats = np.concatenate( feats, axis = 0 )
+        features = np.concatenate( features, axis = 0 )
         gt    = np.concatenate( gt )
 
-        assert feats.shape[0] == gt.shape[0], str(feats.shape[0]) + " , " + str(gt.shape[0])
+        assert features.shape[0] == gt.shape[0], str(features.shape[0]) + " , " + str(gt.shape[0])
 
         # read the classifier parameter
         with open(PipelineParameter().EdgeClassifierConfigFile, 'r') as f:
@@ -356,7 +411,7 @@ class SingleClassifierFromMultipleInputs(luigi.Task):
                 'colsample_by_tree' : cf_config['xgbColsample'], 'subsample' : cf_config['xgbSubsample'],
                 'silent' : silent }
 
-            xgb_mat = xgb.DMatrix(feats, label = gt)
+            xgb_mat = xgb.DMatrix(features, label = gt)
             cf = xgb.train(xgb_params, xgb_mat, cf_config['xgbNumRounds'])
 
         else:
@@ -369,7 +424,7 @@ class SingleClassifierFromMultipleInputs(luigi.Task):
             cf = RandomForestClassifier(n_jobs = cf_config['sklearnNJobs'],
                 n_estimators = cf_config['sklearnNtrees'], verbose = verbose,
                 max_depth = cf_config['sklearnMaxDepth'], min_samples_leaf = cf_config['sklearnMinSamplesLeaf'], bootstrap = cf_config['sklearnBootstrap'])
-            cf.fit(feats, gt)
+            cf.fit(features, gt)
 
         t_learn = time.time() - t_learn
         workflow_logger.info("Learned classifier in: " + str(t_learn) + " s")

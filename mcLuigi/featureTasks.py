@@ -27,6 +27,9 @@ workflow_logger = logging.getLogger(__name__)
 config_logger(workflow_logger)
 
 
+# try vigra features for debugging
+#from debugTasks import get_local_vigra_features
+#get_local_features = get_local_vigra_features
 
 # read the feature configuration from PipelineParams.FeatureConfigFile
 # and return the corresponding feature tasks
@@ -179,7 +182,7 @@ class RegionFeatures(luigi.Task):
 
         assert data.shape == seg.shape, str(data.shape) + " , " + str(seg.shape)
 
-        minMaxNodeSlice = rag.minMaxLabelPerSlice()
+        minMaxNodeSlice = rag.minMaxLabelPerSlice().astype('uint32')
         nNodes = rag.numberOfNodes
 
         # list of the region statistics, that we want to extract
@@ -264,8 +267,12 @@ class RegionFeatures(luigi.Task):
         del regionStatistics
         gc.collect()
 
-        allFeats = [np.minimum(fU, fV), np.maximum(fU, fV),
-                np.abs(fU - fV), fU + fV ]
+        allFeats = [
+                np.minimum(fU, fV),
+                np.maximum(fU, fV),
+                np.abs(fU - fV),
+                fU + fV
+                ]
 
         fU = fU.resize((1,1))
         fV = fV.resize((1,1))
@@ -293,7 +300,7 @@ class RegionFeatures(luigi.Task):
         t_feats = time.time() - t_feats
         workflow_logger.info("Calculated Region Features in: " + str(t_feats) + " s")
 
-        self.output().write( np.nan_to_num(allFeats) )
+        self.output().write( np.nan_to_num(allFeats).astype('float32') )
 
 
     def output(self):

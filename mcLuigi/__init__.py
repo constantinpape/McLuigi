@@ -1,5 +1,6 @@
 from workflowTasks import MulticutSegmentation, BlockwiseMulticutSegmentation
 from learningTasks import SingleClassifierFromGt, SingleClassifierFromMultipleInputs, EdgeGroundtruth
 from dataTasks import StackedRegionAdjacencyGraph
+from featureTasks import RegionFeatures
 from pipelineParameter import  PipelineParameter
 from tools import config_logger

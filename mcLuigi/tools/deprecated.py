@@ -111,8 +111,6 @@ def get_blocks(shape, block_size, block_overlap):
 
     n_blocks = n_x * n_y * n_z
 
-    workflow_logger.info("Fitting " + str(n_blocks) + " blocks of size " + str(block_size) + " into shape " + str(shape) + " additional overlaps: " + str(block_overlap))
-
     block_begins = []
     block_ends   = []
     for z in xrange(n_z):

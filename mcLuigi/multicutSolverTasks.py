@@ -56,14 +56,13 @@ class McSolverFusionMoves(luigi.Task):
         ret    = greedy.optimize()
         workflow_logger.info("Energy of the greedy solution" +  str(obj.evalNodeLabels(ret)) )
 
-        ilpFac = obj.multicutIlpFactory(ilpSolver='cplex',verbose=0,
+        ilpFac = obj.multicutIlpFactory(ilpSolver='cplex',verbose=mc_config["verbose"],
             addThreeCyclesConstraints=True,
             addOnlyViolatedThreeCyclesConstraints=True
         )
 
         solver = obj.fusionMoveBasedFactory(
-            #verbose=mc_config["verbose"],
-            verbose=2,
+            verbose=mc_config["verbose"],
             fusionMove=obj.fusionMoveSettings(mcFactory=ilpFac),
             proposalGen=obj.watershedProposals(sigma=mc_config["sigmaFusion"],seedFraction=mc_config["seedFraction"]),
             numberOfIterations=mc_config["numIt"],
@@ -73,12 +72,11 @@ class McSolverFusionMoves(luigi.Task):
             fuseN=mc_config["numFuse"],
         ).create(obj)
 
-        ## test time limit
-        #visitor = obj.multicutVerboseVisitor(1, 1) # print, timeLimit
-        #print "Starting to optimize with time limit"
-        #ret = solver.optimize(nodeLabels=ret, visitor=visitor)
-
-        ret = solver.optimize(nodeLabels=ret)
+        if mc_config["verbose"]:
+            visitor = obj.multicutVerboseVisitor(1)
+            ret = solver.optimize(nodeLabels=ret, visitor=visitor)
+        else:
+            ret = solver.optimize(nodeLabels=ret)
 
         t_inf = time.time() - t_inf
         workflow_logger.info("Inference with fusion move solver in %i s" % (t_inf,))
