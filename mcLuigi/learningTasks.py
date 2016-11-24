@@ -331,7 +331,7 @@ class SingleClassifierFromMultipleInputs(luigi.Task):
 
         gt_tasks = inp["gts"]
         feature_tasks = inp["features"]
-        rag_tasks = inp["rag"]
+        rag_tasks = inp["rags"]
 
         assert len(feature_tasks) == len(gt_tasks)
 
@@ -353,7 +353,7 @@ class SingleClassifierFromMultipleInputs(luigi.Task):
 
                 features_i = []
                 for feat_task in feat_tasks_i:
-                    feat = feat_tasks_i.read()
+                    feat = feat_task.read()
                     if feat.shape[0] == nEdges:
                         feat = feat[:transitionEdge]
                     elif feat.shape[0] != transitionEdge:
@@ -370,7 +370,7 @@ class SingleClassifierFromMultipleInputs(luigi.Task):
                 gt_i = gt_i[transitionEdge:]
 
                 features_i = []
-                for feat_task in feature_tasks_i:
+                for feat_task in feat_tasks_i:
                     feat = feat_task.read()
                     if feat.shape[0] == nEdges:
                         feat = feat[transitionEdge:]
