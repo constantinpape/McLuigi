@@ -75,25 +75,28 @@ class EdgeProbabilities(luigi.Task):
             nZEdges  = nEdges - nXYEdges
 
             features = inp["features"]
+
             featuresXY = []
-            featuresZ  =[]
+            featuresZ  = []
 
             for feat in features:
-                nFeats = feat.shape()[0]
+
+                feat.open()
+                nFeats = feat.shape[0]
 
                 if nFeats == nEdges:
-                    actualFeats = feat.read()
-                    featuresXY.append(actualFeats[:nXYEdges])
-                    featuresZ.append(actualFeats[nXYEdges:])
+                    featuresXY.append(feat.read([0,0],[nXYEdges,feat.shape[1]]))
+                    featuresZ.append(feat.read([nXYEdges,0],[nEdges,feat.shape[1]]))
 
                 elif nFeats == nXYEdges:
-                    featuresXY.append(feat.read())
+                    featuresXY.append(feat.read([0,0],feat.shape))
 
                 elif nFeats == nZEdges:
-                    featuresZ.append(feat.read())
+                    featuresZ.append(feat.read([0,0],feat.shape))
 
                 else:
                     raise RuntimeError("Number of features: " + str(nFeats) + " does not match number of edges (Total: " + str(nEdges) + ", XY: " + str(nXYEdges) + ", Z: " + str(nZEdges) + " )")
+                feat.close()
 
 
             featuresXY = np.concatenate( featuresXY, axis = 1 )
@@ -120,8 +123,15 @@ class EdgeProbabilities(luigi.Task):
         else:
             t_pred = time.time()
 
+            feat_tasks = inp["features"]
+            for feat in feat_tasks:
+                feat.open()
+
             cf = inp["cfs"][0].read()
-            features = np.concatenate( [feat.read() for feat in inp["features"]], axis = 1 )
+            features = np.concatenate( [feat.read([0,0],feat.shape) for feat in inp["features"]], axis = 1 )
+
+            for feat in feat_tasks:
+                feat.close()
 
             if cf_config["useXGBoost"]:
                 import xgboost as xgb
@@ -213,12 +223,14 @@ class SingleClassifierFromGt(luigi.Task):
 
             features = []
             for feat_task in feature_tasks:
-                feat = feat_task.read()
-                if feat.shape[0] == nEdges:
-                    feat = feat[:transitionEdge]
-                elif feat.shape[0] != transitionEdge:
-                    raise RuntimeError("Number of features %i does not fit total number of edges %i or number of xy edges %i" % (feat.shape, nEdges, transitionEdge))
+                feat_task.open()
+                assert feat_task.shape[0] == nEdges or feat_task[0] == transitionEdge
+                if feat_task.shape[0] == nEdges:
+                    feat = feat_task.read([0,0],[transitionEdge,feat_task.shape[1]])
+                else:
+                    feat = feat_task.read([0,0],feat_task.shape)
                 features.append(feat)
+                feat_task.close()
             features = np.concatenate(features, axis = 1)
 
         elif self.learnZOnly:
@@ -232,17 +244,23 @@ class SingleClassifierFromGt(luigi.Task):
 
             features = []
             for feat_task in feature_tasks:
-                feat = feat_task.read()
-                if feat.shape[0] == nEdges:
-                    feat = feat[transitionEdge:]
-                elif feat.shape[0] != nEdges - transitionEdge:
-                    raise RuntimeError("Number of features %i does not fit total number of edges %i or number of z edges %i" % (feat.shape, nEdges, nEdges - transitionEdge))
+                feat_task.open()
+                assert feat_task.shape[0] == nEdges or feat_task[0] == nEdges - transitionEdge
+                if feat_task.shape[0] == nEdges:
+                    feat = feat_task.read([transitionEdge,0],[nEdges,feat_task.shape[1]])
+                else:
+                    feat = feat_task.read([0,0],feat_task.shape)
                 features.append(feat)
+                feat_task.close()
             features = np.concatenate(features, axis = 1)
 
         else:
+            for feat_task in feature_tasks:
+                feat_task.open()
             workflow_logger.info("Learning classfier for all edges.")
             features = np.concatenate( [feat.read() for feat in feature_tasks], axis = 1 )
+            for feat_task in feature_tasks:
+                feat_task.close()
 
         assert features.shape[0] == gt.shape[0], str(features.shape[0]) + " , " + str(gt.shape[0])
 
@@ -331,6 +349,7 @@ class SingleClassifierFromMultipleInputs(luigi.Task):
 
         gt_tasks = inp["gts"]
         feature_tasks = inp["features"]
+
         rag_tasks = inp["rags"]
 
         assert len(feature_tasks) == len(gt_tasks)
@@ -353,12 +372,12 @@ class SingleClassifierFromMultipleInputs(luigi.Task):
 
                 features_i = []
                 for feat_task in feat_tasks_i:
-                    feat = feat_task.read()
-                    if feat.shape[0] == nEdges:
-                        feat = feat[:transitionEdge]
-                    elif feat.shape[0] != transitionEdge:
-                        raise RuntimeError("Number of features %i does not fit total number of edges %i or number of xy edges %i" % (feat.shape, nEdges, transitionEdge))
+                    feat_task.open()
+                    assert feat_task.shape[0] == nEdges or feat_task.shape[0] == transitionEdge
+                    nFeats = feat_task.shape[1]
+                    feat = feat_task.read([0,0],[transitionEdge,nFeats])
                     features_i.append(feat)
+                    feat_task.close()
                 features_i = np.concatenate(features_i, axis = 1)
 
             elif self.learnZOnly:
@@ -371,17 +390,20 @@ class SingleClassifierFromMultipleInputs(luigi.Task):
 
                 features_i = []
                 for feat_task in feat_tasks_i:
-                    feat = feat_task.read()
-                    if feat.shape[0] == nEdges:
-                        feat = feat[transitionEdge:]
-                    elif feat.shape[0] != nEdges - transitionEdge:
-                        raise RuntimeError("Number of features %i does not fit total number of edges %i or number of z edges %i" % (feat.shape, nEdges, nEdges - transitionEdge))
+                    feat_task.open()
+                    assert feat_task.shape[0] == nEdges or feat_task.shape[0] == nEdges - transitionEdge
+                    nFeats = feat_task.shape[1]
+                    if feat_task.shape[0] == nEdges:
+                        feat = feat_task.read([transitionEdge,0],[nEdges,nFeats])
+                    else:
+                        feat = feat_task.read([0,0],[feat_task.shape[0],nFeats])
                     features_i.append(feat)
+                    feat_task.close()
                 features_i = np.concatenate(features_i, axis = 1)
 
             else:
                 workflow_logger.info("Learning classfier for all edges.")
-                features_i = np.concatenate( [feat.read() for feat in feature_tasks_i], axis = 1 )
+                features_i = np.concatenate( [feat.read([0,0],feat.shape) for feat in feature_tasks_i], axis = 1 )
 
             assert features_i.shape[0] == gt_i.shape[0]
 

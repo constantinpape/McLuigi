@@ -3,7 +3,7 @@
 
 import luigi
 
-from customTargets import HDF5DataTarget
+from customTargets import HDF5DataTarget, HDF5VolumeTarget
 from dataTasks import InputData, StackedRegionAdjacencyGraph, ExternalSegmentation
 #from miscTasks import EdgeIndications
 
@@ -300,13 +300,19 @@ class RegionFeatures(luigi.Task):
         t_feats = time.time() - t_feats
         workflow_logger.info("Calculated Region Features in: " + str(t_feats) + " s")
 
-        self.output().write( np.nan_to_num(allFeats).astype('float32') )
+        out = self.output()
+        out_shape = list(allFeats.shape)
+        chunk_shape = [2500, out_shape[1]]
+        out.open(out_shape, chunk_shape)
+
+        out.write([0,0], np.nan_to_num(allFeats).astype('float32') )
+        out.close()
 
 
     def output(self):
         segFile = os.path.split(self.pathToSeg)[1][:-3]
         save_path = os.path.join( PipelineParameter().cache, "RegionFeatures_%s.h5" % (segFile,) )
-        return HDF5DataTarget( save_path )
+        return HDF5VolumeTarget( save_path, 'float32' )
 
 
 class EdgeFeatures(luigi.Task):
@@ -338,18 +344,32 @@ class EdgeFeatures(luigi.Task):
 
         t_feats = time.time()
 
-        edge_features = nifty.graph.rag.accumulateEdgeFeaturesFromFilters(rag, data, -1) #, nthreads)
+        out = self.output()
+
+        nEdges = rag.numberOfEdges
         if self.keepOnlyXY:
-            transitionEdge = rag.totalNumberOfInSliceEdges
-            edge_features = edge_features[:transitionEdge]
-        if self.keepOnlyZ:
-            transitionEdge = rag.totalNumberOfInSliceEdges
-            edge_features = edge_features[transitionEdge:]
+            nEdges = rag.totalNumberOfInSliceEdges
+        elif self.keepOnlyZ:
+            nEdges = rag.totalNumberOfInBetweenSliceEdges
+
+        out_shape = [nEdges, 9*12] # 9 * 12 = number of features per edge / would be nice not to hard code this here...
+        chunk_shape = [2500, 9*12]
+
+        out.open(out_shape, chunk_shape)
+
+        edge_features = nifty.graph.rag.accumulateEdgeFeaturesFromFilters(rag, data, out.get(), self.keepOnlyXY, self.keepOnlyZ, -1) #, nthreads)
+        #if self.keepOnlyXY:
+        #    transitionEdge = rag.totalNumberOfInSliceEdges
+        #    edge_features = edge_features[:transitionEdge]
+        #if self.keepOnlyZ:
+        #    transitionEdge = rag.totalNumberOfInSliceEdges
+        #    edge_features = edge_features[transitionEdge:]
 
         t_feats = time.time() - t_feats
         workflow_logger.info("Calculated Edge Features in: " + str(t_feats) + " s")
 
-        self.output().write(edge_features)
+        out.close()
+
 
 
     def output(self):
@@ -361,7 +381,7 @@ class EdgeFeatures(luigi.Task):
         if self.keepOnlyZ:
             save_path += '_z'
         save_path += '.h5'
-        return HDF5DataTarget( save_path )
+        return HDF5VolumeTarget( save_path, 'float32' )
 
 
 # TODO in nifty ??

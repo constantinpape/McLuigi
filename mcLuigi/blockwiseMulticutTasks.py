@@ -135,9 +135,8 @@ class BlockwiseMulticutSolver(luigi.Task):
 
         # FIXME parallelism makes it slower here -> investigate this further and discuss with thorsten!
         t_inf = time.time()
-        reducedNodeResult = fusion_moves( reducedGraph, reducedCosts, "reduced global", 20 )
-        t_inf = time.time() - t_inf
-        workflow_logger.info("Inference of reduced problem for the whole volume took: %f s" % (t_inf,))
+        reducedNodeResult = fusion_moves( reducedGraph, reducedCosts, "reduced global", 1 )
+        workflow_logger.info("Inference of reduced problem for the whole volume took: %f s" % (time.time() - t_inf,))
 
         assert reducedNodeResult.shape[0] == reducedNew2Old.shape[0]
 
@@ -288,6 +287,7 @@ class NodesToInitialBlocks(luigi.Task):
         seg = self.input()
         seg.open()
 
+        t_extract = time.time()
 
         blocking = nifty.tools.blocking( roiBegin = [0L,0L,0L], roiEnd = seg.shape, blockShape = self.blockShape )
         numberOfBlocks = blocking.numberOfBlocks
@@ -306,6 +306,9 @@ class NodesToInitialBlocks(luigi.Task):
             for blockId in xrange(numberOfBlocks):
                 tasks.append( executor.submit(nodes_to_block, blockId) )
             blockResult = np.array([fut.result() for fut in tasks])
+
+        workflow_logger.info( "Nodes2InitialBlocks done in %f s" % (time.time() - t_extract) )
+
 
         self.output().writeVlen(blockResult)
 
@@ -329,13 +332,13 @@ class BlockwiseSubSolver(luigi.Task):
 
     def requires(self):
 
-        #with open(PipelineParameter().MCConfigFile, 'r') as f:
-        #    mc_config = json.load(f)
-        #initialShape = mc_config["blockShape"]
-        #overlap      = mc_config["blockOverlap"]
+        with open(PipelineParameter().MCConfigFile, 'r') as f:
+            mc_config = json.load(f)
+        initialShape = mc_config["blockShape"]
+        overlap      = mc_config["blockOverlap"]
 
-        #nodes2blocks = NodesToInitialBlocks(self.pathToSeg, initialShape, overlap)
-        return { "seg" : ExternalSegmentation(self.pathToSeg), "problem" : self.problem }#, "nodes2blocks" : nodes2blocks }
+        nodes2blocks = NodesToInitialBlocks(self.pathToSeg, initialShape, overlap)
+        return { "seg" : ExternalSegmentation(self.pathToSeg), "problem" : self.problem , "nodes2blocks" : nodes2blocks }
 
 
     def run(self):
@@ -359,33 +362,33 @@ class BlockwiseSubSolver(luigi.Task):
 
         # function for subproblem extraction
         # extraction for every level
-        def extract_subproblem(blockBegin, blockEnd):
-            nodeList = np.unique( seg.read(blockBegin, blockEnd) )
-            if self.level != 0:
-                nodeList = np.unique( global2newNodes[nodeList] )
-
-            inner_edges, outer_edges, subgraph = graph.extractSubgraphFromNodes(nodeList)
-            return np.array(inner_edges), np.array(outer_edges), subgraph
-
-
-        # TODO test this
-        #nodes2blocks = inp["nodes2blocks"].read()
-
-        ## get the initial blocking
-        #with open(PipelineParameter().MCConfigFile, 'r') as f:
-        #    mc_config = json.load(f)
-        ## block size in first hierarchy level
-        #initialBlockShape = mc_config["blockShape"]
-        #initialOverlap = list(mc_config["blockOverlap"])
-        #initialBlocking = nifty.tools.blocking( roiBegin = [0L,0L,0L], roiEnd = seg.shape, blockShape = initialBlockShape )
-
-        ## function for subproblem extraction
-        ## extraction only for level 0
         #def extract_subproblem(blockBegin, blockEnd):
-        #    subBlocks = initialBlocking.getBlockIdsInBoundingBox(blockBegin, blockEnd, initialOverlap)
-        #    nodeList = np.unique(np.concatenate([nodes2blocks[subId] for subId in subBlocks]))
+        #    nodeList = np.unique( seg.read(blockBegin, blockEnd) )
+        #    if self.level != 0:
+        #        nodeList = np.unique( global2newNodes[nodeList] )
+
         #    inner_edges, outer_edges, subgraph = graph.extractSubgraphFromNodes(nodeList)
         #    return np.array(inner_edges), np.array(outer_edges), subgraph
+
+        nodes2blocks = inp["nodes2blocks"].read()
+
+        # get the initial blocking
+        with open(PipelineParameter().MCConfigFile, 'r') as f:
+            mc_config = json.load(f)
+        # block size in first hierarchy level
+        initialBlockShape = mc_config["blockShape"]
+        initialOverlap = list(mc_config["blockOverlap"])
+        initialBlocking = nifty.tools.blocking( roiBegin = [0L,0L,0L], roiEnd = seg.shape, blockShape = initialBlockShape )
+
+        # function for subproblem extraction
+        # extraction only for level 0
+        def extract_subproblem(blockBegin, blockEnd):
+            subBlocks = initialBlocking.getBlockIdsInBoundingBox(blockBegin, blockEnd, initialOverlap)
+            nodeList = np.unique(np.concatenate([nodes2blocks[subId] for subId in subBlocks]))
+            if self.level != 0:
+                nodeList = np.unique( global2newNodes[nodeList] )
+            inner_edges, outer_edges, subgraph = graph.extractSubgraphFromNodes(nodeList)
+            return np.array(inner_edges), np.array(outer_edges), subgraph
 
 
         blockOverlap = list(self.blockOverlap)
@@ -401,8 +404,9 @@ class BlockwiseSubSolver(luigi.Task):
         #subProblems = []
         #for blockId in xrange(numberOfBlocks):
 
+        #    print blockId
         #    # nifty blocking
-        #    block = blocking.getBlockWithHalo(blockId, self.blockOverlap).outerBlock
+        #    block = blocking.getBlockWithHalo(blockId, blockOverlap).outerBlock
         #    blockBegin, blockEnd = block.begin, block.end
 
         #    subProblems.append( extract_subproblem( blockBegin, blockEnd ) )
