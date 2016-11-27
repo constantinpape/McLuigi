@@ -84,7 +84,7 @@ class ExternalSegmentation(luigi.Task):
 
         assert os.path.exists(self.path), self.path
         with h5py.File(self.path, 'r') as f:
-            assert self.key in f.keys(), self.key + " , " + f.keys()
+            assert self.key in f.keys(), self.key + " , " + str(f.keys())
             dset = f[self.key]
 
             if np.dtype(self.dtype) != np.dtype(dset.dtype):

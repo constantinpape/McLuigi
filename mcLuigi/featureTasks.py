@@ -357,7 +357,7 @@ class EdgeFeatures(luigi.Task):
 
         out.open(out_shape, chunk_shape)
 
-        edge_features = nifty.graph.rag.accumulateEdgeFeaturesFromFilters(rag, data, out.get(), self.keepOnlyXY, self.keepOnlyZ, -1) #, nthreads)
+        edge_features = nifty.graph.rag.accumulateEdgeFeaturesFromFilters(rag, data, out.get(), self.keepOnlyXY, self.keepOnlyZ, 20) #, nthreads)
         #if self.keepOnlyXY:
         #    transitionEdge = rag.totalNumberOfInSliceEdges
         #    edge_features = edge_features[:transitionEdge]
