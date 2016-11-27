@@ -216,7 +216,8 @@ class RegionFeatures(luigi.Task):
                 else:
                     regionStatisticsSlice.append(stat)
 
-            regionStatisticsSlice = np.concatenate(regionStatisticsSlice, axis = 1)
+            regionStatisticsSlice = np.nan_to_num(
+                    np.concatenate(regionStatisticsSlice, axis = 1) )
             regionStatistics[minNode:maxNode+1] = regionStatisticsSlice
 
             # the region center differences, that art treated seperately
@@ -228,7 +229,8 @@ class RegionFeatures(luigi.Task):
                 else:
                     regionCentersSlice.append(stat)
 
-            regionCentersSlice = np.concatenate(regionCentersSlice, axis=1)
+            regionCentersSlice = np.nan_to_num(
+                    np.concatenate(regionCentersSlice, axis=1) )
             regionCenters[minNode:maxNode+1] = regionCentersSlice
 
             return True
@@ -246,9 +248,9 @@ class RegionFeatures(luigi.Task):
 
         # we actively delete stuff we don't need to free memory
         # because this may become memory consuming for lifted edges
-        results = []
-        del results
-        gc.collect()
+        #results = []
+        #del results
+        #gc.collect()
 
         uvIds = rag.uvIds()
 
@@ -267,34 +269,19 @@ class RegionFeatures(luigi.Task):
         chunk_shape = [2500, out_shape[1]]
         out.open(out_shape, chunk_shape)
 
-        #combine = [
-        #        lambda x,y : np.minimum(x,y),
-        #        lambda x,y : np.maximum(x,y),
-        #        lambda x,y : np.abs(x - y),
-        #        lambda x,y : x + y
-        #        ]
+        combine = [
+                lambda x,y : np.minimum(x,y),
+                lambda x,y : np.maximum(x,y),
+                lambda x,y : np.abs(x - y),
+                lambda x,y : x + y
+                ]
 
         offset = 0
-        #for i, func in enumerate(combine):
-        #    start = [0,offset]
-        #    out.write( start, np.nan_to_num(func(fU,fV)) )
-        #    offset += 16
-
-        start = [0,offset]
-        out.write( start, np.nan_to_num(np.minimum(fU,fV)) )
-        offset += 16
-
-        start = [0,offset]
-        out.write( start, np.nan_to_num(np.maximum(fU,fV)) )
-        offset += 16
-
-        start = [0,offset]
-        out.write( start, np.nan_to_num(np.abs(fU-fV)) )
-        offset += 16
-
-        start = [0,offset]
-        out.write( start, np.nan_to_num(fU+fV) )
-        offset += 16
+        for i, func in enumerate(combine):
+            start = [0,offset]
+            #feat = func(fU,fV)
+            out.write( start, func(fU,fV) )
+            offset += 16
 
         fU = fU.resize((1,1))
         fV = fV.resize((1,1))
@@ -305,7 +292,8 @@ class RegionFeatures(luigi.Task):
         sU = regionCenters[uvIds[:,0],:]
         sV = regionCenters[uvIds[:,1],:]
         start = [0,offset]
-        out.write(start, np.nan_to_num( (sU - sV)**2 ) )
+        #feat = (sU - sV)**2
+        out.write(start, (sU - sV)**2 )
 
         #sU = sV.resize((1,1))
         #sV = sV.resize((1,1))
