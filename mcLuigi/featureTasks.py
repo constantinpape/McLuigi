@@ -153,6 +153,7 @@ def get_local_features_for_multiinp(xyOnly = False, zOnly = False):
     return feature_tasks
 
 
+# TODO benchmark on herny
 class RegionFeatures(luigi.Task):
 
     pathToInput = luigi.Parameter()
