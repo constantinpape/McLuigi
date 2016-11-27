@@ -20,7 +20,10 @@ class PipelineParameter(object):
     def __init__(self):
         # TODO this should also be read from some json...
         self.cache = "/tmp/mc_cache"
-        self.nThreads = 40
+
+        import multiprocessing
+        self.nThreads = multiprocessing.cpu_count()
+
         self.InputFile = ""
         self.FeatureConfigFile = ""
         self.MCConfigFile = ""
