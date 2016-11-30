@@ -153,20 +153,19 @@ def get_local_features_for_multiinp(xyOnly = False, zOnly = False):
     return feature_tasks
 
 
-# TODO benchmark on herny
-class RegionFeatures(luigi.Task):
+class RegionNodeFeatures(luigi.Task):
 
     pathToInput = luigi.Parameter()
     pathToSeg   = luigi.Parameter()
 
     def requires(self):
-        # TODO have to rethink this once we include lifted multicut
-        return {"Data" : InputData(self.pathToInput), "Seg" : ExternalSegmentation(self.pathToSeg), "Rag" : StackedRegionAdjacencyGraph(self.pathToSeg)}
-
+        return {
+                "Data" : InputData(self.pathToInput),
+                "Seg" : ExternalSegmentation(self.pathToSeg),
+                "Rag" : StackedRegionAdjacencyGraph(self.pathToSeg)
+                }
 
     def run(self):
-
-        import gc
 
         t_feats = time.time()
 
@@ -185,6 +184,7 @@ class RegionFeatures(luigi.Task):
 
         minMaxNodeSlice = rag.minMaxLabelPerSlice().astype('uint32')
         nNodes = rag.numberOfNodes
+        nFeats = 20
 
         # list of the region statistics, that we want to extract
         # drop te Histogram, because it blows up the feature space...
@@ -193,8 +193,11 @@ class RegionFeatures(luigi.Task):
                         "RegionRadii", "Skewness", "Sum",
                         "Variance", "Weighted<RegionCenter>", "RegionCenter"]
 
-        regionStatistics = np.zeros( (nNodes, 16) )
-        regionCenters    = np.zeros( (nNodes, 4) )
+        out = self.output()
+        out_shape = [nNodes, nFeats]
+        chunk_shape = [5000, out_shape[1]]
+        out.open(out_shape, chunk_shape)
+
 
         # get region statistics with the vigra region feature extractor for a single slice
         def extractRegionStatsSlice(start, end, z):
@@ -207,10 +210,8 @@ class RegionFeatures(luigi.Task):
             extractor = vigra.analysis.extractRegionFeatures(dataSlice, segSlice, features = statistics )
 
             regionStatisticsSlice = []
-            regionCentersSlice    = []
 
-            # the 'normal' region statistics
-            for statName in statistics[0:9]:
+            for statName in statistics:
                 stat = extractor[statName]
                 if stat.ndim == 1:
                     regionStatisticsSlice.append(stat[:,None])
@@ -218,24 +219,29 @@ class RegionFeatures(luigi.Task):
                     regionStatisticsSlice.append(stat)
 
             regionStatisticsSlice = np.nan_to_num(
-                    np.concatenate(regionStatisticsSlice, axis = 1) )
-            regionStatistics[minNode:maxNode+1] = regionStatisticsSlice
+                    np.concatenate(regionStatisticsSlice, axis = 1).astype('float32') )
 
-            # the region center differences, that art treated seperately
-            for statName in statistics[9:11]:
-                # only keep the nodes that are in this slice (others are zero anyway!)
-                stat = extractor[statName]
-                if stat.ndim == 1:
-                    regionCentersSlice.append(stat[:,None])
-                else:
-                    regionCentersSlice.append(stat)
 
-            regionCentersSlice = np.nan_to_num(
-                    np.concatenate(regionCentersSlice, axis=1) )
-            regionCenters[minNode:maxNode+1] = regionCentersSlice
+            startOut = [ long(minNode) ,0L]
+            assert regionStatisticsSlice.shape[0] == maxNode + 1 - minNode
+            out.write(startOut, regionStatisticsSlice)
+
+            #regionStatistics[minNode:maxNode+1] = regionStatisticsSlice
+            #regionCenters[minNode:maxNode+1] = regionCentersSlice
+
+            print "Processed slice", z
 
             return True
 
+
+        # sequential for debugging
+        #results = []
+        #for z in xrange(shape[0]):
+        #    start = [z,0,0]
+        #    end   = [z+1,shape[1],shape[2]]
+        #    results.append( extractRegionStatsSlice( start, end, z) )
+
+        # parallel
         nWorkers = min( shape[0], PipelineParameter().nThreads )
         #nWorkers = 1
         with futures.ThreadPoolExecutor(max_workers=nWorkers) as executor:
@@ -244,25 +250,59 @@ class RegionFeatures(luigi.Task):
                 start = [z,0,0]
                 end   = [z+1,shape[1],shape[2]]
                 tasks.append( executor.submit(extractRegionStatsSlice, start, end, z) )
-
         results = [task.result() for task in tasks]
 
-        # we actively delete stuff we don't need to free memory
-        # because this may become memory consuming for lifted edges
-        #results = []
-        #del results
-        #gc.collect()
+        t_feats = time.time() - t_feats
+        workflow_logger.info("Calculated Region Node Features in: " + str(t_feats) + " s")
+
+
+    def output(self):
+        segFile = os.path.split(self.pathToSeg)[1][:-3]
+        save_path = os.path.join( PipelineParameter().cache, "RegionNodeFeatures_%s.h5" % (segFile,) )
+        return HDF5VolumeTarget( save_path, 'float32' )
+
+
+
+
+# TODO benchmark on herny
+class RegionFeatures(luigi.Task):
+
+    pathToInput = luigi.Parameter()
+    pathToSeg   = luigi.Parameter()
+
+    def requires(self):
+        # TODO have to rethink this once we include lifted multicut
+        return {
+                "Rag" : StackedRegionAdjacencyGraph(self.pathToSeg),
+                "RegionNodeFeatures" : RegionNodeFeatures(self.pathToInput,self.pathToSeg)
+                }
+
+
+    def run(self):
+
+        import gc
+
+        t_feats = time.time()
+
+        inp = self.input()
+        rag = inp["Rag"].read()
+        nodeFeats = inp["RegionNodeFeatures"]
+        nodeFeats.open()
 
         uvIds = rag.uvIds()
+
+        regionStatistics = nodeFeats.read([0,0],[nodeFeats.shape[0],16])
 
         fU = regionStatistics[uvIds[:,0],:]
         fV = regionStatistics[uvIds[:,1],:]
 
         assert fU.shape[0] == rag.numberOfEdges
 
-        #regionStatistics.resize((1,1))
-        #del regionStatistics
-        #gc.collect()
+        # we actively delete stuff we don't need to free memory
+        # because this may become memory consuming for lifted edges
+        regionStatistics.resize((1,1))
+        del regionStatistics
+        gc.collect()
 
         nFeats = 4*16 + 4
         out = self.output()
@@ -279,6 +319,7 @@ class RegionFeatures(luigi.Task):
 
         offset = 0
         for i, func in enumerate(combine):
+            print "Combining", i
             start = [0,offset]
             #feat = func(fU,fV)
             out.write( start, func(fU,fV) )
@@ -289,6 +330,8 @@ class RegionFeatures(luigi.Task):
         del fU
         del fV
         gc.collect()
+
+        regionCenters = nodeFeats.read([0,16],[nodeFeats.shape[0],nodeFeats.shape[1]])
 
         sU = regionCenters[uvIds[:,0],:]
         sV = regionCenters[uvIds[:,1],:]

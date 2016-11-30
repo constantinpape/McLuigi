@@ -1,5 +1,5 @@
 from workflowTasks import MulticutSegmentation, BlockwiseMulticutSegmentation
-from learningTasks import SingleClassifierFromGt, SingleClassifierFromMultipleInputs, EdgeGroundtruth
+from learningTasks import SingleClassifierFromGt, SingleClassifierFromMultipleInputs, EdgeGroundtruth, EdgeProbabilities
 from dataTasks import StackedRegionAdjacencyGraph
 from featureTasks import RegionFeatures, EdgeFeatures
 from pipelineParameter import  PipelineParameter
