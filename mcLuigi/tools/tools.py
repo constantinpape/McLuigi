@@ -5,11 +5,14 @@ import numpy as np
 # change the log file / log level if necessary
 def config_logger(logger):
 
+    level = logging.INFO
+    #level = logging.DEBUG
+
     # for now we have to change this here, until we have better configuration handling
     handler = logging.FileHandler('luigi_workflow.log')
-    handler.setLevel(logging.INFO)
+    handler.setLevel(level)
 
-    logger.setLevel(logging.INFO)
+    logger.setLevel(level)
     logger.addHandler(handler)
 
 # init the workflow logger

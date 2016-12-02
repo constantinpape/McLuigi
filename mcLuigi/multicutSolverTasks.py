@@ -180,7 +180,10 @@ class McProblem(luigi.Task):
 
         inp = self.input()
         rag = inp["Rag"].read()
-        edgeCosts = inp["EdgeProbabilities"].read()
+        edgeCosts = inp["EdgeProbabilities"]
+        edgeCosts.open()
+        assert len(edgeCosts.shape) == 1
+        edgeCosts = edgeCosts.read([0L],[long(edgeCosts.shape[0])])
 
         uvIds = rag.uvIds()
 

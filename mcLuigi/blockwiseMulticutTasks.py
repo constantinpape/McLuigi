@@ -139,28 +139,12 @@ class BlockwiseMulticutSolver(luigi.Task):
         workflow_logger.info("Inference of reduced problem for the whole volume took: %f s" % (time.time() - t_inf,))
 
         assert reducedNodeResult.shape[0] == reducedNew2Old.shape[0]
+        toGlobalNodes = reducedProblem.read("new2global")
 
-        # TODO clean up and vectorize some
-        # project back to global problem through all hierarchy levels
-        nodeResult = reducedNodeResult
-        new2old    = reducedNew2Old
-        for l in reversed(xrange(self.numberOflevels)):
-
-            nextProblem = problems[l]
-            if l != 0:
-                nextNew2old = nextProblem.read("new2old")
-                nextNumberOfNodes = len( nextNew2old )
-            else:
-                nextNumberOfNodes = globalNumberOfNodes
-
-            nextNodeResult = np.zeros(nextNumberOfNodes, dtype = 'uint32')
-            for nodeId in xrange(nodeResult.shape[0]):
-                for oldNodeId in new2old[nodeId]:
-                    nextNodeResult[oldNodeId] = nodeResult[nodeId]
-
-            nodeResult = nextNodeResult
-            if l != 0:
-                new2old = nextNew2old
+        # TODO vectorize
+        nodeResult = np.zeros(globalNumberOfNodes, dtype = 'uint32')
+        for nodeId, nodeRes in enumerate(reducedNodeResult):
+            nodeResult[toGlobalNodes[nodeId]] = nodeRes
 
         # get the global energy
         globalEnergy = globalObjective.evalNodeLabels(nodeResult)
@@ -239,14 +223,24 @@ class ReducedProblem(luigi.Task):
 
         if self.level == 0:
             global2new = old2newNodes
+            new2global = new2oldNodes
 
         else:
             global2newLast = problem.read("global2new").astype(np.uint32)
-            global2new = np.zeros_like( global2newLast, dtype = np.uint32)
+            new2globalLast = problem.read("new2global")
 
-            #TODO vectorize  completely
+            global2new = -1 * np.ones_like( global2newLast, dtype = np.int32)
+            new2global = []
+
+            #TODO vectorize
             for newNode in xrange(numberOfNewNodes):
-                global2new[ global2newLast[new2oldNodes[newNode]] ] = newNode
+                oldNodes = new2oldNodes[newNode]
+                globalNodes = np.concatenate(new2globalLast[oldNodes])
+                global2new[ globalNodes ] = newNode
+                new2global.append( globalNodes )
+
+            assert not -1 in global2new
+            global2new = global2new.astype('uint32')
 
 
         t_merge = time.time() - t_merge
@@ -259,10 +253,15 @@ class ReducedProblem(luigi.Task):
         out = self.output()
         out.write(reducedGraph.serialize(), "graph")
         out.write(newCosts, "costs")
+
         out.write(global2new, "global2new")
+
         # need to serialize this differently, due to list of list
-        new2oldNodes = np.array([np.array(n2o) for n2o in new2oldNodes])
+        new2oldNodes = np.array([np.array(n2o, dtype = 'uint32') for n2o in new2oldNodes])
         out.writeVlen(new2oldNodes, "new2old")
+
+        new2global = np.array([np.array(n2g, dtype = 'uint32') for n2g in new2global])
+        out.writeVlen(new2global, "new2global")
 
 
     def output(self):
@@ -382,11 +381,12 @@ class BlockwiseSubSolver(luigi.Task):
 
         # function for subproblem extraction
         # extraction only for level 0
-        def extract_subproblem(blockBegin, blockEnd):
+        def extract_subproblem(blockId, blockBegin, blockEnd):
             subBlocks = initialBlocking.getBlockIdsInBoundingBox(blockBegin, blockEnd, initialOverlap)
             nodeList = np.unique(np.concatenate([nodes2blocks[subId] for subId in subBlocks]))
             if self.level != 0:
                 nodeList = np.unique( global2newNodes[nodeList] )
+            workflow_logger.debug( "Block id %i: Number of nodes %i" % (blockId,nodeList.shape[0]) )
             inner_edges, outer_edges, subgraph = graph.extractSubgraphFromNodes(nodeList)
             return np.array(inner_edges), np.array(outer_edges), subgraph
 
@@ -404,12 +404,12 @@ class BlockwiseSubSolver(luigi.Task):
         #subProblems = []
         #for blockId in xrange(numberOfBlocks):
 
-        #    print blockId
         #    # nifty blocking
         #    block = blocking.getBlockWithHalo(blockId, blockOverlap).outerBlock
         #    blockBegin, blockEnd = block.begin, block.end
+        #    workflow_logger.debug( "Block id " + str(blockId) + " start " + str(blockBegin) + " end " + str(blockEnd) )
 
-        #    subProblems.append( extract_subproblem( blockBegin, blockEnd ) )
+        #    subProblems.append( extract_subproblem( blockId, blockBegin, blockEnd ) )
 
         # parallel
         with futures.ThreadPoolExecutor(max_workers=nWorkers) as executor:
@@ -420,7 +420,7 @@ class BlockwiseSubSolver(luigi.Task):
                 blockBegin, blockEnd = block.begin, block.end
 
                 workflow_logger.debug( "Block id " + str(blockId) + " start " + str(blockBegin) + " end " + str(blockEnd) )
-                tasks.append( executor.submit( extract_subproblem, blockBegin, blockEnd ) )
+                tasks.append( executor.submit( extract_subproblem, blockId, blockBegin, blockEnd ) )
 
             subProblems = [task.result() for task in tasks]
 
@@ -434,6 +434,7 @@ class BlockwiseSubSolver(luigi.Task):
         # sequential for debugging
         #subResults = []
         #for blockId, subProblem in enumerate(subProblems):
+        #    #print subProblem[0]
         #    subResults.append( fusion_moves( subProblem[2], costs[subProblem[0]], blockId, 1 ) )
 
         with futures.ThreadPoolExecutor(max_workers=nWorkers) as executor:

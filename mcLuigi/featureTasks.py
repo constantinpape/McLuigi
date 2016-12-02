@@ -254,6 +254,7 @@ class RegionNodeFeatures(luigi.Task):
 
         t_feats = time.time() - t_feats
         workflow_logger.info("Calculated Region Node Features in: " + str(t_feats) + " s")
+        out.close()
 
 
     def output(self):
