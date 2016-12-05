@@ -3,7 +3,7 @@
 
 import luigi
 
-from customTargets import PickleTarget, HDF5DataTarget
+from customTargets import PickleTarget, HDF5DataTarget, HDF5VolumeTarget
 from featureTasks import get_local_features,get_local_features_for_multiinp
 from dataTasks import DenseGroundtruth, ExternalSegmentation, StackedRegionAdjacencyGraph
 
@@ -34,7 +34,7 @@ class ExternalClassifier(luigi.Task):
 class EdgeProbabilities(luigi.Task):
 
     pathToSeg = luigi.Parameter()
-    classifierPaths = luigi.ListParameter()
+    pathsToClassifier = luigi.ListParameter()
 
     def requires(self):
 
@@ -43,14 +43,14 @@ class EdgeProbabilities(luigi.Task):
             cf_config = json.load(f)
 
         if cf_config["separateEdgeClassification"]:
-            assert len(self.classifierPaths) == 2
+            assert len(self.pathsToClassifier) == 2
 
         else:
-            assert len(self.classifierPaths) == 1
+            assert len(self.pathsToClassifier) == 1
 
         feature_tasks = get_local_features()
 
-        cf_tasks = [ExternalClassifier(cfp) for cfp in self.classifierPaths]
+        cf_tasks = [ExternalClassifier(cfp) for cfp in self.pathsToClassifier]
         return {"cfs" : cf_tasks, "features" : feature_tasks, "rag" : StackedRegionAdjacencyGraph(self.pathToSeg)}
 
     def run(self):
@@ -60,64 +60,160 @@ class EdgeProbabilities(luigi.Task):
             cf_config = json.load(f)
 
         inp = self.input()
+        nSubFeats = cf_config["nSubFeats"]
 
         # seperate classfiers for xy - and z - edges
         if cf_config["separateEdgeClassification"]:
             t_pred = time.time()
 
-            cf_xy = inp["cfs"][0].read()
-            cf_z  = inp["cfs"][1].read()
-
             rag = inp["rag"].read()
+            features = inp["features"]
 
             nEdges   = rag.numberOfEdges
             nXYEdges = rag.totalNumberOfInSliceEdges
             nZEdges  = nEdges - nXYEdges
 
-            features = inp["features"]
-
-            featuresXY = []
-            featuresZ  = []
-
+            nFeatsXY = 0
+            nFeatsZ = 0
             for feat in features:
-
                 feat.open()
-                nFeats = feat.shape[0]
-
-                if nFeats == nEdges:
-                    featuresXY.append(feat.read([0,0],[nXYEdges,feat.shape[1]]))
-                    featuresZ.append(feat.read([nXYEdges,0],[nEdges,feat.shape[1]]))
-
-                elif nFeats == nXYEdges:
-                    featuresXY.append(feat.read([0,0],feat.shape))
-
-                elif nFeats == nZEdges:
-                    featuresZ.append(feat.read([0,0],feat.shape))
-
+                if feat.shape[0] == nEdges:
+                    nFeatsXY += feat.shape[1]
+                    nFeatsZ += feat.shape[1]
+                elif feat.shape[0] == nXYEdges:
+                    nFeatsXY += feat.shape[1]
+                elif feat.shape[0] == nZEdges:
+                    nFeatsZ += feat.shape[1]
                 else:
-                    raise RuntimeError("Number of features: " + str(nFeats) + " does not match number of edges (Total: " + str(nEdges) + ", XY: " + str(nXYEdges) + ", Z: " + str(nZEdges) + " )")
-                feat.close()
+                    raise RuntimeError("Number of features: " + str(feat.shape[0]) + " does not match number of edges (Total: " + str(nEdges) + ", XY: " + str(nXYEdges) + ", Z: " + str(nZEdges) + " )")
+
+            out = self.output()
+
+            out.open([nEdges],[min(262144,nEdges)])
+
+            for i, feat_type in enumerate( ['xy', 'z'] ):
+                print "Predicting", feat_type, "features"
+                cf = inp["cfs"][i].read()
+
+                nEdgesType = nXYEdges
+                nEdgesNonType = nZEdges
+                startType  = 0
+                endType    = nXYEdges
+                nFeatsTotal = nFeatsXY
+                if feat_type == 'z':
+                    nEdgesType = nZEdges
+                    nEdgesNonType = nXYEdges
+                    startType = nXYEdges
+                    endType = nEdges
+                    nFeatsTotal = nFeatsZ
+
+                print "FeatType:", feat_type
+                print "Edges from", startType, "to", endType
+
+                # if nSubfeats > 1 we split feats to avoid memory error
+
+                if nSubFeats > 1:
+
+                    for subFeats in xrange(nSubFeats):
+                        print subFeats, '/', nSubFeats
+                        featIndexStart = int(float(subFeats)/nSubFeats * nEdgesType)
+                        featIndexEnd   = int(float(subFeats+1)/nSubFeats * nEdgesType)
+                        if subFeats == nSubFeats:
+                            featIndexEnd = nEdgesType
+                        nEdgesSub = featIndexEnd - featIndexStart
+
+                        featuresType = np.zeros( (nEdgesSub, nFeatsTotal), dtype = 'float32' )
+                        featOffset = 0
+
+                        for ii, feat in enumerate(features):
+                            #print "Loading feat", ii, "/", len(features)
+
+                            nFeats = feat.shape[0]
+
+                            if nFeats == nEdges:
+                                #print "Feat common for xy and z"
+                                readStart = featIndexStart + startType
+                                readEnd   = featIndexEnd + startType
+                                featuresType[:,featOffset:featOffset+feat.shape[1]] = feat.read(
+                                        [long(readStart),0L],
+                                        [long(readEnd),long(feat.shape[1])]
+                                    )
+
+                            elif nFeats == nEdgesType:
+                                #print "Only", feat_type, "feature"
+                                featuresType[:,featOffset:featOffset+feat.shape[1]] = feat.read(
+                                        [long(featIndexStart),0L],
+                                        [long(featIndexEnd), long(feat.shape[1])]
+                                    )
+
+                            elif nFeats == nEdgesNonType:
+                                #print "Not", feat_type, "feature"
+                                continue
+
+                            else:
+                                raise RuntimeError("Number of features: " + str(nFeats) + " does not match number of edges (Total: " + str(nEdges) + ", XY: " + str(nXYEdges) + ", Z: " + str(nZEdges) + " )")
+
+                            featOffset += feat.shape[1]
+
+                        #featuresType = np.concatenate( featuresType, axis = 1 )
+                        print "Features loaded, starting prediction"
+
+                        readStart = featIndexStart + startType
+                        if cf_config["useXGBoost"]:
+                            import xgboost as xgb
+                            xgb_mat = xgb.DMatrix(featuresType)
+                            out.write( [long(readStart)],  cf.predict(xgb_mat)[:,1] )
+                        else:
+                            out.write([long(readStart)], cf.predict_proba(featuresType)[:,1] )
+
+                else: # we don't split the features along the edges
+
+                    featuresType = np.zeros( (nEdgesType, nFeatsTotal), dtype = 'float32' )
+                    featOffset = 0
+
+                    for ii, feat in enumerate(features):
+                        #print "Loading feat", ii, "/", len(features)
+
+                        nFeats = feat.shape[0]
+
+                        if nFeats == nEdges:
+                            #print "Feat common for xy and z"
+                            featuresType[:,featOffset:featOffset+feat.shape[1]] = feat.read(
+                                [long(startType),0L], [long(endType),long(feat.shape[1])])
+
+                        elif nFeats == nEdgesType:
+                            #print "Only", feat_type, "feature"
+                            featuresType[:,featOffset:featOffset+feat.shape[1]] = feat.read(
+                                    [0L,0L],
+                                    feat.shape
+                                )
+
+                        elif nFeats == nEdgesNonType:
+                            #print "Not", feat_type, "feature"
+                            continue
+
+                        else:
+                            raise RuntimeError("Number of features: " + str(nFeats) + " does not match number of edges (Total: " + str(nEdges) + ", XY: " + str(nXYEdges) + ", Z: " + str(nZEdges) + " )")
+
+                        featOffset += feat.shape[1]
+
+                    print "Features loaded, starting prediction"
+
+                    if cf_config["useXGBoost"]:
+                        import xgboost as xgb
+                        xgb_mat = xgb.DMatrix(featuresType)
+                        out.write( [long(startType)],  cf.predict(xgb_mat)[:,1] )
+                    else:
+                        out.write([long(startType)], cf.predict_proba(featuresType)[:,1] )
 
 
-            featuresXY = np.concatenate( featuresXY, axis = 1 )
-            featuresZ  = np.concatenate( featuresZ , axis = 1 )
 
-            t_pred = time.time()
-            if cf_config["useXGBoost"]:
-                import xgboost as xgb
-                xgb_mat_xy = xgb.DMatrix(featuresXY)
-                probs_xy = cf_xy.predict(xgb_mat_xy)[:,1]
-                xgb_mat_z = xgb.DMatrix(featuresZ)
-                probs_z = cf_z.predict(xgb_mat_z)[:,1]
-            else:
-                probs_xy = cf_xy.predict_proba(featuresXY)[:,1]
-                probs_z  = cf_z.predict_proba( featuresZ)[:,1]
             t_pred = time.time() - t_pred
             workflow_logger.info("Predicted classifier in: " + str(t_pred) + " s")
 
-            probs = np.concatenate([probs_xy, probs_z], axis = 0)
-
-            self.output().write(probs)
+            out.close()
+            for feat in features:
+                feat.close()
 
         # same classfier for xy - and z - edges
         else:
@@ -143,11 +239,13 @@ class EdgeProbabilities(luigi.Task):
             t_pred = time.time() - t_pred
             workflow_logger.info("Predicted RF in: " + str(t_pred) + " s")
 
-            self.output().write(probs)
+            out  = self.output()
+            out.open([nEdges],[min(262144,nEdges)])
+            self.output().write([0L],probs)
 
     def output(self):
         save_path = os.path.join( PipelineParameter().cache, "EdgeProbabilities.h5"  )
-        return HDF5DataTarget( save_path  )
+        return HDF5VolumeTarget( save_path, 'float32'   )
 
 
 # TODO fuzzy mapping in nifty ?!

@@ -26,7 +26,7 @@ workflow_logger = logging.getLogger(__name__)
 config_logger(workflow_logger)
 
 
-def fusion_moves(g, costs, blockId, nThreads = 1):
+def fusion_moves(g, costs, blockId, nThreads = 1, isGlobal = False):
 
     # read the mc parameter
     with open(PipelineParameter().MCConfigFile, 'r') as f:
@@ -66,11 +66,21 @@ def fusion_moves(g, costs, blockId, nThreads = 1):
     ret = greedy.optimize()
 
     # then run the actual fusion moves solver warmstarted with greedy result
-    # TODO time limit
-    ret = solver.optimize(nodeLabels=ret)
+
+    if isGlobal: # time limit and verbose for global problem:
+        tLim = 60*60*10 # time limit in seconds / 10 hours
+        visitor = obj.multicutVerboseVisitor(1,tLim)
+        ret = solver.optimize(nodeLabels=ret,visitor=visitor)
+    else:
+        ret = solver.optimize(nodeLabels=ret)
+
+
     t_inf = time.time() - t_inf
 
-    workflow_logger.debug("Inference for block " + str(blockId) + " with fusion moves solver in " + str(t_inf) + " s")
+    if isGlobal:
+        workflow_logger.debug("Inference for global problem with fusion moves solver in " + str(t_inf) + " s")
+    else:
+        workflow_logger.debug("Inference for block " + str(blockId) + " with fusion moves solver in " + str(t_inf) + " s")
 
     return ret
 
@@ -135,7 +145,7 @@ class BlockwiseMulticutSolver(luigi.Task):
 
         # FIXME parallelism makes it slower here -> investigate this further and discuss with thorsten!
         t_inf = time.time()
-        reducedNodeResult = fusion_moves( reducedGraph, reducedCosts, "reduced global", 1 )
+        reducedNodeResult = fusion_moves( reducedGraph, reducedCosts, 0, 1, isGlobal = True )
         workflow_logger.info("Inference of reduced problem for the whole volume took: %f s" % (time.time() - t_inf,))
 
         assert reducedNodeResult.shape[0] == reducedNew2Old.shape[0]
