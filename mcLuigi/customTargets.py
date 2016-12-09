@@ -235,3 +235,6 @@ class StackedRagTarget(FileSystemTarget):
                 serialization = serialization)
 
         return rag
+
+    def shape(self):
+        return rag.shape

@@ -19,6 +19,7 @@ import time
 import numpy as np
 import vigra
 import nifty
+from itertools import combinations
 
 from concurrent import futures
 
@@ -110,6 +111,7 @@ class BlockwiseSubSolverForStitching(luigi.Task):
         assert len(subResults) == len(subProblems), str(len(subResults)) + " , " + str(len(subProblems))
 
         out = self.output()
+        # FIXME more efficient to group these into vlen targets!
         for blockId in xrange(numberOfBlocks):
             out.write(subProblems[blockId][0],'%i_inner_edges.h5'%(blockId))
             out.write(subProblems[blockId][1],'%i_outer_edges.h5'%(blockId))
@@ -130,18 +132,15 @@ class StitchGraph(luigi.Task):
 
     def requires(self):
 
-        # read the mc parameter
         with open(PipelineParameter().MCConfigFile, 'r') as f:
             mc_config = json.load(f)
-
-        # block size in first hierarchy level
         blockShape = mc_config["blockShape"]
-        # block overlap, for now same for each hierarchy lvl
         blockOverlap = mc_config["blockOverlap"]
 
         nodes2blocks = NodesToInitialBlocks(self.pathToSeg, self.blockShape, self.blockOverlap)
 
         return {
+            "mcProblem" : self.mcProblem,
             "nodes2blocks" : nodes2blocks,
             "rag" : StackedRegionAdjacencyGraph(self.pathToSeg),
             "subSolutions" : BlockwiseSubSolverForStitching(self.pathToSeg, self.mcProblem, blockShape, blockOverlap)
@@ -152,11 +151,53 @@ class StitchGraph(luigi.Task):
 
         inp = self.input()
 
-        # TODO reimplement w/o loops
+        nodes2blocks = inp["nodes2blocks"].read()
+        blockResults = inp["subSolutions"]
+        rag = inp["rag"].read()
+
+        nBlocks = len(nodes2blocks)
+
+        with open(PipelineParameter().MCConfigFile, 'r') as f:
+            mc_config = json.load(f)
+        blockShape = mc_config["blockShape"]
+        blockOverlap = mc_config["blockOverlap"]
+
+        blocking = nifty.blocking(roiBegin = [0L,0L,0L], roiEnd = rag.shape, blockShape = blockShape)
+        assert blocking.numberOfBlocks == nBlocks
+
+        # TODO reimplement w/o loops or parallelize subtasks
 
         # find all edges that are outer edges or are contained in more than one block (1)
 
+        keepEdges = [] # these are the edges that we keep in the problem
+        for blockId in xrange(nBlocks):
+            keepEdges.extend(blockResult.read('%i_outer_edges'%(blockId)).tolist())
+
+        # this looks pretty inefficient, rethink how we do this! or parallelize -> should be fine
+        for blockId in xrange(nBlocks):
+            thisNodes = nodes2blocks[blockId]
+            block = blocking.getBlockWithHalo(blockId, blockOverlap)
+            # find overlapping blocks
+            overlappingBlocks = blocking.getBlockIdsInBoundingBox(block.begin, block.end, blockOverlap)
+            for ovlBlockId in overlappingBlocks:
+                if ovlBlockId == blockId:
+                    continue
+                ovlNodes = nodes2blocks[ovlBlockId]
+                # find shared nodes
+                sharedNodes = np.intersect1d(thisNodes,ovlNodes,assume_unique=True)
+                # find shared pairs of nodes that have an edges
+                for uv in combinations(sharedNodes, 2):
+                    edgeId = rag.findEdge(uv[0],uv[1])
+                    # TODO we might additionally check if the subsolutions agree for this edge and only
+                    # add it to the keepEdges if they don't agree
+                    if edgeId != -1:
+                        keepEdges.append(edgeId)
+
+        keepEdges = np.unique(keepEdges)
+
         # merge all other edges (only contained in a single block) according to subblock solution (2)
+
+        fixedEdges = np.zeros(rag.numberOfEdges, dtype = bool )
 
         # update edges and weights (1) according to (2) (adding weights s.t. probabilities are preserved!)
 
