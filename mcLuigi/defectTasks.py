@@ -344,13 +344,20 @@ class DefectsToNodes(luigi.Task):
         return HDF5DataTarget(save_path)
 
 
-# TODO implement
 # modify the rag to isolate defected superpixels
 # introduce skip edges over the defected superpixels in z
+# TODO it is probably simpler to modify the plain graph that is fed to the mc instead of the rag
 class ModifiedRag(luigi.Task):
 
+    self.pathToSeg = luigi.Parameter()
+
     def requires(self):
-        pass
+        return {'seg' : ExternalSegmentation(self.pathToSeg),
+                'defect_nodes' : DefectsToNodes(self.pathToSeg)}
+
+    def run(self):
+
+    def output(self):
 
 
 # TODO implement
