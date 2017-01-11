@@ -143,6 +143,7 @@ class HDF5DataTarget(FileSystemTarget):
         raise AttributeError("Not implemented")
 
     def write(self, data, key = "data", compression = None):
+        self.makedirs()
         if compression != None:
             vigra.writeHDF5(data, self.path, key, compression = compression)
         else:

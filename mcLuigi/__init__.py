@@ -3,4 +3,5 @@ from learningTasks import SingleClassifierFromGt, SingleClassifierFromMultipleIn
 from dataTasks import StackedRegionAdjacencyGraph
 from featureTasks import RegionFeatures, EdgeFeatures
 from pipelineParameter import  PipelineParameter
+from defectTasks import OversegmentationStatistics
 from tools import config_logger
