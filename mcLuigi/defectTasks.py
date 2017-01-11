@@ -336,12 +336,12 @@ class DefectsToNodes(luigi.Task):
             for fut in tasks:
                 defect_nodes.extend(fut.result())
 
-        self.output().write(defect_nodes,data)
+        self.output().write(np.array(defect_nodes,dtype='uint32'),'data')
 
     def output(self):
         segFile = os.path.split(self.pathToSeg)[1][:-3]
         save_path = os.path.join( PipelineParameter().cache, "DefectsToNodes_%s.h5" % (segFile,) )
-        return HDF5DataTarget(save_path, dtype = np.uint32)
+        return HDF5DataTarget(save_path)
 
 
 # TODO implement
