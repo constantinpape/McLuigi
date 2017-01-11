@@ -29,8 +29,11 @@ class PipelineParameter(object):
         self.MCConfigFile = ""
         self.EdgeClassifierConfigFile = ""
 
+        # flag to switch between pipeline for normal data and defected data
+        self.defectPipeline = False
+
     ## TODO checks...
-    ## TODO this is not pythonic, overload some __ stuff instead
+    ## TODO this is not pythonic, @propery and set property instead
     #def set_cache(self, cahce):
     #    self.cache = cache
 

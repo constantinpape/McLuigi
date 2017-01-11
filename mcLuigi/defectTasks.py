@@ -95,7 +95,7 @@ class OversegmentationPatchStatistics(luigi.Task):
 class OversegmentationSliceStatistics(luigi.Task):
 
     pathToSeg = luigi.Parameter()
-    nBins = luigi.Parameter(default = 16)
+    nBins = luigi.Parameter(default = 16) # TODO this needs to be fine-tuned together with binThreshold of DefectSliceDetection
 
     def requires(self):
         return ExternalSegmentation(self.pathToSeg)
@@ -291,12 +291,57 @@ class DefectSliceDetection(luigi.Task):
         save_path = os.path.join( PipelineParameter().cache, "DefectSliceDetection_%s.h5" % (segFile,) )
         return HDF5VolumeTarget(save_path, dtype = 'uint8')
 
-# TODO implement
+
+# TODO detection with svm and combination
+# of svm and ws-stat detectios
+
+
 # map defect patches to overlapping superpixels
-class DefectPatchesToSegments(luigi.Task):
+class DefectsToNodes(luigi.Task):
+
+    pathToSeg = luigi.Parameter()
 
     def requires(self):
-        pass
+        return {'seg' : ExternalSegmentation(self.pathToSeg),
+                'defects' : DefectSliceDetection(self.pathToSeg)} # need to tweek binThreshold w/ the default param
+
+    def run(self):
+        inp = self.input()
+        seg = inp['seg']
+        seg.open()
+        defects = inp['defects']
+        defects.open()
+
+        assert seg.shape == defects.shape
+
+        ny = long(seg.shape[1])
+        nx = long(seg.shape[2])
+
+        def defects_to_nodes_z(z):
+            slice_begin = [long(z),0L,0L]
+            slice_end   = [long(z+1),ny,nx]
+            defect_mask = defects.read(slice_begin,slice_end)
+            if 1 in defect_mask:
+                seg_z = seg.read(slice_begin,slice_end)
+                where_defect = defect_mask == 1
+                return list(np.unique(seg_z[where_defect]))
+            else:
+                return []
+
+        with futures.ThreadPoolExecutor(max_workers = PipelineParameter().nThreads) as executor:
+            tasks = []
+            for z in xrange(seg.shape[0]):
+                tasks.append(executor.submit(defects_to_nodes_z,z))
+            defect_nodes = []
+            for fut in tasks:
+                defect_nodes.extend(fut.result())
+
+        self.output().write(defect_nodes,data)
+
+    def output(self):
+        segFile = os.path.split(self.pathToSeg)[1][:-3]
+        save_path = os.path.join( PipelineParameter().cache, "DefectsToNodes_%s.h5" % (segFile,) )
+        return HDF5DataTarget(save_path, dtype = np.uint32)
 
 
 # TODO implement
@@ -309,8 +354,8 @@ class ModifiedRag(luigi.Task):
 
 
 # TODO implement
-# calculate features for the skip edges
-class SkipFeatures(luigi.Task):
+# calculate and insert features for the skip edges
+class ModifiedFeatures(luigi.Task):
 
     def requires(self):
         pass
@@ -318,7 +363,7 @@ class SkipFeatures(luigi.Task):
 
 # TODO implement
 # set the xy edges connecting defected superpixel to non-defected superpixels to be repulsive
-class ModifyWeights(luigi.Task):
+class ModifiedWeights(luigi.Task):
 
     def requires(self):
         pass
