@@ -26,3 +26,5 @@ Missing:
 * Get central scheduler running.
 * Doc + Examples
 * Proper installer via setup.py/ conda
+* Add docstrings
+* change to PEP8 style
