@@ -347,7 +347,7 @@ class DefectsToNodes(luigi.Task):
 # modify the rag to isolate defected superpixels
 # introduce skip edges over the defected superpixels in z
 # TODO it is probably simpler to modify the plain graph that is fed to the mc instead of the rag
-class ModifiedRag(luigi.Task):
+class ModifiedAdjacency(luigi.Task):
 
     self.pathToSeg = luigi.Parameter()
 
@@ -356,8 +356,12 @@ class ModifiedRag(luigi.Task):
                 'defect_nodes' : DefectsToNodes(self.pathToSeg)}
 
     def run(self):
+        pass
+        # TODO compute and save the skip edges as tuples (n1,n2) as well
+        # as the resulting modified adjacency (as plain graph)
 
     def output(self):
+        pass
 
 
 # TODO implement
@@ -369,8 +373,17 @@ class ModifiedFeatures(luigi.Task):
 
 
 # TODO implement
-# set the xy edges connecting defected superpixel to non-defected superpixels to be repulsive
-class ModifiedWeights(luigi.Task):
+# modify the mc problem by changing the graph to the 'ModifiedAdjacency'
+# and setting xy-edges that connect defected with non-defected nodes to be maximal repulsive
+class ModifiedMcProblem(luigi.Task):
+
+    def requires(self):
+        pass
+
+
+# TODO implement
+# replace the segmentation in completely defected slices with adjacent slice
+class PostprocessDefectedSlices(luigi.Task):
 
     def requires(self):
         pass
