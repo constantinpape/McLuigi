@@ -126,6 +126,8 @@ class ModifiedAdjacency(luigi.Task):
         # loop over the defect nodes and find the skip edges,
         # compute the modify adjacency
         skip_edges = []
+        skip_ranges = []
+
         # get the rag adjacency
         uv_ids = rag.uvIds()
         n_nodes = uv_ids.max() + 1
@@ -182,6 +184,8 @@ class ModifiedAdjacency(luigi.Task):
                 continue
 
             # find skip edges
+            skip_range = z_up - z_dn
+
             if prev_z != z: # only read the segmentations if we haven't loaded it yet
                 seg_z = seg.read([z,0L,0L],[z+1,ny,nx]).squeeze()
 
@@ -212,14 +216,18 @@ class ModifiedAdjacency(luigi.Task):
                 # find intersecting nodes in upper slice and add skip edges
                 connected_nodes = np.unique(seg_up[mask_dn])
                 skip_edges.extend( [[min(u_dn,cc),max(u_dn,cc)] for cc in connected_nodes] )
+                skip_ranges.extend( [skip_range for _ in xrange(len(connected_nodes)) ] )
 
             prev_z = z
+
+        assert len(skip_edges) == len(skip_ranges)
 
         delete_edges.sort()
         uv_ids = np.delete(uv_ids,delete_edges,axis=0)
         workflow_logger.info("Deleted %i z-edges due to defects" % (len(delete_edges),) )
 
         skip_edges = np.array(skip_edges, dtype = np.uint32)
+        skip_ranges = np.array(skip_ranges, dtype = np.uint32)
         workflow_logger.info("Introduced %i skip edges due to defects" % (len(skip_edges),) )
 
         # create the modified adjacency
@@ -232,6 +240,7 @@ class ModifiedAdjacency(luigi.Task):
         out = self.output()
         out.write(modified_adjacency.serialize(), "modified_adjacency")
         out.write(skip_edges, "skip_edges")
+        out.write(skip_ranges, "skip_ranges")
 
     def output(self):
         segFile = os.path.split(self.pathToSeg)[1][:-3]
