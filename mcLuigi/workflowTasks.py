@@ -61,7 +61,7 @@ class MulticutSegmentation(luigi.Task):
 
     def output(self):
         save_path = os.path.join( PipelineParameter().cache, "MulticutSegmentation.h5" )
-        return HDF5VolumeTarget( save_path, self.dtype )
+        return HDF5VolumeTarget( save_path, self.dtype, compression = PipelineParameter().compressionLevel)
 
 
 class BlockwiseMulticutSegmentation(luigi.Task):
@@ -107,4 +107,4 @@ class BlockwiseMulticutSegmentation(luigi.Task):
 
     def output(self):
         save_path = os.path.join( PipelineParameter().cache, "BlockwiseMulticutSegmentation.h5" )
-        return HDF5VolumeTarget( save_path, self.dtype )
+        return HDF5VolumeTarget( save_path, self.dtype, compression = PipelineParameter().compressionLevel )

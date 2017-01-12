@@ -92,7 +92,7 @@ class ExternalSegmentation(luigi.Task):
                 workflow_logger.debug("Changing dtype from %s to %s" % (self.dtype,dset.dtype) )
                 self.dtype = dset.dtype
 
-        return HDF5VolumeTarget(self.path, self.dtype, self.key)
+        return HDF5VolumeTarget(self.path, self.dtype, self.key, compression = PipelineParameter().compressionLevel)
 
 
 
@@ -174,7 +174,7 @@ class ExternalSegmentationLabeled(luigi.Task):
 
         save_path = os.path.join( PipelineParameter().cache,
                 os.path.split(self.pathToSeg)[1][:-3] + "_labeled.h5" )
-        return HDF5VolumeTarget( save_path, self.dtype )
+        return HDF5VolumeTarget( save_path, self.dtype, compression = PipelineParameter().compressionLevel )
 
 
 
@@ -204,7 +204,7 @@ class DenseGroundtruth(luigi.Task):
 
     def output(self):
         save_path = os.path.join( PipelineParameter().cache, os.path.split(self.path)[1][:-3] + "_labeled.h5" )
-        return HDF5VolumeTarget( save_path, self.dtype )
+        return HDF5VolumeTarget( save_path, self.dtype, compression = PipelineParameter().compressionLevel)
 
 
 class StackedRegionAdjacencyGraph(luigi.Task):

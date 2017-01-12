@@ -222,7 +222,7 @@ class DefectPatchDetection(luigi.Task):
     def output(self):
         segFile = os.path.split(self.pathToSeg)[1][:-3]
         save_path = os.path.join( PipelineParameter().cache, "DefectPatchDetection_%s.h5" % (segFile,) )
-        return HDF5VolumeTarget(save_path, dtype = 'uint8')
+        return HDF5VolumeTarget(save_path, dtype = 'uint8', compression = PipelineParameter().compressionLevel)
 
 
 class DefectSliceDetection(luigi.Task):
@@ -292,7 +292,7 @@ class DefectSliceDetection(luigi.Task):
     def output(self):
         segFile = os.path.split(self.pathToSeg)[1][:-3]
         save_path = os.path.join( PipelineParameter().cache, "DefectSliceDetection_%s.h5" % (segFile,) )
-        return HDF5VolumeTarget(save_path, dtype = 'uint8')
+        return HDF5VolumeTarget(save_path, dtype = 'uint8', compression = PipelineParameter().compressionLevel)
 
 
 # TODO detection with svm, potentially followed by object detection

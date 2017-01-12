@@ -32,6 +32,9 @@ class PipelineParameter(object):
         # flag to switch between pipeline for normal data and defected data
         self.defectPipeline = False
 
+        # compression level
+        self.compressionLevel = 5
+
     ## TODO checks...
     ## TODO this is not pythonic, @propery and set property instead
     #def set_cache(self, cahce):

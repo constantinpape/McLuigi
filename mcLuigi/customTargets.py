@@ -30,13 +30,14 @@ class HDF5VolumeTarget(FileSystemTarget):
             except OSError:
                 pass
 
-    def __init__(self, path, dtype, key = "data"):
+    def __init__(self, path, dtype, key = "data", compression = -1):
         super(HDF5VolumeTarget, self).__init__(path)
         self.key = key
         self.dtype = dtype
         self.shape = None
         self.chunkShape = None
         self.h5_file = None
+        self.compression = compression
 
 
     def open(self, shape = None, chunkShape = None):
@@ -88,15 +89,15 @@ class HDF5VolumeTarget(FileSystemTarget):
 
             # set the accordingly #TODO (could we do this in a more elegant way?)
             if np.dtype(self.dtype) == np.dtype("float32"):
-                self.array = nifty.hdf5.Hdf5ArrayFloat32(self.h5_file, self.key, self.shape, self.chunkShape)#, cache_slots, cache_size, cache_setting)
+                self.array = nifty.hdf5.Hdf5ArrayFloat32(self.h5_file, self.key, self.shape, self.chunkShape, compression = self.compression)#, cache_slots, cache_size, cache_setting)
             elif np.dtype(self.dtype) == np.dtype("float64"):
-                self.array = nifty.hdf5.Hdf5ArrayFloat64(self.h5_file, self.key, self.shape, self.chunkShape)#, cache_slots, cache_size, cache_setting)
+                self.array = nifty.hdf5.Hdf5ArrayFloat64(self.h5_file, self.key, self.shape, self.chunkShape, compression = self.compression)#, cache_slots, cache_size, cache_setting)
             elif np.dtype(self.dtype) == np.dtype("uint8"):
-                self.array = nifty.hdf5.Hdf5ArrayUInt8(self.h5_file,   self.key, self.shape, self.chunkShape)#, cache_slots, cache_size, cache_setting)
+                self.array = nifty.hdf5.Hdf5ArrayUInt8(self.h5_file,   self.key, self.shape, self.chunkShape, compression = self.compression)#, cache_slots, cache_size, cache_setting)
             elif np.dtype(self.dtype) == np.dtype("uint32"):
-                self.array = nifty.hdf5.Hdf5ArrayUInt32(self.h5_file,  self.key, self.shape, self.chunkShape)#, cache_slots, cache_size, cache_setting)
+                self.array = nifty.hdf5.Hdf5ArrayUInt32(self.h5_file,  self.key, self.shape, self.chunkShape, compression = self.compression)#, cache_slots, cache_size, cache_setting)
             elif np.dtype(self.dtype) == np.dtype("uint64"):
-                self.array = nifty.hdf5.Hdf5ArrayUInt64(self.h5_file,  self.key, self.shape, self.chunkShape)#, cache_slots, cache_size, cache_setting)
+                self.array = nifty.hdf5.Hdf5ArrayUInt64(self.h5_file,  self.key, self.shape, self.chunkShape, compression = self.compression)#, cache_slots, cache_size, cache_setting)
             else:
                 raise RuntimeError("Datatype %s not supported!" % (str(self.dtype),))
 
