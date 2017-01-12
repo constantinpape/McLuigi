@@ -141,7 +141,7 @@ class ModifiedAdjacency(luigi.Task):
 
         # returns skip edges from nodes in lower slice to nodes in the above slices for the defected nodes
         # if nodes in above slice is also defected, recursively calls itself and goes one slice up
-        def get_skip_edges(z_up, z_dn bb_begin, bb_end, mask, nodes_dn, seg_dn):
+        def get_skip_edges(z_up, z_dn, bb_begin, bb_end, mask, nodes_dn, seg_dn):
 
             seg_up = seg.read([z_up] + bb_begin, [z_up+1] + bb_end).squeeze()
             nodes_up = vigra.analysis.unique(seg_up[mask])
@@ -196,7 +196,7 @@ class ModifiedAdjacency(luigi.Task):
             mask[where_in_bb] = 1
 
             # find the lower nodes for skip connections
-            seg_dn = seg.read([z_dn] + begin_u, [z] + end_u).squeeze()
+            seg_dn = seg.read([z-1] + begin_u, [z] + end_u).squeeze()
             nodes_dn = vigra.analysis.unique(seg_dn[mask])
 
             # we discard defected nodes in the lower slice (if present), because these were already taken care of
@@ -204,9 +204,9 @@ class ModifiedAdjacency(luigi.Task):
             nodes_dn = np.array([nn for nn in nodes_dn if nn not in defect_nodes])
 
             if nodes_dn.size: # only do stuff if the array is not empty
-                skip_edges_u, skip_ranges_u = get_skip_edges(z+1, z-1, begin_u, end_u, nodes_dn, seg_dn)
-                skip_edges.extend(skip_edges)
-                skip_ranges.extend(skip_ranges)
+                skip_edges_u, skip_ranges_u = get_skip_edges(z+1, z-1, begin_u, end_u, mask, nodes_dn, seg_dn)
+                skip_edges.extend(skip_edges_u)
+                skip_ranges.extend(skip_ranges_u)
 
             prev_z = z
 
