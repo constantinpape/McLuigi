@@ -4,7 +4,7 @@ import luigi
 
 from customTargets import HDF5DataTarget, HDF5VolumeTarget
 from dataTasks import InputData, ExternalSegmentation
-#from miscTasks import EdgeIndications
+from defectDetectionTasks import DefectSliceDetection
 
 from pipelineParameter import PipelineParameter
 from tools import config_logger
