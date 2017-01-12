@@ -4,5 +4,5 @@ from dataTasks import StackedRegionAdjacencyGraph
 from featureTasks import RegionFeatures, EdgeFeatures
 from pipelineParameter import  PipelineParameter
 from defectDetectionTasks import OversegmentationPatchStatistics, OversegmentationSliceStatistics, DefectPatchDetection, DefectSliceDetection
-from defectHandlingTasks import DefectsToNodes
+from defectHandlingTasks import DefectsToNodes, ModifiedAdjacency
 from tools import config_logger

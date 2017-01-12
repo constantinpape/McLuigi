@@ -228,13 +228,8 @@ class StackedRegionAdjacencyGraph(luigi.Task):
         seg.open()
         shape = seg.shape
 
-        print shape
-
         seg_last = seg.read( [shape[0]-1,0,0], shape )
-
         n_labels = seg_last.max() + 1
-
-        print "NumberOfLabels:", n_labels
 
         t_rag = time.time()
         rag = nifty.graph.rag.gridRagStacked2DHdf5( seg.get(), n_labels, numberOfThreads = -1) # nThreads = -1, could also make this accessible

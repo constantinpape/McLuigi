@@ -254,6 +254,7 @@ class DefectSliceDetection(luigi.Task):
 
         slice_shape = (1L,ny,nx)
         defect_mask = np.ones(slice_shape, dtype = np.uint8)
+        non_defect_mask = np.zeros(slice_shape, dtype = np.uint8)
 
         def detect_defected_slice(z):
             slice_begin = [long(z),0L,0L]
@@ -264,7 +265,9 @@ class DefectSliceDetection(luigi.Task):
             if n_segs < threshold:
                 out.write(slice_begin, defect_mask)
                 return True
-            return False
+            else: # FIXME for some reason we have to write here, otherwise there is strange behaviour when loading the data slice by slice
+                out.write(slice_begin, non_defect_mask)
+                return False
 
         # non parallel for debugging
         #defect_indications = []
