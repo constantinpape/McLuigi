@@ -117,6 +117,9 @@ class ModifiedAdjacency(luigi.Task):
         seg = inp['seg']
         seg.open()
 
+        # make sure that z is monotonically increasing (not strictly!)
+        assert np.all(np.diff(nodes_z) >= 0), "Defected slice index is not increasing monotonically!"
+
         workflow_logger.info("Computing ModiifiedAdjacency")
 
         edge_offset = rag.totalNumberOfInSliceEdges
@@ -125,39 +128,45 @@ class ModifiedAdjacency(luigi.Task):
 
         # loop over the defect nodes and find the skip edges,
         # compute the modify adjacency
+
         skip_edges = []
         skip_ranges = []
+        delete_edges = []
 
-        # get the rag adjacency
+        prev_z = -1
+
+        # get the original rag adjacency
         uv_ids = rag.uvIds()
         n_nodes = uv_ids.max() + 1
 
-        # TODO this is fine for now, since we mark whole slices as defected anyway,
-        # but we have individual defect patches need to come up with something more clever!
-        # if we have defects in multiple consecutive slices we only consider the lowest one and skip
-        # over the following defected slices
-        slices_with_defect = vigra.analysis.unique(nodes_z)
-        consecutive_defects = np.split(slices_with_defect, np.where(np.diff(slices_with_defect) != 1)[0]+1)
-        lowest_defect_slices = [consec[0] for consec in consecutive_defects if len(consec) > 1]
-        skip_slices          = [cc for c in consec for consec in consecutive_defects if len(consec) > 1]
-        next_good_slices     = [consec[-1] + 1 for consec in consecutive_defects if len(consec) > 1]
-        assert len(lowest_defect_slices) == len(next_good_slices)
-        lowest_to_good       = {lowest_defect_slices[ii] : next_good_slices[ii] for ii in xrange(len(next_good_slices))}
+        # returns skip edges from nodes in lower slice to nodes in the above slices for the defected nodes
+        # if nodes in above slice is also defected, recursively calls itself and goes one slice up
+        def get_skip_edges(z_up, z_dn bb_begin, bb_end, mask, nodes_dn, seg_dn):
 
-        # fix the corner case that we have a succession of bad slices at the bottom
-        lowest_good_slice = 0
-        if 0 in lowest_to_good:
-            lowest_good_slice = lowest_to_good[0]
+            seg_up = seg.read([z_up] + bb_begin, [z_up+1] + bb_end).squeeze()
+            nodes_up = vigra.analysis.unique(seg_up[mask])
 
-        workflow_logger.info("Found %i consecutive defected slices" % (len(lowest_defect_slices)))
-        workflow_logger.info("Lowest slices to next good slices: " + str(lowest_to_good))
-        workflow_logger.info("Skip slices: " + str(skip_slices))
+            skip_range = z_up - z_dn
+            new_skip_edges = []
+            new_skip_ranges = []
 
-        # edges to be deleted
-        delete_edges = []
-        prev_z = -1
+            for u_dn in nodes_dn:
+                # find coordinates of node in lower slice and interesect with mask
+                where_dn = seg_dn == u_dn
+                mask_dn = np.logical_and(where_dn, mask)
+                # find intersecting nodes in upper slice and find the nodes with overlap
+                connected_nodes = np.unique(seg_up[mask_dn])
+                # if any of the nodes is defected go to the next slice
+                # TODO Don't know if this is the best way to do it, but already much better than skipping the whole slice
+                if np.any([nn in defect_nodes for nn in connected_nodes]):
+                    new_skip_edges, new_skip_ranges = get_skip_edges(z_up+1,z_dn,bb_begin,bb_end,mask,nodes_dn,seg_dn)
+                    break
+                else:
+                    new_skip_edges.extend( [[min(u_dn,cc),max(u_dn,cc)] for cc in connected_nodes] )
+                    new_skip_ranges.extend( [skip_range for _ in xrange(len(connected_nodes))] )
 
-        # TODO can we speed this up somehow? -> parallelize or move impl to c++
+            return new_skip_edges, new_skip_ranges
+
         print "Processing defected nodes:"
         for i, u in enumerate(defect_nodes):
             print i, '/', len(defect_nodes)
@@ -169,22 +178,9 @@ class ModifiedAdjacency(luigi.Task):
                 if edge_id > edge_offset:
                     delete_edges.append(edge_id)
 
-            if z in skip_slices: #skip over consecutive defected slices that are not lowest
-                continue
-            if z in lowest_defect_slices: # if we are at lowest slice of consecutive defected slices, need to skip further
-                z_up = lowest_to_good[z]
-                if z_up >= seg.shape[0]: # next good slice is out of range
-                    continue
-            else:
-                z_up = long(z + 1)
-            z_dn = long(z - 1)
-
             # don't need skip edges for first (good) or last slice
-            if z == lowest_good_slice or z == seg.shape[0] - 1:
+            if z == 0 or z == seg.shape[0] - 1:
                 continue
-
-            # find skip edges
-            skip_range = z_up - z_dn
 
             if prev_z != z: # only read the segmentations if we haven't loaded it yet
                 seg_z = seg.read([z,0L,0L],[z+1,ny,nx]).squeeze()
@@ -199,24 +195,18 @@ class ModifiedAdjacency(luigi.Task):
             mask = np.zeros( tuple(map(lambda x,y: x - y, end_u, begin_u)), dtype = bool)
             mask[where_in_bb] = 1
 
-            # find the upper and lower nodes for skip connections
+            # find the lower nodes for skip connections
             seg_dn = seg.read([z_dn] + begin_u, [z] + end_u).squeeze()
-            seg_up = seg.read([z_up] + begin_u, [z_up+1] + end_u).squeeze()
-
-            # connect up and dn nodes that have overlap in the mask
             nodes_dn = vigra.analysis.unique(seg_dn[mask])
-            nodes_up = vigra.analysis.unique(seg_up[mask])
 
-            # TODO need to handle the possibility that the up nodes could be defected later on here
-            # that shouldn't be too hard, because we have already processed every thing in the lower part
-            for u_dn in nodes_dn:
-                # find coordinates of node in lower slice and interesect with mask
-                where_dn = seg_dn == u_dn
-                mask_dn = np.logical_and(where_dn, mask)
-                # find intersecting nodes in upper slice and add skip edges
-                connected_nodes = np.unique(seg_up[mask_dn])
-                skip_edges.extend( [[min(u_dn,cc),max(u_dn,cc)] for cc in connected_nodes] )
-                skip_ranges.extend( [skip_range for _ in xrange(len(connected_nodes)) ] )
+            # we discard defected nodes in the lower slice (if present), because these were already taken care of
+            # in previous iterations
+            nodes_dn = np.array([nn for nn in nodes_dn if nn not in defect_nodes])
+
+            if nodes_dn.size: # only do stuff if the array is not empty
+                skip_edges_u, skip_ranges_u = get_skip_edges(z+1, z-1, begin_u, end_u, nodes_dn, seg_dn)
+                skip_edges.extend(skip_edges)
+                skip_ranges.extend(skip_ranges)
 
             prev_z = z
 
@@ -259,6 +249,7 @@ class ModifiedFeatures(luigi.Task):
 # TODO implement
 # modify the mc problem by changing the graph to the 'ModifiedAdjacency'
 # and setting xy-edges that connect defected with non-defected nodes to be maximal repulsive
+# maybe weight down the skip edges by their respective skip - range
 class ModifiedMcProblem(luigi.Task):
 
     def requires(self):
