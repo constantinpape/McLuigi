@@ -4,7 +4,7 @@
 # singleton top class holding cache and number of cores (params that are needed by
 # all Tasks, but I don't want to pass around...)
 
-import luigi
+import multiprocessing
 
 # singleton type
 class Singleton(type):
@@ -18,27 +18,21 @@ class PipelineParameter(object):
     __metaclass__ = Singleton
 
     def __init__(self):
-        # TODO this should also be read from some json...
+
+        # Input Files
         self.cache = "/tmp/mc_cache"
-
-        import multiprocessing
-        self.nThreads = multiprocessing.cpu_count()
-
         self.InputFile = ""
         self.FeatureConfigFile = ""
         self.MCConfigFile = ""
         self.EdgeClassifierConfigFile = ""
 
+        # flag to switch between pipeline for anisotropic and isotropic (not implemented yet) data
+        self.anisotropicPipeline = True
         # flag to switch between pipeline for normal data and defected data
         self.defectPipeline = False
-
+        # number of threads
+        self.nThreads = multiprocessing.cpu_count()
         # compression level
         self.compressionLevel = 5
 
-    ## TODO checks...
-    ## TODO this is not pythonic, @propery and set property instead
-    #def set_cache(self, cahce):
-    #    self.cache = cache
-
-    #def set_n_threads(n_threads):
-    #    self.n_threads = n_threads
+    # TODO range cheks for nThreads and compressionLevel with @propery and set property

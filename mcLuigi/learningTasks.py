@@ -3,8 +3,8 @@
 
 import luigi
 
+from taskSelection import get_local_features,get_local_features_for_multiinp
 from customTargets import PickleTarget, HDF5DataTarget, HDF5VolumeTarget
-from featureTasks import get_local_features,get_local_features_for_multiinp
 from dataTasks import DenseGroundtruth, ExternalSegmentation, StackedRegionAdjacencyGraph
 
 from pipelineParameter import PipelineParameter

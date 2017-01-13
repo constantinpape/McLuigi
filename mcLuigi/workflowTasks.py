@@ -3,12 +3,12 @@
 
 import luigi
 
-from multicutSolverTasks import McProblem, McSolverExact, McSolverFusionMoves
+from taskSelection import MulticutProblem
+
+from multicutSolverTasks import McSolverExact, McSolverFusionMoves
 from blockwiseMulticutTasks import BlockwiseMulticutSolver
 from dataTasks import StackedRegionAdjacencyGraph, ExternalSegmentation
 from customTargets import HDF5VolumeTarget
-
-from debugTasks import McPromblemVigraFromFile
 
 from pipelineParameter import PipelineParameter
 from tools import config_logger
@@ -29,8 +29,7 @@ class MulticutSegmentation(luigi.Task):
 
     def requires(self):
         return { "McNodes" : McSolverFusionMoves(
-                    McProblem(self.pathToSeg, self.pathsToClassifier) ),
-                    #McPromblemVigraFromFile(self.pathToSeg) ),
+                    MulticutProblem(self.pathToSeg, self.pathsToClassifier) ),
                 "Rag" : StackedRegionAdjacencyGraph(self.pathToSeg),
                 "Seg" : ExternalSegmentation(self.pathToSeg)}
 
@@ -74,8 +73,7 @@ class BlockwiseMulticutSegmentation(luigi.Task):
 
     def requires(self):
         return { "McNodes" : BlockwiseMulticutSolver( self.pathToSeg,
-                    McProblem(self.pathToSeg, self.pathsToClassifier),
-                    #McPromblemVigraFromFile(self.pathToSeg),
+                    MulticutProblem(self.pathToSeg, self.pathsToClassifier),
                     self.numberOfLevels ),
                 "Rag" : StackedRegionAdjacencyGraph(self.pathToSeg),
                 "Seg" : ExternalSegmentation(self.pathToSeg)}

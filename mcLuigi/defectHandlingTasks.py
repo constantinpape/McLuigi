@@ -239,8 +239,16 @@ class ModifiedAdjacency(luigi.Task):
 
 
 # TODO implement
-# calculate and insert features for the skip edges
-class ModifiedFeatures(luigi.Task):
+# calculate and insert edge features for the skip edges
+class ModifiedEdgeFeatures(luigi.Task):
+
+    def requires(self):
+        pass
+
+
+# TODO implement
+# calculate and insert region features for the skip edges
+class ModifiedEdgeFeatures(luigi.Task):
 
     def requires(self):
         pass
@@ -250,7 +258,7 @@ class ModifiedFeatures(luigi.Task):
 # modify the mc problem by changing the graph to the 'ModifiedAdjacency'
 # and setting xy-edges that connect defected with non-defected nodes to be maximal repulsive
 # maybe weight down the skip edges by their respective skip - range
-class ModifiedMcProblem(luigi.Task):
+class ModifiedMulticutProblem(luigi.Task):
 
     def requires(self):
         pass
