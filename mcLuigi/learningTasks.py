@@ -9,7 +9,7 @@ from customTargets import PickleTarget, HDF5DataTarget, HDF5VolumeTarget
 from dataTasks import DenseGroundtruth, ExternalSegmentation, StackedRegionAdjacencyGraph
 
 from pipelineParameter import PipelineParameter
-from tools import config_logger
+from tools import config_logger, run_decorator
 
 import logging
 
@@ -551,8 +551,6 @@ class SingleClassifierFromMultipleInputs(luigi.Task):
         workflow_logger.info("Learned classifier in: " + str(t_learn) + " s")
 
         self.output().write(cf)
-
-
 
     def output(self):
         with open(PipelineParameter().EdgeClassifierConfigFile, 'r') as f:

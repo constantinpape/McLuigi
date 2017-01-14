@@ -6,4 +6,4 @@ from pipelineParameter import  PipelineParameter
 from defectDetectionTasks import OversegmentationSliceStatistics, DefectSliceDetection
 from defectHandlingTasks import DefectsToNodes, ModifiedAdjacency, ModifiedRegionFeatures, ModifiedEdgeFeatures
 from multicutProblemTasks import MulticutProblem
-from tools import config_logger
+from tools import config_logger, run_decorator

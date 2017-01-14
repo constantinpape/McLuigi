@@ -8,7 +8,7 @@ from defectDetectionTasks import DefectSliceDetection
 from featureTasks import EdgeFeatures, RegionFeatures, RegionNodeFeatures
 
 from pipelineParameter import PipelineParameter
-from tools import config_logger
+from tools import config_logger, run_decorator
 
 import logging
 import json
@@ -363,8 +363,10 @@ class ModifiedEdgeFeatures(luigi.Task):
                 'rag' : StackedRegionAdjacencyGraph(self.pathToSeg),
                 'data' : InputData(self.pathToInput) }
 
+    @run_decorator
     def run(self):
 
+        print "Called!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!1"
         inp = self.input()
         rag = inp['rag'].read()
 
