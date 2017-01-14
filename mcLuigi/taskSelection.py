@@ -3,18 +3,16 @@
 # pipeline options
 
 from featureTasks import EdgeFeatures, RegionFeatures
-from defectHandlingTasks import ModifiedEdgeFeatures, ModifiedRegionFeatures, ModifiedMulticutProblem
-from multicutProblemTasks import StandardMulticutProblem
-
+from defectHandlingTasks import ModifiedEdgeFeatures, ModifiedRegionFeatures
 from pipelineParameter import PipelineParameter
 from tools import config_logger
 
 import logging
+import json
 
 # init the workflow logger
 workflow_logger = logging.getLogger(__name__)
 config_logger(workflow_logger)
-
 
 # TODO select debug tasks if flag
 # try vigra features for debugging
@@ -22,13 +20,6 @@ config_logger(workflow_logger)
 #get_local_features = get_local_vigra_features
 
 # TODO implement and select isotropic tasks if not pipelineParams.anisotropicPipeline
-
-# select defect handling tasks if pipelineParams.defectPipeline
-if PipelineParameter().defectPipeline:
-    MulticutProblem = ModifiedMulticutProblem
-else:
-    MulticutProblem = StandardMulticutProblem
-
 
 # read the feature configuration from PipelineParams.FeatureConfigFile
 # and return the corresponding feature tasks

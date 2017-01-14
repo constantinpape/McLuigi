@@ -149,6 +149,7 @@ class RegionFeatures(luigi.Task):
 
         import gc
 
+        workflow_logger.info("Computing RegionFeatures")
         t_feats = time.time()
 
         inp = self.input()
@@ -246,6 +247,13 @@ class EdgeFeatures(luigi.Task):
 
         assert not(self.keepOnlyXY and self.keepOnlyZ)
 
+        workflow_logger.info("Computing EdgeFeatures")
+        if self.keepOnlyXY:
+            workflow_logger.info("for xy-edges only")
+        elif self.keepOnlyZ:
+            workflow_logger.info("for z-edges only")
+        workflow_logger.info("on input from: %s" % self.pathToInput)
+
         inp[1].open()
         data = inp[1].get()
 
@@ -264,7 +272,7 @@ class EdgeFeatures(luigi.Task):
 
         out.open(out_shape, chunk_shape)
 
-        edge_features = nifty.graph.rag.accumulateEdgeFeaturesFromFilters(rag, data, out.get(), self.keepOnlyXY, self.keepOnlyZ, 20) #, nthreads)
+        edge_features = nifty.graph.rag.accumulateEdgeFeaturesFromFilters(rag, data, out.get(), self.keepOnlyXY, self.keepOnlyZ, PipelineParameter().nThreads)
 
         t_feats = time.time() - t_feats
         workflow_logger.info("Calculated Edge Features in: " + str(t_feats) + " s")

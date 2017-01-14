@@ -3,6 +3,7 @@
 
 import luigi
 
+# FIXME this causes ann ImportError for some reason
 from taskSelection import get_local_features,get_local_features_for_multiinp
 from customTargets import PickleTarget, HDF5DataTarget, HDF5VolumeTarget
 from dataTasks import DenseGroundtruth, ExternalSegmentation, StackedRegionAdjacencyGraph

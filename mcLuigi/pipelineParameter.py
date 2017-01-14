@@ -5,6 +5,7 @@
 # all Tasks, but I don't want to pass around...)
 
 import multiprocessing
+import logging
 
 # singleton type
 class Singleton(type):
@@ -34,5 +35,7 @@ class PipelineParameter(object):
         self.nThreads = multiprocessing.cpu_count()
         # compression level
         self.compressionLevel = 5
+        # log level
+        self.logLevel = logging.INFO
 
-    # TODO range cheks for nThreads and compressionLevel with @propery and set property
+    # TODO range cheks for nThreads, compressionLevel and logLevel with @propery and set property

@@ -9,6 +9,7 @@ import time
 from dataTasks import StackedRegionAdjacencyGraph
 from learningTasks import EdgeProbabilities
 from customTargets import HDF5DataTarget
+from defectHandlingTasks import ModifiedAdjacency
 
 from pipelineParameter import PipelineParameter
 from tools import config_logger
@@ -80,6 +81,8 @@ class StandardMulticutProblem(luigi.Task):
         with open(PipelineParameter().MCConfigFile, 'r') as f:
             mc_config = json.load(f)
 
+        workflow_logger.info("Computing Standard Multicut Problem")
+
         inp = self.input()
         rag = inp["Rag"].read()
         # FIXME why is this a vol target? it should easily fit in ram, or we are reaalllly screwed
@@ -126,3 +129,85 @@ class StandardMulticutProblem(luigi.Task):
     def output(self):
         save_path = os.path.join( PipelineParameter().cache, "StandardMulticutProblem.h5" )
         return HDF5DataTarget( save_path )
+
+
+# modify the mc problem by changing the graph to the 'ModifiedAdjacency'
+# and setting xy-edges that connect defected with non-defected nodes to be maximal repulsive
+# TODO maybe weight down the skip edges by their respective skip - range
+class ModifiedMulticutProblem(luigi.Task):
+
+    pathToSeg = luigi.Parameter()
+    # this can either contain a single path (classifier trained for xy - and z - edges jointly)
+    # or two paths (classfier trained for xy - edges + classifier trained for z - edges separately)
+    pathsToClassifier  = luigi.ListParameter()
+
+    def requires(self):
+        return {'edge_probabilities' : EdgeProbabilities(self.pathToSeg, self.pathsToClassifier),
+                'modified_adjacency' : ModifiedAdjacency(self.pathToSeg),
+                'rag' : StackedRegionAdjacencyGraph(self.pathToSeg)}
+
+    def run(self):
+        inp = self.input()
+        modified_adjacency = inp['modified_adjacency']
+        rag = inp['rag'].read()
+        edge_costs = inp['edge_probabilities']
+        edge_costs.open()
+        edge_costs = edge_costs.read([0L],[long(edgeCosts.shape[0])])
+        assert len(edge_costs.shape) == 1
+
+        # read the mc parameter
+        with open(PipelineParameter().MCConfigFile, 'r') as f:
+            mc_config = json.load(f)
+
+        workflow_logger.info("Computing Modified Multicut Problem")
+
+        # scale the probabilities
+        # this is pretty arbitrary, it used to be 1. / n_tress, but this does not make that much sense for sklearn impl
+        p_min = 0.001
+        p_max = 1. - p_min
+        edge_costs = (p_max - p_min) * edge_costs + p_min
+
+        beta = mc_config["beta"]
+
+        # probabilities to energies, second term is boundary bias
+        edge_costs = np.log( (1. - edge_costs) / edge_costs ) + np.log( (1. - beta) / beta )
+
+        # weight edge costs
+        weighting_scheme = mc_config["weightingScheme"]
+        weight           = mc_config["weight"]
+
+        edge_costs = weight_edge_costs(edge_costs, rag, weighting_scheme, weight)
+
+        assert edge_costs.shape[0] == uvIds.shape[0]
+        assert np.isfinite( edge_costs.min() ), str(edge_costs.min())
+        assert np.isfinite( edge_costs.max() ), str(edge_costs.max())
+
+        # modify the edges costs by setting the ignore edges to be maximally repulsive
+        ignore_edges = modified_adjacency.read('ignore_edges')
+
+        max_repulsive = 2 * edge_costs.max() # max is correct here !?!
+        edge_costs[ignore_edges] = max_repulsive
+
+        # TODO we might also want to weight down the skip-edges according to their range
+        #skip_ranges = modified_adjacency.read('skip_ranges')
+        #skip_edges_begin = rag.numberOfEdges
+        #assert edge_costs.shape[0] - skip_edges_begin == len(skip_ranges), '%i, %i' % (edge_costs.shape[0] - skip_edges_begin, len(skip_ranges))
+        #edge_costs[skip_edges_begin:] /= skip_ranges
+
+        out = self.output()
+
+        out.write(edge_costs,'costs')
+        # write the modified graph
+        out.write(modified_adjacency.read('modified_adjacency'))
+
+
+    def output(self):
+        save_path = os.path.join( PipelineParameter().cache, "ModifiedMulticutProblem.h5" )
+        return HDF5DataTarget( save_path )
+
+
+# select defect handling tasks if pipelineParams.defectPipeline
+if PipelineParameter().defectPipeline:
+    MulticutProblem = ModifiedMulticutProblem
+else:
+    MulticutProblem = StandardMulticutProblem

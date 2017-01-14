@@ -3,10 +3,7 @@ import numpy as np
 
 # call this function to configure the logger
 # change the log file / log level if necessary
-def config_logger(logger):
-
-    level = logging.INFO
-    #level = logging.DEBUG
+def config_logger(logger, level = logging.INFO):
 
     # for now we have to change this here, until we have better configuration handling
     handler = logging.FileHandler('luigi_workflow.log')
@@ -19,6 +16,7 @@ def config_logger(logger):
 workflow_logger = logging.getLogger(__name__)
 config_logger(workflow_logger)
 
+# TODO implement a wrapper for task.run that logs arguments and runtime!
 
 
 # numpy.replace: replcaces the values in array according to dict

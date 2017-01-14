@@ -3,7 +3,7 @@
 
 import luigi
 
-from taskSelection import MulticutProblem
+from multicutProblemTasks import MulticutProblem
 
 from multicutSolverTasks import McSolverExact, McSolverFusionMoves
 from blockwiseMulticutTasks import BlockwiseMulticutSolver
