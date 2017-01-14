@@ -7,7 +7,7 @@ from pipelineParameter import PipelineParameter
 from dataTasks import StackedRegionAdjacencyGraph, ExternalSegmentation
 from customTargets import HDF5DataTarget
 
-from tools import config_logger
+from tools import config_logger, run_decorator
 
 import os
 import logging
@@ -109,7 +109,7 @@ class BlockwiseMulticutSolver(luigi.Task):
         for l in xrange(self.numberOflevels):
             levelBlockShape = map( lambda x: x*blockFactor, initialBlockShape)
 
-            workflow_logger.info("Scheduling reduced problem for level " + str(l) + " with block shape: " + str(levelBlockShape))
+            workflow_logger.info("BlockwiseMulticutSolver: scheduling reduced problem for level %i with block shape: %s" % (l, str(levelBlockShape))
 
             # TODO check that we don't get larger than the actual shape here
             problemHierarchy.append( ReducedProblem(self.pathToSeg, problemHierarchy[-1],
@@ -118,7 +118,7 @@ class BlockwiseMulticutSolver(luigi.Task):
 
         return problemHierarchy
 
-
+    @run_decorator
     def run(self):
 
         problems = self.input()
@@ -145,7 +145,7 @@ class BlockwiseMulticutSolver(luigi.Task):
         # FIXME parallelism makes it slower here -> investigate this further and discuss with thorsten!
         t_inf = time.time()
         reducedNodeResult = fusion_moves( reducedGraph, reducedCosts, 0, 1, isGlobal = True )
-        workflow_logger.info("Inference of reduced problem for the whole volume took: %f s" % (time.time() - t_inf,))
+        workflow_logger.info("BlockwiseMulticutSolver: inference of reduced problem for the whole volume took: %f s" % (time.time() - t_inf,))
 
         assert reducedNodeResult.shape[0] == reducedNew2Old.shape[0]
         toGlobalNodes = reducedProblem.read("new2global")
@@ -157,10 +157,9 @@ class BlockwiseMulticutSolver(luigi.Task):
 
         # get the global energy
         globalEnergy = globalObjective.evalNodeLabels(nodeResult)
-        workflow_logger.info("Blockwise Multicut problem solved with energy %s" % (globalEnergy,) )
+        workflow_logger.info("BlockwiseMulticutSolver: Global problem solved with energy %f" % (globalEnergy,) )
 
         self.output().write(nodeResult)
-
 
     def output(self):
         save_path = os.path.join( PipelineParameter().cache, "BlockwiseMulticutSolver.h5")
@@ -181,7 +180,7 @@ class ReducedProblem(luigi.Task):
         return {"subSolution" : BlockwiseSubSolver( self.pathToSeg, self.problem, self.blockShape, self.blockOverlap, self.level),
                 "problem" : self.problem }
 
-
+    @run_decorator
     def run(self):
 
         inp = self.input()
@@ -253,11 +252,11 @@ class ReducedProblem(luigi.Task):
 
 
         t_merge = time.time() - t_merge
-        workflow_logger.info("Time for merging: %f s" % (t_merge))
+        workflow_logger.info("ReucedProblem: Time for merging: %f s" % (t_merge))
 
-        workflow_logger.info("Merging of blockwise results reduced problemsize (level %i):" % (self.level,) )
-        workflow_logger.info("Nodes: From %i to %i" % (numberOfNodes, numberOfNewNodes) )
-        workflow_logger.info("Edges: From %i to %i" % (numberOfEdges, numberOfNewEdges) )
+        workflow_logger.info("ReucedProblem: Merging of blockwise results reduced problemsize (level %i):" % (self.level,) )
+        workflow_logger.info("ReucedProblem: Nodes: From %i to %i" % (numberOfNodes, numberOfNewNodes) )
+        workflow_logger.info("ReucedProblem: Edges: From %i to %i" % (numberOfEdges, numberOfNewEdges) )
 
         out = self.output()
         out.write(reducedGraph.serialize(), "graph")
@@ -290,6 +289,7 @@ class NodesToInitialBlocks(luigi.Task):
     def requires(self):
         return ExternalSegmentation(self.pathToSeg)
 
+    @run_decorator
     def run(self):
 
         seg = self.input()
@@ -315,17 +315,12 @@ class NodesToInitialBlocks(luigi.Task):
                 tasks.append( executor.submit(nodes_to_block, blockId) )
             blockResult = np.array([fut.result() for fut in tasks])
 
-        workflow_logger.info( "Nodes2InitialBlocks done in %f s" % (time.time() - t_extract) )
-
-
         self.output().writeVlen(blockResult)
-
 
     def output(self):
         save_name = "NodesToInitialBlocks.h5"
         save_path = os.path.join( PipelineParameter().cache, save_name)
         return HDF5DataTarget( save_path )
-
 
 
 class BlockwiseSubSolver(luigi.Task):
@@ -348,7 +343,7 @@ class BlockwiseSubSolver(luigi.Task):
         nodes2blocks = NodesToInitialBlocks(self.pathToSeg, initialShape, overlap)
         return { "seg" : ExternalSegmentation(self.pathToSeg), "problem" : self.problem , "nodes2blocks" : nodes2blocks }
 
-
+    @run_decorator
     def run(self):
 
         # Input
@@ -395,7 +390,7 @@ class BlockwiseSubSolver(luigi.Task):
             nodeList = np.unique(np.concatenate([nodes2blocks[subId] for subId in subBlocks]))
             if self.level != 0:
                 nodeList = np.unique( global2newNodes[nodeList] )
-            workflow_logger.debug( "Block id %i: Number of nodes %i" % (blockId,nodeList.shape[0]) )
+            workflow_logger.debug("BlockwiseSubSolver: block id %i: Number of nodes %i" % (blockId,nodeList.shape[0]) )
             inner_edges, outer_edges, subgraph = graph.extractSubgraphFromNodes(nodeList)
             return np.array(inner_edges), np.array(outer_edges), subgraph
 
@@ -428,7 +423,7 @@ class BlockwiseSubSolver(luigi.Task):
                 block = blocking.getBlockWithHalo(blockId, blockOverlap).outerBlock
                 blockBegin, blockEnd = block.begin, block.end
 
-                workflow_logger.debug( "Block id " + str(blockId) + " start " + str(blockBegin) + " end " + str(blockEnd) )
+                workflow_logger.debug("BlockwiseSubSolver: block id %i start %s end %s" % (blockId, str(blockBegin), str(blockEnd)) )
                 tasks.append( executor.submit( extract_subproblem, blockId, blockBegin, blockEnd ) )
 
             subProblems = [task.result() for task in tasks]
@@ -436,7 +431,7 @@ class BlockwiseSubSolver(luigi.Task):
         assert len(subProblems) == numberOfBlocks, str(len(subProblems)) + " , " + str(numberOfBlocks)
 
         t_extract = time.time() - t_extract
-        workflow_logger.info( "Extraction time for subproblems %f s" % (t_extract,) )
+        workflow_logger.info( "BlockwiseSubSolver: Extraction time for subproblems %f s" % (t_extract,) )
 
         t_inf_total = time.time()
 
@@ -454,7 +449,7 @@ class BlockwiseSubSolver(luigi.Task):
         subResults = [task.result() for task in tasks]
 
         t_inf_total = time.time() - t_inf_total
-        workflow_logger.info( "Inference time total for subproblems %f s" % (t_inf_total,))
+        workflow_logger.info( "BlockwiseSubSolver: Inference time total for subproblems %f s" % (t_inf_total,))
 
         cutEdges = np.zeros( numberOfEdges, dtype = np.uint8 )
 
@@ -476,7 +471,6 @@ class BlockwiseSubSolver(luigi.Task):
         cutEdges[cutEdges >= 1] = 1
 
         self.output().write(cutEdges)
-
 
     def output(self):
         blcksize_str = "_".join( map( str, list(self.blockShape) ) )

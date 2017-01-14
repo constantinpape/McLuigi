@@ -3,7 +3,6 @@
 
 import luigi
 
-# FIXME this causes ann ImportError for some reason
 from taskSelection import get_local_features,get_local_features_for_multiinp
 from customTargets import PickleTarget, HDF5DataTarget, HDF5VolumeTarget
 from dataTasks import DenseGroundtruth, ExternalSegmentation, StackedRegionAdjacencyGraph
@@ -54,6 +53,7 @@ class EdgeProbabilities(luigi.Task):
         cf_tasks = [ExternalClassifier(cfp) for cfp in self.pathsToClassifier]
         return {"cfs" : cf_tasks, "features" : feature_tasks, "rag" : StackedRegionAdjacencyGraph(self.pathToSeg)}
 
+    @run_decorator
     def run(self):
 
         # read the classifier parameter
@@ -65,7 +65,6 @@ class EdgeProbabilities(luigi.Task):
 
         # seperate classfiers for xy - and z - edges
         if cf_config["separateEdgeClassification"]:
-            t_pred = time.time()
 
             rag = inp["rag"].read()
             features = inp["features"]
@@ -207,18 +206,12 @@ class EdgeProbabilities(luigi.Task):
                     else:
                         out.write([long(startType)], cf.predict_proba(featuresType)[:,1] )
 
-
-
-            t_pred = time.time() - t_pred
-            workflow_logger.info("Predicted classifier in: " + str(t_pred) + " s")
-
             out.close()
             for feat in features:
                 feat.close()
 
         # same classfier for xy - and z - edges
         else:
-            t_pred = time.time()
 
             feat_tasks = inp["features"]
             for feat in feat_tasks:
@@ -236,9 +229,6 @@ class EdgeProbabilities(luigi.Task):
                 probs = cf.predict(xgb_mat)[:,1]
             else:
                 probs = cf.predict_proba(features)[:,1]
-
-            t_pred = time.time() - t_pred
-            workflow_logger.info("Predicted RF in: " + str(t_pred) + " s")
 
             out  = self.output()
             out.open([nEdges],[min(262144,nEdges)])
@@ -258,7 +248,7 @@ class EdgeGroundtruth(luigi.Task):
     def requires(self):
         return {"gt" : DenseGroundtruth(self.pathToGt), "rag" : StackedRegionAdjacencyGraph(self.pathToSeg) }
 
-
+    @run_decorator
     def run(self):
 
         inp = self.input()
@@ -279,12 +269,10 @@ class EdgeGroundtruth(luigi.Task):
 
         self.output().write(edgeGt)
 
-
     def output(self):
         segFile = os.path.split(self.pathToSeg)[1][:-3]
         save_path = os.path.join( PipelineParameter().cache, "EdgeGroundtruth_%s.h5" % (segFile,)  )
         return HDF5DataTarget( save_path  )
-
 
 
 class SingleClassifierFromGt(luigi.Task):
@@ -304,7 +292,7 @@ class SingleClassifierFromGt(luigi.Task):
                 "features" : feature_tasks,
                 "rag" : StackedRegionAdjacencyGraph(self.pathToSeg)}
 
-
+    @run_decorator
     def run(self):
 
         inp = self.input()
@@ -312,7 +300,7 @@ class SingleClassifierFromGt(luigi.Task):
         feature_tasks = inp["features"]
 
         if self.learnXYOnly:
-            workflow_logger.info("Learning classfier for xy edges.")
+            workflow_logger.info("SingleClassifierFromGt: learning classfier for xy edges.")
 
             rag = inp["rag"].read()
             nEdges = rag.numberOfEdges
@@ -333,7 +321,7 @@ class SingleClassifierFromGt(luigi.Task):
             features = np.concatenate(features, axis = 1)
 
         elif self.learnZOnly:
-            workflow_logger.info("Learning classfier for z edges.")
+            workflow_logger.info("SingleClassifierFromGt: learning classfier for z edges.")
 
             rag = inp["rag"].read()
             nEdges = rag.numberOfEdges
@@ -356,7 +344,7 @@ class SingleClassifierFromGt(luigi.Task):
         else:
             for feat_task in feature_tasks:
                 feat_task.open()
-            workflow_logger.info("Learning classfier for all edges.")
+            workflow_logger.info("SingleClassifierFromGt: learning classfier for all edges.")
             features = np.concatenate( [feat.read() for feat in feature_tasks], axis = 1 )
             for feat_task in feature_tasks:
                 feat_task.close()
@@ -366,8 +354,6 @@ class SingleClassifierFromGt(luigi.Task):
         # read the classifier parameter
         with open(PipelineParameter().EdgeClassifierConfigFile, 'r') as f:
             cf_config = json.load(f)
-
-        t_learn = time.time()
 
         if cf_config["useXGBoost"]:
             import xgboost as xgb
@@ -396,9 +382,6 @@ class SingleClassifierFromGt(luigi.Task):
                 max_depth = cf_config['sklearnMaxDepth'], min_samples_leaf = cf_config['sklearnMinSamplesLeaf'], bootstrap = cf_config['sklearnBootstrap'])
             cf.fit(features, gt)
 
-        t_learn = time.time() - t_learn
-        workflow_logger.info("Learned classifier in: " + str(t_learn) + " s")
-
         self.output().write(cf)
 
 
@@ -423,7 +406,6 @@ class SingleClassifierFromGt(luigi.Task):
         return PickleTarget(save_path)
 
 
-
 class SingleClassifierFromMultipleInputs(luigi.Task):
 
     pathsToSeg = luigi.ListParameter()
@@ -442,6 +424,7 @@ class SingleClassifierFromMultipleInputs(luigi.Task):
         rag_tasks = [StackedRegionAdjacencyGraph(segp) for segp in self.pathsToSeg]
         return {"gts" : gts, "features" : feature_tasks, "rags" : rag_tasks}
 
+    @run_decorator
     def run(self):
 
         inp = self.input()
@@ -501,7 +484,7 @@ class SingleClassifierFromMultipleInputs(luigi.Task):
                 features_i = np.concatenate(features_i, axis = 1)
 
             else:
-                workflow_logger.info("Learning classfier for all edges.")
+                workflow_logger.info("SingleClassifierFromMultipleInputs: learning classfier for all edges.")
                 features_i = np.concatenate( [feat.read([0,0],feat.shape) for feat in feature_tasks_i], axis = 1 )
 
             assert features_i.shape[0] == gt_i.shape[0]
@@ -517,8 +500,6 @@ class SingleClassifierFromMultipleInputs(luigi.Task):
         # read the classifier parameter
         with open(PipelineParameter().EdgeClassifierConfigFile, 'r') as f:
             cf_config = json.load(f)
-
-        t_learn = time.time()
 
         if cf_config["useXGBoost"]:
             import xgboost as xgb
@@ -546,9 +527,6 @@ class SingleClassifierFromMultipleInputs(luigi.Task):
                 n_estimators = cf_config['sklearnNtrees'], verbose = verbose,
                 max_depth = cf_config['sklearnMaxDepth'], min_samples_leaf = cf_config['sklearnMinSamplesLeaf'], bootstrap = cf_config['sklearnBootstrap'])
             cf.fit(features, gt)
-
-        t_learn = time.time() - t_learn
-        workflow_logger.info("Learned classifier in: " + str(t_learn) + " s")
 
         self.output().write(cf)
 

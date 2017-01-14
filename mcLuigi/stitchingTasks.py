@@ -1,6 +1,8 @@
 # Multicut Pipeline implemented with luigi
 # Stitching Tasks
 
+# TODO this is all WIP
+
 import luigi
 
 from pipelineParameter import PipelineParameter
@@ -9,7 +11,7 @@ from BlockwiseMulticutSolver import BlockwiseSubSolver, NodesToInitialBlocks, fu
 from multicutSolverTasks import McProblem
 from customTargets import HDF5DataTarget
 
-from tools import config_logger
+from tools import config_logger, config_logger
 
 import os
 import logging

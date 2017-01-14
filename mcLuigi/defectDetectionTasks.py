@@ -7,7 +7,7 @@ from dataTasks import InputData, ExternalSegmentation
 #from miscTasks import EdgeIndications
 
 from pipelineParameter import PipelineParameter
-from tools import config_logger
+from tools import config_logger, run_decorator
 
 import logging
 import json
@@ -34,6 +34,7 @@ class OversegmentationPatchStatistics(luigi.Task):
     def requires(self):
         return ExternalSegmentation(self.pathToSeg)
 
+    @run_decorator
     def run(self):
         seg = self.input()
         seg.open()
@@ -100,6 +101,7 @@ class OversegmentationSliceStatistics(luigi.Task):
     def requires(self):
         return ExternalSegmentation(self.pathToSeg)
 
+    @run_decorator
     def run(self):
         seg = self.input()
         seg.open()
@@ -157,6 +159,7 @@ class DefectPatchDetection(luigi.Task):
         return {"seg" : ExternalSegmentation(self.pathToSeg),
                 "stats" : OversegmentationPatchStatistics(self.pathToSeg,self.patchSize)}
 
+    @run_decorator
     def run(self):
         inp = self.input()
         seg = inp["seg"]
@@ -174,8 +177,6 @@ class DefectPatchDetection(luigi.Task):
 
         patch_shape = [self.patchSize,self.patchSize]
         patch_overlap = [long(self.patchOverlap),long(self.patchOverlap)]
-
-        workflow_logger.info("Running defect detection:")
 
         def detect_patches_z(z):
             seg_z = seg.read([long(z),0L,0L],[z+1,ny,nx])
@@ -212,10 +213,10 @@ class DefectPatchDetection(luigi.Task):
             defects_per_slice = [fut.result() for fut in tasks]
 
         # log the defects
-        workflow_logger.info("Total number of defected patches: %i" % np.sum(defects_per_slice))
+        workflow_logger.info("DefectPatchDetection: total number of defected patches: %i" % np.sum(defects_per_slice))
         for z in xrange(seg.shape[0]):
             if defects_per_slice[z] > 0:
-                workflow_logger.info("Slice %i has %i defected patches." % (z,defects_per_slice[z]))
+                workflow_logger.info("DefectPatchDetection slice %i has %i defected patches." % (z,defects_per_slice[z]))
 
         out.close()
 
@@ -235,6 +236,7 @@ class DefectSliceDetection(luigi.Task):
         return {"seg" : ExternalSegmentation(self.pathToSeg),
                 "stats" : OversegmentationSliceStatistics(self.pathToSeg)}
 
+    @run_decorator
     def run(self):
         inp = self.input()
         seg = inp["seg"]
@@ -249,8 +251,6 @@ class DefectSliceDetection(luigi.Task):
 
         ny = long(seg.shape[1])
         nx = long(seg.shape[2])
-
-        workflow_logger.info("Running defect detection:")
 
         slice_shape = (1L,ny,nx)
         defect_mask = np.ones(slice_shape, dtype = np.uint8)
@@ -282,10 +282,10 @@ class DefectSliceDetection(luigi.Task):
             defect_indications = [fut.result() for fut in tasks]
 
         # log the defects
-        workflow_logger.info("Total number of defected slices: %i" % np.sum(defect_indications))
+        workflow_logger.info("DefectSliceDetection: total number of defected slices: %i" % np.sum(defect_indications))
         for z in xrange(seg.shape[0]):
             if defect_indications[z]:
-                workflow_logger.info("Slice %i is defected." % (z,))
+                workflow_logger.info("DefectSliceDetection: slice %i is defected." % (z,))
 
         out.close()
 

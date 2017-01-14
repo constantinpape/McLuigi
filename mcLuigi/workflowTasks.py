@@ -11,7 +11,7 @@ from dataTasks import StackedRegionAdjacencyGraph, ExternalSegmentation
 from customTargets import HDF5VolumeTarget
 
 from pipelineParameter import PipelineParameter
-from tools import config_logger
+from tools import config_logger, run_decorator
 
 import logging
 import json
@@ -33,6 +33,7 @@ class MulticutSegmentation(luigi.Task):
                 "Rag" : StackedRegionAdjacencyGraph(self.pathToSeg),
                 "Seg" : ExternalSegmentation(self.pathToSeg)}
 
+    @run_decorator
     def run(self):
 
         inp = self.input()
@@ -78,6 +79,7 @@ class BlockwiseMulticutSegmentation(luigi.Task):
                 "Rag" : StackedRegionAdjacencyGraph(self.pathToSeg),
                 "Seg" : ExternalSegmentation(self.pathToSeg)}
 
+    @run_decorator
     def run(self):
 
         inp = self.input()
@@ -101,7 +103,6 @@ class BlockwiseMulticutSegmentation(luigi.Task):
         segOut.open(seg.shape)
 
         nifty.graph.rag.projectScalarNodeDataToPixels(rag, mcNodes, segOut.get() ) # nWorkers = -1, could also set this...
-
 
     def output(self):
         save_path = os.path.join( PipelineParameter().cache, "BlockwiseMulticutSegmentation.h5" )

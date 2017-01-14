@@ -9,7 +9,7 @@ import time
 from customTargets import HDF5DataTarget
 
 from pipelineParameter import PipelineParameter
-from tools import config_logger
+from tools import config_logger, run_decorator
 
 import logging
 import json
@@ -28,6 +28,7 @@ class McSolverFusionMoves(luigi.Task):
     def requires(self):
         return self.problem
 
+    @run_decorator
     def run(self):
 
         # read the mc parameter
@@ -45,14 +46,14 @@ class McSolverFusionMoves(luigi.Task):
 
         obj = nifty.graph.multicut.multicutObjective(g, edgeCosts)
 
-        workflow_logger.info("Solving multicut problem with %i number of variables" % (g.numberOfNodes,))
-        workflow_logger.info("Using the fusion moves solver from nifty")
+        workflow_logger.info("McSolverFusionMoves: solving multicut problem with %i number of variables" % (g.numberOfNodes,))
+        workflow_logger.info("McSolverFusionMoves: using the fusion moves solver from nifty")
 
         greedy = obj.greedyAdditiveFactory().create(obj)
 
         t_inf = time.time()
         ret    = greedy.optimize()
-        workflow_logger.info("Energy of the greedy solution" +  str(obj.evalNodeLabels(ret)) )
+        workflow_logger.info("McSolverFusionMoves: energy of the greedy solution %f" % obj.evalNodeLabels(ret) )
 
         ilpFac = obj.multicutIlpFactory(ilpSolver='cplex',verbose=mc_config["verbose"],
             addThreeCyclesConstraints=True,
@@ -77,7 +78,7 @@ class McSolverFusionMoves(luigi.Task):
             ret = solver.optimize(nodeLabels=ret)
 
         t_inf = time.time() - t_inf
-        workflow_logger.info("Inference with fusion move solver in %i s" % (t_inf,))
+        workflow_logger.info("McSolverFusionMoves: inference with fusion move solver in %i s" % (t_inf,))
 
         # projection to edge result, don't really need it
         # if necessary at some point, make extra task and recover
@@ -86,7 +87,7 @@ class McSolverFusionMoves(luigi.Task):
         #rv = res_node[uv_ids[:,1]]
         #res_edge = ru!=rv
 
-        workflow_logger.info("Energy of the solution %i" % (obj.evalNodeLabels(ret), ) )
+        workflow_logger.info("McSolverFusionMoves: energy of the solution %f" % (obj.evalNodeLabels(ret), ) )
 
         self.output().write(ret)
 
@@ -96,7 +97,7 @@ class McSolverFusionMoves(luigi.Task):
         return HDF5DataTarget( save_path )
 
 
-# FIXME nifty exact does not work responsibly for all problems!
+# FIXME nifty exact does not work properly for all problems!
 class McSolverExact(luigi.Task):
 
     problem = luigi.TaskParameter()
@@ -104,6 +105,7 @@ class McSolverExact(luigi.Task):
     def requires(self):
         return self.problem
 
+    @run_decorator
     def run(self):
 
         # read the mc parameter
@@ -121,8 +123,8 @@ class McSolverExact(luigi.Task):
 
         obj = nifty.graph.multicut.multicutObjective(g, edgeCosts)
 
-        workflow_logger.info("Solving multicut problem with %i number of variables" % (g.numberOfNodes,))
-        workflow_logger.info("Using the exact solver from nifty")
+        workflow_logger.info("McSolverExact: solving multicut problem with %i number of variables" % (g.numberOfNodes,))
+        workflow_logger.info("McSolverExact: using the exact solver from nifty")
 
         solver = obj.multicutIlpFactory(ilpSolver='cplex',verbose=0,
             addThreeCyclesConstraints=True,
@@ -139,7 +141,7 @@ class McSolverExact(luigi.Task):
         ret = solver.optimize()
 
         t_inf = time.time() - t_inf
-        workflow_logger.info("Inference with exact solver in %i s" % (t_inf,))
+        workflow_logger.info("McSolverExact: inference with exact solver in %i s" % (t_inf,))
 
         # projection to edge result, don't really need it
         # if necessary at some point, make extra task and recover
@@ -148,7 +150,7 @@ class McSolverExact(luigi.Task):
         #rv = res_node[uv_ids[:,1]]
         #res_edge = ru!=rv
 
-        workflow_logger.info("Energy of the solution %i" % (obj.evalNodeLabels(ret), ) )
+        workflow_logger.info("McSolverExact: energy of the solution %f" % (obj.evalNodeLabels(ret), ) )
 
         self.output().write(ret)
 

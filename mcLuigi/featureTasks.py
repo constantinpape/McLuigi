@@ -7,7 +7,7 @@ from customTargets import HDF5DataTarget, HDF5VolumeTarget
 from dataTasks import InputData, StackedRegionAdjacencyGraph, ExternalSegmentation
 
 from pipelineParameter import PipelineParameter
-from tools import config_logger
+from tools import config_logger, run_decorator
 
 import logging
 import json
@@ -39,9 +39,8 @@ class RegionNodeFeatures(luigi.Task):
                 "Rag" : StackedRegionAdjacencyGraph(self.pathToSeg)
                 }
 
+    @run_decorator
     def run(self):
-
-        t_feats = time.time()
 
         inp = self.input()
 
@@ -72,7 +71,6 @@ class RegionNodeFeatures(luigi.Task):
         chunk_shape = [5000, out_shape[1]]
         out.open(out_shape, chunk_shape)
 
-
         # get region statistics with the vigra region feature extractor for a single slice
         def extractRegionStatsSlice(start, end, z):
 
@@ -99,8 +97,6 @@ class RegionNodeFeatures(luigi.Task):
             assert regionStatisticsSlice.shape[0] == maxNode + 1 - minNode
             out.write(startOut, regionStatisticsSlice)
 
-            print "Processed slice", z
-
             return True
 
         # sequential for debugging
@@ -121,10 +117,7 @@ class RegionNodeFeatures(luigi.Task):
                 tasks.append( executor.submit(extractRegionStatsSlice, start, end, z) )
         results = [task.result() for task in tasks]
 
-        t_feats = time.time() - t_feats
-        workflow_logger.info("Calculated Region Node Features in: " + str(t_feats) + " s")
         out.close()
-
 
     def output(self):
         segFile = os.path.split(self.pathToSeg)[1][:-3]
@@ -139,18 +132,13 @@ class RegionFeatures(luigi.Task):
 
     def requires(self):
         # TODO have to rethink this once we include lifted multicut
-        return {
-                "Rag" : StackedRegionAdjacencyGraph(self.pathToSeg),
-                "RegionNodeFeatures" : RegionNodeFeatures(self.pathToInput,self.pathToSeg)
-                }
+        return {"Rag" : StackedRegionAdjacencyGraph(self.pathToSeg),
+                "RegionNodeFeatures" : RegionNodeFeatures(self.pathToInput,self.pathToSeg)}
 
-
+    @run_decorator
     def run(self):
 
         import gc
-
-        workflow_logger.info("Computing RegionFeatures")
-        t_feats = time.time()
 
         inp = self.input()
         rag = inp["Rag"].read()
@@ -212,9 +200,6 @@ class RegionFeatures(luigi.Task):
         #del sV
         #gc.collect()
 
-        t_feats = time.time() - t_feats
-        workflow_logger.info("Calculated Region Features in: " + str(t_feats) + " s")
-
         out.close()
 
 
@@ -240,6 +225,7 @@ class EdgeFeatures(luigi.Task):
     def requires(self):
         return StackedRegionAdjacencyGraph(self.pathToSeg), InputData(self.pathToInput)
 
+    @run_decorator
     def run(self):
 
         inp = self.input()
@@ -247,17 +233,8 @@ class EdgeFeatures(luigi.Task):
 
         assert not(self.keepOnlyXY and self.keepOnlyZ)
 
-        workflow_logger.info("Computing EdgeFeatures")
-        if self.keepOnlyXY:
-            workflow_logger.info("for xy-edges only")
-        elif self.keepOnlyZ:
-            workflow_logger.info("for z-edges only")
-        workflow_logger.info("on input from: %s" % self.pathToInput)
-
         inp[1].open()
         data = inp[1].get()
-
-        t_feats = time.time()
 
         out = self.output()
 
@@ -273,9 +250,6 @@ class EdgeFeatures(luigi.Task):
         out.open(out_shape, chunk_shape)
 
         edge_features = nifty.graph.rag.accumulateEdgeFeaturesFromFilters(rag, data, out.get(), self.keepOnlyXY, self.keepOnlyZ, PipelineParameter().nThreads)
-
-        t_feats = time.time() - t_feats
-        workflow_logger.info("Calculated Edge Features in: " + str(t_feats) + " s")
 
         out.close()
 

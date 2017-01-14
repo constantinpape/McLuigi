@@ -12,7 +12,7 @@ from customTargets import HDF5DataTarget
 from defectHandlingTasks import ModifiedAdjacency
 
 from pipelineParameter import PipelineParameter
-from tools import config_logger
+from tools import config_logger, run_decorator
 
 import logging
 import json
@@ -75,13 +75,12 @@ class StandardMulticutProblem(luigi.Task):
         return { "EdgeProbabilities" : EdgeProbabilities(self.pathToSeg, self.pathsToClassifier),
                 "Rag" : StackedRegionAdjacencyGraph(self.pathToSeg) }
 
+    @run_decorator
     def run(self):
 
         # read the mc parameter
         with open(PipelineParameter().MCConfigFile, 'r') as f:
             mc_config = json.load(f)
-
-        workflow_logger.info("Computing Standard Multicut Problem")
 
         inp = self.input()
         rag = inp["Rag"].read()
@@ -125,7 +124,6 @@ class StandardMulticutProblem(luigi.Task):
         out.write( g.serialize(), "graph" )
         out.write( edgeCosts, "costs")
 
-
     def output(self):
         save_path = os.path.join( PipelineParameter().cache, "StandardMulticutProblem.h5" )
         return HDF5DataTarget( save_path )
@@ -146,6 +144,7 @@ class ModifiedMulticutProblem(luigi.Task):
                 'modified_adjacency' : ModifiedAdjacency(self.pathToSeg),
                 'rag' : StackedRegionAdjacencyGraph(self.pathToSeg)}
 
+    @run_decorator
     def run(self):
         inp = self.input()
         modified_adjacency = inp['modified_adjacency']
@@ -158,8 +157,6 @@ class ModifiedMulticutProblem(luigi.Task):
         # read the mc parameter
         with open(PipelineParameter().MCConfigFile, 'r') as f:
             mc_config = json.load(f)
-
-        workflow_logger.info("Computing Modified Multicut Problem")
 
         # scale the probabilities
         # this is pretty arbitrary, it used to be 1. / n_tress, but this does not make that much sense for sklearn impl
@@ -199,7 +196,6 @@ class ModifiedMulticutProblem(luigi.Task):
         out.write(edge_costs,'costs')
         # write the modified graph
         out.write(modified_adjacency.read('modified_adjacency'))
-
 
     def output(self):
         save_path = os.path.join( PipelineParameter().cache, "ModifiedMulticutProblem.h5" )

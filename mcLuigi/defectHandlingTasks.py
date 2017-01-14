@@ -36,9 +36,8 @@ class DefectsToNodes(luigi.Task):
         return {'seg' : ExternalSegmentation(self.pathToSeg),
                 'defects' : DefectSliceDetection(self.pathToSeg)} # need to tweek binThreshold w/ the default param
 
+    @run_decorator
     def run(self):
-        workflow_logger.info("Computing DefectToNodes")
-
         inp = self.input()
         seg = inp['seg']
         seg.open()
@@ -85,7 +84,7 @@ class DefectsToNodes(luigi.Task):
 
         assert len(defect_nodes) == len(nodes_z)
 
-        workflow_logger.info("Found %i defected nodes" % (len(defect_nodes)))
+        workflow_logger.info("DefectsToNodes: found %i defected nodes" % (len(defect_nodes)))
 
         self.output().write(np.array(defect_nodes,dtype='uint32'),'defect_nodes')
         self.output().write(np.array(nodes_z,dtype='uint32'),'nodes_z')
@@ -109,6 +108,7 @@ class ModifiedAdjacency(luigi.Task):
 
     # compute and save the skip edges as tuples (n1,n2) as well
     # as the resulting modified adjacency (as plain graph)
+    @run_decorator
     def run(self):
         inp = self.input()
         rag = inp['rag'].read()
@@ -119,9 +119,6 @@ class ModifiedAdjacency(luigi.Task):
 
         # make sure that z is monotonically increasing (not strictly!)
         assert np.all(np.diff(nodes_z) >= 0), "Defected slice index is not increasing monotonically!"
-
-        workflow_logger.info("Computing ModifiedAdjacency")
-        t_adj = time.time()
 
         edge_offset = rag.totalNumberOfInSliceEdges
         ny = long(seg.shape[1])
@@ -170,7 +167,6 @@ class ModifiedAdjacency(luigi.Task):
 
             return new_skip_edges, new_skip_ranges
 
-        print "Processing defected nodes:"
         for i, u in enumerate(defect_nodes):
             print i, '/', len(defect_nodes)
             z = long(nodes_z[i])
@@ -220,14 +216,14 @@ class ModifiedAdjacency(luigi.Task):
 
         delete_edges.sort()
         uv_ids = np.delete(uv_ids,delete_edges,axis=0)
-        workflow_logger.info("Deleted %i z-edges due to defects" % (len(delete_edges),) )
+        workflow_logger.info("ModifiedAdjacency: deleted %i z-edges due to defects" % (len(delete_edges),) )
 
         skip_edges = np.array(skip_edges, dtype = np.uint32)
         skip_ranges = np.array(skip_ranges, dtype = np.uint32)
-        workflow_logger.info("Introduced %i skip edges due to defects" % (len(skip_edges),) )
+        workflow_logger.info("ModifiedAdjacency: introduced %i skip edges due to defects" % (len(skip_edges),) )
 
         ignore_edges.sort()
-        workflow_logger.info("Found %i ignore edges due to defects" % (len(ignore_edges),) )
+        workflow_logger.info("ModifiedAdjacency: found %i ignore edges due to defects" % (len(ignore_edges),) )
 
         # create the modified adjacency
         modified_adjacency = nifty.graph.UndirectedGraph(int(n_nodes))
@@ -235,6 +231,7 @@ class ModifiedAdjacency(luigi.Task):
         modified_adjacency.insertEdges(uv_ids)
         # insert skip edges
         modified_adjacency.insertEdges(skip_edges)
+        workflow_logger.info("ModifiedAdjacency: Total number of edges in modified adjacency: %i" % modified_adjacency.numberOfEdges)
 
         out = self.output()
         out.write(modified_adjacency.serialize(), "modified_adjacency")
@@ -243,7 +240,6 @@ class ModifiedAdjacency(luigi.Task):
         out.write(skip_ranges, "skip_ranges")
         out.write(delete_edges, "delete_edges")
         out.write(ignore_edges, "ignore_edges")
-        workflow_logger.info("Calculated ModifiedAdjacency in: %f s" % (time.time() - t_adj))
 
     def output(self):
         segFile = os.path.split(self.pathToSeg)[1][:-3]
@@ -264,19 +260,16 @@ class ModifiedRegionFeatures(luigi.Task):
                 'modified_adjacency' : ModifiedAdjacency(self.pathToSeg),
                 'rag' : StackedRegionAdjacencyGraph(self.pathToSeg)}
 
+    @run_decorator
     def run(self):
         inp = self.input()
         rag = inp['rag'].read()
-
-        workflow_logger.info("Computing ModifiedRegionFeatures")
 
         # the unmodified features
         node_feats = inp['node_feats']
         node_feats.open()
         region_feats = inp['region_feats']
         region_feats.open()
-
-        t_feats = time.time()
 
         # the modified edge connectivity
         modified_adjacency = inp['modified_adjacency']
@@ -338,7 +331,6 @@ class ModifiedRegionFeatures(luigi.Task):
         assert skip_center_feats.shape[1] == out.shape[1] - skip_stat_feats.shape[1]
         out.write([total_copied,skip_stat_feats.shape[1]], skip_center_feats)
 
-        workflow_logger.info("Calculated ModifiedRegionFeatures in: %f s" % (time.time() - t_feats) )
         out.close()
 
     def output(self):
@@ -366,19 +358,10 @@ class ModifiedEdgeFeatures(luigi.Task):
     @run_decorator
     def run(self):
 
-        print "Called!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!1"
         inp = self.input()
         rag = inp['rag'].read()
 
         assert not (self.keepOnlyXY and self.keepOnlyZ)
-
-        workflow_logger.info("Computing ModifiedEdgeFeatures")
-        if self.keepOnlyXY:
-            workflow_logger.info("for xy-edges only")
-        elif self.keepOnlyZ:
-            workflow_logger.info("for z-edges only")
-        workflow_logger.info("on input from: %s" % self.pathToInput)
-        t_feats = time.time()
 
         # the unmodified features
         edge_feats = inp['edge_feats']
@@ -454,7 +437,6 @@ class ModifiedEdgeFeatures(luigi.Task):
             assert skip_feats.shape[1] == n_feats
             out.write([total_copied,0], skip_feats)
 
-        workflow_logger.info("Calculated ModifiedEdgeFeatures in: %f s" % (time.time() - t_feats) )
         out.close()
 
     def output(self):

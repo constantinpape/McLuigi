@@ -5,7 +5,7 @@ import luigi
 from customTargets import HDF5VolumeTarget, StackedRagTarget
 
 from pipelineParameter import PipelineParameter
-from tools import config_logger
+from tools import config_logger, run_decorator
 
 import logging
 
@@ -37,7 +37,6 @@ class InputData(luigi.Task):
     def run(self):
         pass
 
-
     def output(self):
         """
         Returns the target output.
@@ -51,8 +50,8 @@ class InputData(luigi.Task):
             dset = f[self.key]
 
             if np.dtype(self.dtype) != np.dtype(dset.dtype):
-                workflow_logger.debug("InputData task, loading data from %s" % (self.path,) )
-                workflow_logger.debug("Changing dtype from %s to %s" % (self.dtype,dset.dtype) )
+                workflow_logger.debug("InputData: task, loading data from %s" % (self.path,) )
+                workflow_logger.debug("InputData: changing dtype from %s to %s" % (self.dtype,dset.dtype) )
                 self.dtype = dset.dtype
 
         return HDF5VolumeTarget(self.path, self.dtype, self.key)
@@ -73,7 +72,6 @@ class ExternalSegmentation(luigi.Task):
     def run(self):
         pass
 
-
     def output(self):
         """
         Returns the target output.
@@ -88,12 +86,11 @@ class ExternalSegmentation(luigi.Task):
             dset = f[self.key]
 
             if np.dtype(self.dtype) != np.dtype(dset.dtype):
-                workflow_logger.debug("InputData task, loading data from %s" % (self.path,) )
-                workflow_logger.debug("Changing dtype from %s to %s" % (self.dtype,dset.dtype) )
+                workflow_logger.debug("ExternalSegmentation: loading data from %s" % (self.path,) )
+                workflow_logger.debug("ExternalSegmentation: changing dtype from %s to %s" % (self.dtype,dset.dtype) )
                 self.dtype = dset.dtype
 
         return HDF5VolumeTarget(self.path, self.dtype, self.key, compression = PipelineParameter().compressionLevel)
-
 
 
 class ExternalSegmentationLabeled(luigi.Task):
@@ -111,6 +108,7 @@ class ExternalSegmentationLabeled(luigi.Task):
     def requires(self):
         return ExternalSegmentation(self.pathToSeg, self.keyToSeg, self.dtype )
 
+    @run_decorator
     def run(self):
 
         segIn = self.input()
@@ -160,16 +158,14 @@ class ExternalSegmentationLabeled(luigi.Task):
 
         res = [task.result() for task in tasks]
 
-
-
     def output(self):
         f = h5py.File(self.path, 'r')
         assert self.key in f.keys(), self.key + " , " + f.keys()
         dset = f[self.key]
 
         if np.dtype(self.dtype) != np.dtype(dset.dtype):
-            workflow_logger.debug("InputData task, loading data from %s" % (self.path,) )
-            workflow_logger.debug("Changing dtype from %s to %s" % (self.dtype,dset.dtype) )
+            workflow_logger.debug("ExternalSegmentationLabeled: loading data from %s" % (self.path,) )
+            workflow_logger.debug("ExternalSegmentationLabeled: changing dtype from %s to %s" % (self.dtype,dset.dtype) )
             self.dtype = dset.dtype
 
         save_path = os.path.join( PipelineParameter().cache,
@@ -191,6 +187,7 @@ class DenseGroundtruth(luigi.Task):
     def requires(self):
         return ExternalSegmentation(self.path, self.key, self.dtype )
 
+    @run_decorator
     def run(self):
 
         gt = self.input()
@@ -219,7 +216,7 @@ class StackedRegionAdjacencyGraph(luigi.Task):
     def requires(self):
         return ExternalSegmentation(self.pathToSeg)
 
-
+    @run_decorator
     def run(self):
 
         # get the number of labels
@@ -235,10 +232,7 @@ class StackedRegionAdjacencyGraph(luigi.Task):
         rag = nifty.graph.rag.gridRagStacked2DHdf5( seg.get(), n_labels, numberOfThreads = -1) # nThreads = -1, could also make this accessible
         t_rag = time.time() - t_rag
 
-        workflow_logger.info("Computed RAG in " + str(t_rag) + " s")
-
         self.output().write( rag, self.pathToSeg, self.keyToSeg)
-
 
     def output(self):
         segFile = os.path.split(self.pathToSeg)[1][:-3]
