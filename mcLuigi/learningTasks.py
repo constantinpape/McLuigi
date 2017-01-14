@@ -17,18 +17,86 @@ import nifty
 import os
 import time
 import json
+import cPickle as pickle
+
+if PipelineParameter().useXGBoost
+    import xgboost as xgb
+else:
+    from sklearn.ensemble import RandomForestClassifier
+
 
 # init the workflow logger
 workflow_logger = logging.getLogger(__name__)
 config_logger(workflow_logger)
 
-# load external classifier from pickle file
-class ExternalClassifier(luigi.Task):
+# wrapper for xgboost / sklearn.rf classifier
+class EdgeClassifier(object):
 
-    ClassifierPath = luigi.Parameter()
+    def __init__(self):
+        self.use_xgb = PipelineParameter().useXGBoost
+        self.cf = None
 
-    def output(self):
-        return PickleTarget(self.ClassifierPath)
+    def train(self, x, y):
+        assert x.shape[0] == y.shape[0]
+        if use_xgb:
+            self._train_xgb(x,y)
+        else:
+            self._train_rf(x,y)
+
+    def _train_xgb(self,x,y):
+        # read the classifier parameter
+        with open(PipelineParameter().EdgeClassifierConfigFile, 'r') as f:
+            cf_config = json.load(f)
+        silent = 1
+        if cf_config['verbose']:
+            silent = 0
+        # TODO use cf_config.get(key, default) instead of cf_config[key] with sensible defaults
+        xgb_params = { 'objective' : 'multi:softprob', 'num_class' : 2, # these two should not be changed
+            'eta' : cf_config['xgbEta'],
+            'max_delta_step' : cf_config['xgbMaxDeltaStep'] ,
+            'colsample_by_tree' : cf_config['xgbColsample'],
+            'subsample' : cf_config['xgbSubsample'],
+            'silent' : silent }
+        xgb_mat = xgb.DMatrix(x, label = y)
+        self.cf = xgb.train(xgb_params, xgb_mat, cf_config['xgbNumRounds'])
+
+    def _train_rf(self,x,y):
+        with open(PipelineParameter().EdgeClassifierConfigFile, 'r') as f:
+            cf_config = json.load(f)
+        verbose = 0
+        if cf_config['verbose']:
+            verbose = 2
+        # TODO use cf_config.get(key, default) instead of cf_config[key] with sensible defaults
+        self.cf = RandomForestClassifier(n_jobs = cf_config['sklearnNJobs'],
+            n_estimators     = cf_config['sklearnNtrees'],
+            verbose          = verbose,
+            max_depth        = cf_config['sklearnMaxDepth'],
+            min_samples_leaf = cf_config['sklearnMinSamplesLeaf'],
+            bootstrap        = cf_config['sklearnBootstrap'])
+        self.cf.fit(x, y)
+
+    def predict(self, x):
+        assert self.cf is not None, "Need to load or train a classifier before predicting."
+        if self.use_xgb:
+            return self._predict_xgb(x)
+        else:
+            return self._predict_rf(x)
+
+    def _predict_xgb(self, x):
+        xgb_mat = xgb.DMatrix(x)
+        return self.cf.predict(x)[:,1]
+
+    def _predict_rf(self, x):
+        return self.cf.predict_proba(x)[:,1]
+
+    def load(self, path):
+        assert os.path.exists(path), path
+        with open(path) as f:
+            self.cf = pickle.load(f)
+
+    def get_classifier(self):
+        assert self.cf is not None, "Need to load or train a classifier first."
+        return self.classifier
 
 
 class EdgeProbabilities(luigi.Task):
@@ -38,10 +106,6 @@ class EdgeProbabilities(luigi.Task):
 
     def requires(self):
 
-        # read the classifier parameter
-        with open(PipelineParameter().EdgeClassifierConfigFile, 'r') as f:
-            cf_config = json.load(f)
-
         if PipelineParameter().separateEdgeClassification:
             assert len(self.pathsToClassifier) == 2
         else:
@@ -49,19 +113,16 @@ class EdgeProbabilities(luigi.Task):
 
         feature_tasks = get_local_features()
 
-        cf_tasks = [ExternalClassifier(cfp) for cfp in self.pathsToClassifier]
-        return {"cfs" : cf_tasks,
-                "features" : feature_tasks,
+        return {"features" : feature_tasks,
                 "rag" : StackedRegionAdjacencyGraph(self.pathToSeg)}
 
     @run_decorator
     def run(self):
 
+        inp = self.input()
         # read the classifier parameter
         with open(PipelineParameter().EdgeClassifierConfigFile, 'r') as f:
             cf_config = json.load(f)
-
-        inp = self.input()
         nSubFeats = cf_config["nSubFeats"]
 
         # seperate classfiers for xy - and z - edges
@@ -94,7 +155,8 @@ class EdgeProbabilities(luigi.Task):
 
             for i, feat_type in enumerate( ['xy', 'z'] ):
                 print "Predicting", feat_type, "features"
-                cf = inp["cfs"][i].read()
+                classifier = EdgeClassifier()
+                classifier.load(self.pathsToClassifier[i])
 
                 nEdgesType = nXYEdges
                 nEdgesNonType = nZEdges
@@ -159,13 +221,8 @@ class EdgeProbabilities(luigi.Task):
                         #featuresType = np.concatenate( featuresType, axis = 1 )
                         print "Features loaded, starting prediction"
 
-                        readStart = featIndexStart + startType
-                        if PipelineParameter().useXGBoost:
-                            import xgboost as xgb
-                            xgb_mat = xgb.DMatrix(featuresType)
-                            out.write( [long(readStart)],  cf.predict(xgb_mat)[:,1] )
-                        else:
-                            out.write([long(readStart)], cf.predict_proba(featuresType)[:,1] )
+                        readStart = long(featIndexStart + startType)
+                        out.write([readStart], classifier.predict(featuresType))
 
                 else: # we don't split the features along the edges
 
@@ -199,13 +256,7 @@ class EdgeProbabilities(luigi.Task):
                         featOffset += feat.shape[1]
 
                     print "Features loaded, starting prediction"
-
-                    if PipelineParameter().useXGBoost:
-                        import xgboost as xgb
-                        xgb_mat = xgb.DMatrix(featuresType)
-                        out.write( [long(startType)],  cf.predict(xgb_mat)[:,1] )
-                    else:
-                        out.write([long(startType)], cf.predict_proba(featuresType)[:,1] )
+                    out.write([long(startType)], classifier.predict(featuresType))
 
             out.close()
             for feat in features:
@@ -218,18 +269,14 @@ class EdgeProbabilities(luigi.Task):
             for feat in feat_tasks:
                 feat.open()
 
-            cf = inp["cfs"][0].read()
+            classifier = EdgeClassifier()
+            classifier.load(self.pathsToClassifier[0])
             features = np.concatenate( [feat.read([0,0],feat.shape) for feat in inp["features"]], axis = 1 )
 
             for feat in feat_tasks:
                 feat.close()
 
-            if PipelineParameter().useXGBoost:
-                import xgboost as xgb
-                xgb_mat = xgb.DMatrix(features)
-                probs = cf.predict(xgb_mat)[:,1]
-            else:
-                probs = cf.predict_proba(features)[:,1]
+            probs = classifier.predict(features)
 
             out  = self.output()
             out.open([nEdges],[min(262144,nEdges)])
@@ -356,34 +403,10 @@ class SingleClassifierFromGt(luigi.Task):
         with open(PipelineParameter().EdgeClassifierConfigFile, 'r') as f:
             cf_config = json.load(f)
 
-        if PipelineParameter().useXGBoost:
-            import xgboost as xgb
+        classifier = EdgeClassifier()
+        classifier.train(features, gt)
 
-            silent = 1
-            if cf_config['verbose']:
-                silent = 0
-
-            xgb_params = { 'objective' : 'multi:softprob', 'num_class' : 2, # this should not be changed
-                'eta' : cf_config['xgbEta'], 'max_delta_step' : cf_config['xgbMaxDeltaStep'] ,
-                'colsample_by_tree' : cf_config['xgbColsample'], 'subsample' : cf_config['xgbSubsample'],
-                'silent' : silent }
-
-            xgb_mat = xgb.DMatrix(features, label = gt)
-            cf = xgb.train(xgb_params, xgb_mat, cf_config['xgbNumRounds'])
-
-        else:
-            from sklearn.ensemble import RandomForestClassifier
-
-            verbose = 0
-            if cf_config['verbose']:
-                verbose = 2
-
-            cf = RandomForestClassifier(n_jobs = cf_config['sklearnNJobs'],
-                n_estimators = cf_config['sklearnNtrees'], verbose = verbose,
-                max_depth = cf_config['sklearnMaxDepth'], min_samples_leaf = cf_config['sklearnMinSamplesLeaf'], bootstrap = cf_config['sklearnBootstrap'])
-            cf.fit(features, gt)
-
-        self.output().write(cf)
+        self.output().write(classifier.get_classifier())
 
 
     def output(self):
@@ -502,34 +525,8 @@ class SingleClassifierFromMultipleInputs(luigi.Task):
         with open(PipelineParameter().EdgeClassifierConfigFile, 'r') as f:
             cf_config = json.load(f)
 
-        if PipelineParameter().useXGBoost:
-            import xgboost as xgb
-
-            silent = 1
-            if cf_config['verbose']:
-                silent = 0
-
-            xgb_params = { 'objective' : 'multi:softprob', 'num_class' : 2, # this should not be changed
-                'eta' : cf_config['xgbEta'], 'max_delta_step' : cf_config['xgbMaxDeltaStep'] ,
-                'colsample_by_tree' : cf_config['xgbColsample'], 'subsample' : cf_config['xgbSubsample'],
-                'silent' : silent }
-
-            xgb_mat = xgb.DMatrix(features, label = gt)
-            cf = xgb.train(xgb_params, xgb_mat, cf_config['xgbNumRounds'])
-
-        else:
-            from sklearn.ensemble import RandomForestClassifier
-
-            verbose = 0
-            if cf_config['verbose']:
-                verbose = 2
-
-            cf = RandomForestClassifier(n_jobs = cf_config['sklearnNJobs'],
-                n_estimators = cf_config['sklearnNtrees'], verbose = verbose,
-                max_depth = cf_config['sklearnMaxDepth'], min_samples_leaf = cf_config['sklearnMinSamplesLeaf'], bootstrap = cf_config['sklearnBootstrap'])
-            cf.fit(features, gt)
-
-        self.output().write(cf)
+        classifier.train(features, gt)
+        self.output().write(classifier.get())
 
     def output(self):
         with open(PipelineParameter().EdgeClassifierConfigFile, 'r') as f:
