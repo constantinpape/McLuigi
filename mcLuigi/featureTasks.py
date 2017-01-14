@@ -103,7 +103,6 @@ class RegionNodeFeatures(luigi.Task):
 
             return True
 
-
         # sequential for debugging
         #results = []
         #for z in xrange(shape[0]):
@@ -189,7 +188,6 @@ class RegionFeatures(luigi.Task):
         for i, func in enumerate(combine):
             print "Combining", i
             start = [0,offset]
-            #feat = func(fU,fV)
             out.write( start, func(fU,fV) )
             offset += 16
 

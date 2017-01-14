@@ -23,6 +23,45 @@ import nifty
 workflow_logger = logging.getLogger(__name__)
 config_logger(workflow_logger)
 
+
+def weight_edge_costs(edge_costs, rag, weighting_scheme, weight ):
+
+    workflow_logger.info("Weighting edge costs with scheme " + weighting_scheme + " and weight " + str(weight) )
+    if weighting_scheme == "z":
+        edgeLens = rag.edgeLengths()
+        assert edgeLens.shape[0] == edge_costs.shape[0], str(edgeLens.shape[0]) + " , " + str(edge_costs.shape[0])
+
+        edgeTransition = rag.totalNumberOfInSliceEdges
+
+        z_max = float( np.max( edgeLens[edgeTransition:] ) )
+        # we only weight the z edges !
+        w = weight * edgeLens[edgeTransition:] / z_max
+        edge_costs[edgeTransition:] = np.multiply(w, edge_costs[edgeTransition:])
+
+    elif weighting_scheme == "xyz":
+        edgeLens = rag.edgeLengths()
+        assert edgesLen.shape[0] == edge_costs.shape[0]
+
+        edgeTransition = rag.totalNumberOfInSliceEdges
+
+        z_max = float( np.max( edgeLens[edgeTransition:] ) )
+        xy_max = float( np.max( edgeLens[:edgeTransition] ) )
+        w_z = weight * edgeLens[edgeTransition:] / z_max
+        w_xy = weight * edgeLens[:edgeTransition] / xy_max
+        edge_costs[edgeTransition:] = np.multiply(w_z,  edge_costs[edgeTransition:])
+        edge_costs[:edgeTransition] = np.multiply(w_xy, edge_costs[:edgeTransition])
+
+    elif weighting_scheme == "all":
+        edgeLens = rag.edgeLengths()
+        assert edgesLen.shape[0] == edge_costs.shape[0]
+
+        edge_max  = float( np.max( edgesLens) )
+        w  = weight * edgeLens / edge_max
+        edge_costs = np.multiply(w, edge_costs)
+
+    return edge_costs
+
+
 # get weights and uvids of the MC problem
 class StandardMulticutProblem(luigi.Task):
 
@@ -43,6 +82,7 @@ class StandardMulticutProblem(luigi.Task):
 
         inp = self.input()
         rag = inp["Rag"].read()
+        # FIXME why is this a vol target? it should easily fit in ram, or we are reaalllly screwed
         edgeCosts = inp["EdgeProbabilities"]
         edgeCosts.open()
         assert len(edgeCosts.shape) == 1
@@ -65,38 +105,7 @@ class StandardMulticutProblem(luigi.Task):
         weighting_scheme = mc_config["weightingScheme"]
         weight           = mc_config["weight"]
 
-        workflow_logger.info("Weighting edge costs with scheme " + weighting_scheme + " and weight " + str(weight) )
-        if weighting_scheme == "z":
-            edgeLens = rag.edgeLengths()
-            assert edgeLens.shape[0] == edgeCosts.shape[0], str(edgeLens.shape[0]) + " , " + str(edgeCosts.shape[0])
-
-            edgeTransition = rag.totalNumberOfInSliceEdges
-
-            z_max = float( np.max( edgeLens[edgeTransition:] ) )
-            # we only weight the z edges !
-            w = weight * edgeLens[edgeTransition:] / z_max
-            edgeCosts[edgeTransition:] = np.multiply(w, edgeCosts[edgeTransition:])
-
-        elif weighting_scheme == "xyz":
-            edgeLens = rag.edgeLengths()
-            assert edgesLen.shape[0] == edgeCosts.shape[0]
-
-            edgeTransition = rag.totalNumberOfInSliceEdges
-
-            z_max = float( np.max( edgeLens[edgeTransition:] ) )
-            xy_max = float( np.max( edgeLens[:edgeTransition] ) )
-            w_z = weight * edgeLens[edgeTransition:] / z_max
-            w_xy = weight * edgeLens[:edgeTransition] / xy_max
-            edgeCosts[edgeTransition:] = np.multiply(w_z,  edgeCosts[edgeTransition:])
-            edgeCosts[:edgeTransition] = np.multiply(w_xy, edgeCosts[:edgeTransition])
-
-        elif weighting_scheme == "all":
-            edgeLens = rag.edgeLengths()
-            assert edgesLen.shape[0] == edgeCosts.shape[0]
-
-            edge_max  = float( np.max( edgesLens) )
-            w  = weight * edgeLens / edge_max
-            edgeCosts = np.multiply(w, edgeCosts)
+        edgeCosts = weight_edge_costs(edgeCosts, rag, weighting_scheme, weight)
 
         assert edgeCosts.shape[0] == uvIds.shape[0]
         assert np.isfinite( edgeCosts.min() ), str(edgeCosts.min())

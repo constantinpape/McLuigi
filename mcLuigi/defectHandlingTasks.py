@@ -5,6 +5,9 @@ import luigi
 from customTargets import HDF5DataTarget, HDF5VolumeTarget
 from dataTasks import InputData, ExternalSegmentation, StackedRegionAdjacencyGraph
 from defectDetectionTasks import DefectSliceDetection
+from featureTasks import EdgeFeatures, RegionFeatures, RegionNodeFeatures
+from learningTasks import EdgeProbabilities
+from multicutProblemTasks import weight_edge_costs
 
 from pipelineParameter import PipelineParameter
 from tools import config_logger
@@ -95,7 +98,6 @@ class DefectsToNodes(luigi.Task):
         return HDF5DataTarget(save_path)
 
 
-# TODO handle consecutive defected slices for individual patch predictions
 # modify the rag to isolate defected superpixels
 # introduce skip edges over the defected superpixels in z
 class ModifiedAdjacency(luigi.Task):
@@ -129,9 +131,11 @@ class ModifiedAdjacency(luigi.Task):
         # loop over the defect nodes and find the skip edges,
         # compute the modify adjacency
 
-        skip_edges = []
-        skip_ranges = []
-        delete_edges = []
+        skip_edges   = [] # the skip edges that run over the defects in z
+        skip_ranges  = [] # z-distance of the skip edges
+        skip_starts  = [] # starting slices of the skip edges
+        delete_edges = [] # the z-edges between defected and non-defected nodes that are deleted from the graph
+        ignore_edges = [] # the xy-edges between defected and non-defected nodes, that will be set to maximally repulsive weights
 
         prev_z = -1
 
@@ -172,11 +176,13 @@ class ModifiedAdjacency(luigi.Task):
             print i, '/', len(defect_nodes)
             z = long(nodes_z[i])
 
-            # remove edges
+            # remove edges and find edges connecting defected to non defected nodes
             for v, edge_id in rag.nodeAdjacency(long(u)):
                 # check if this is a z-edge and if it is, remove it from the adjacency
                 if edge_id > edge_offset:
                     delete_edges.append(edge_id)
+                elif v not in defect_nnodes: # otherwise, add it to the ignore edges, if it v is non-defected
+                    ignore_edges.append(edge_id)
 
             # don't need skip edges for first (good) or last slice
             if z == 0 or z == seg.shape[0] - 1:
@@ -207,6 +213,7 @@ class ModifiedAdjacency(luigi.Task):
                 skip_edges_u, skip_ranges_u = get_skip_edges(z+1, z-1, begin_u, end_u, mask, nodes_dn, seg_dn)
                 skip_edges.extend(skip_edges_u)
                 skip_ranges.extend(skip_ranges_u)
+                skip_starts.extend(len(skip_edges_u) * [z-1])
 
             prev_z = z
 
@@ -220,6 +227,9 @@ class ModifiedAdjacency(luigi.Task):
         skip_ranges = np.array(skip_ranges, dtype = np.uint32)
         workflow_logger.info("Introduced %i skip edges due to defects" % (len(skip_edges),) )
 
+        ignore_edges.sort()
+        workflow_logger.info("Found %i ignore edges due to defects" % (len(ignore_edges),) )
+
         # create the modified adjacency
         modified_adjacency = nifty.graph.UndirectedGraph(int(n_nodes))
         # insert original remaining edges
@@ -230,7 +240,10 @@ class ModifiedAdjacency(luigi.Task):
         out = self.output()
         out.write(modified_adjacency.serialize(), "modified_adjacency")
         out.write(skip_edges, "skip_edges")
+        out.write(skip_starts, "skip_starts")
         out.write(skip_ranges, "skip_ranges")
+        out.write(delete_edges, "delete_edges")
+        out.write(ignore_edges, "ignore_edges")
 
     def output(self):
         segFile = os.path.split(self.pathToSeg)[1][:-3]
@@ -238,30 +251,262 @@ class ModifiedAdjacency(luigi.Task):
         return HDF5DataTarget(save_path)
 
 
-# TODO implement
+# calculate and insert region features for the skip_edges
+# and delete the delete_edges
+class ModifiedRegionFeatures(luigi.Task):
+
+    pathToInput = luigi.Parameter()
+    pathToSeg   = luigi.Parameter()
+
+    def requires(self):
+        return {'region_feats' : RegionFeatures(self.pathToInput, self.pathToSeg),
+                'node_feats'   : RegionNodeFeatures(self.pathToInput, self.pathToSeg),
+                'modified_adjacency' : ModifiedAdjacency(self.pathToSeg),
+                'rag' : StackedRegionAdjacencyGraph(self.pathToSeg)}
+
+    def run(self):
+        inp = self.input()
+        rag = inp['rag'].read()
+
+        # the unmodified features
+        node_feats = inp['node_feats']
+        node_feats.open()
+        region_feats = inp['region_feats']
+        region_feats.open()
+
+        # the modified edge connectivity
+        modified_adjacency = inp['modified_adjacency']
+        skip_edges = modified_adjacency.read('skip_edges')
+        skip_ranges = modified_adjacency.read('skip_ranges')
+        delete_edges = modified_adjacency.read('delete_edges')
+
+        transition_edge = rag.totalNumberOfInSliceEdges
+        assert delete_edges.min() >= transition_edge
+
+        n_modified = region_feats.shape[0] - delete_edges.shape[0] + skip_edges.shape[0]
+        n_feats = region_feats.shape[1] + 1 # we add an additional feature to indicate the skip range
+        out_shape = [n_modified, n_feats]
+        chunk_shape = [2500,n_feats]
+        out = self.output()
+        out.open(out_shape, chunk_shape)
+
+        # first, copy the xy-features, adding a 0 column indicating the skip range
+        out.write([0,0],
+            np.c_[region_feats.read([0,0],[transition_edge,region_feats.shape[1]]),np.zeros(transition_edge)])
+
+        # next, copy the z-edges, leaving out delete edges
+        # add a column of 1s to indicate the skip range
+        prev_edge = transtion_edge
+        total_copied = transition_edge
+        for del_edge in delete_edges:
+            if del_edge == prev_edge:
+                continue
+            n_copy = del_edge - prev_edges
+            out.write([total_copied,0],
+                np.c_[region_feats.read([prev_edge,0],[del_edge,region_feats.shape[1]]),np.ones(n_copy)] )
+            prev_edge = del_edge + 1 # we skip over the del_edge
+            total_copied += n_copy
+
+        assert total_copied == region_feats.shape[0] - delete_edges.shape[0], "%i, %i" % (region_feats.shape[0], transition_edge - delete_edges.shape[0])
+
+        # finally, calculate the region features for the skip edges
+        region_stats = node_feats.read([0,0],[node_feats.shape[0],16])
+
+        fU = region_stats[skip_edges[:,0],:]
+        fV = region_stats[skip_edges[:,1],:]
+
+        skip_stat_feats = np.concatenate([np.minimum(fU,fV),
+            np.maximum(fU,fV),
+            np.abs(fU - fV),
+            fU + f)], axis = 1)
+
+        out.write([total_copied,0],skip_stat_feats)
+
+        region_centers = node_feats.read([0,skip_stat_feats.shape[1]],[node_feats.shape[0],node_feats.shape[1]])
+        sU = region_centers[skip_edges[:,0],:]
+        sV = region_centers[skip_edges[:,1],:]
+
+        out.write([total_copied,skip_stat_feats.shape[1]],
+            np.c_[(sU - sV)**2,skip_ranges])
+
+        out.close()
+
+    def output(self):
+        segFile = os.path.split(self.pathToSeg)[1][:-3]
+        save_path = os.path.join( PipelineParameter().cache, "ModifiedRegionFeatures_%s.h5" % (segFile,) )
+        return HDF5VolumeTarget( save_path, 'float32' )
+
+
+# TODO finish implementation
 # calculate and insert edge features for the skip edges
+# and delete the delete_edges
 class ModifiedEdgeFeatures(luigi.Task):
 
-    def requires(self):
-        pass
+    pathToInput = luigi.Parameter()
+    pathToSeg = luigi.Parameter()
 
-
-# TODO implement
-# calculate and insert region features for the skip edges
-class ModifiedEdgeFeatures(luigi.Task):
+    keepOnlyXY = luigi.BoolParameter(default = False)
+    keepOnlyZ = luigi.BoolParameter(default = False)
 
     def requires(self):
-        pass
+        return {'edge_feats' : EdgeFeatures(self.pathToInput, self.pathToSeg, self.keepOnlyXY, self.keepOnlyZ),
+                'modified_adjacency' : ModifiedAdjacency(self.pathToSeg),
+                'rag' : StackedRegionAdjacencyGraph(self.pathToSeg)}
+
+    def run(self):
+
+        inp = self.input()
+        rag = inp['rag'].read()
+
+        assert not (self.keepOnlyXY and self.keepOnlyZ)
+
+        # the unmodified features
+        edge_feats = inp['edge_feats']
+        edge_feats.open()
+
+        # the modified edge connectivity
+        modified_adjacency = inp['modified_adjacency']
+        skip_edges = modified_adjacency.read('skip_edges')
+        skip_ranges = modified_adjacency.read('skip_ranges')
+        delete_edges = modified_adjacency.read('delete_edges')
+
+        transition_edge = rag.totalNumberOfInSliceEdges
+        assert delete_edges.min() >= transition_edge
+
+        n_feats = edge_feats.shape[1]
+        if keepOnlyXY:
+            n_modified = edge_feats.shape[0] - delete_edges.shape[0]
+        elif keepOnlyZ:
+            n_modified = edge_feats.shape[0] - skip_edges.shape[0]
+        else:
+            n_modified = edge_feats.shape[0] - delete_edges.shape[0] + skip_edges.shape[0]
+
+        out_shape = [n_modified, n_feats]
+        chunk_shape = [2500,n_feats]
+        out = self.output()
+        out.open(out_shape, chunk_shape)
+
+        # we copy the edge feats for xy-edges
+        # don't do this if keepOnlyZ
+        if not keepOnlyZ:
+            out.write([0,0], edge_feats.read([0,0], transition_edge))
+            total_copied = transition_edge
+            prev_edge    = transition_edge
+        else:
+            total_copied = 0
+            prev_edges   = 0
+
+        # copy the z-edges, leaving out delete edges and calculate features for the skip edges
+        # don't do this if keepOnlyXY
+        if not keepOnlyXY:
+
+            n_z = rag.totalNumberOfInBetweenSliceEdges
+            out.write([total_copied,0],
+                edge_feats.read([transition_edge,0],edge_feats.shape),)
+            total_copied += n_z
+
+            for del_edge in delete_edges:
+                if del_edge == prev_edge:
+                    continue
+                n_copy = del_edge - prev_edges
+                out.write([total_copied,0],
+                    edge_feats.read([prev_edge,0],[del_edge,n_feats]) )
+                prev_edge = del_edge + 1 # we skip over the del_edge
+                total_copied += n_copy
+
+            assert total_copied == edge_feats.shape[0] - delete_edges.shape[0], "%i, %i" % (total_copied, edge_feats.shape[0] - delete_edges.shape[0])
+
+            # compute skip features with nifty
+            #skip_feats = # TODO implement in nifty
+            assert skip_feats.shape[0] == skip_edges.shape[0]
+            assert skip_feats.shape[1] == n_feats
+            out.write([total_copied,0], skip_feats)
+
+        out.close()
+
+    def output(self):
+        segFile = os.path.split(self.pathToSeg)[1][:-3]
+        inpFile = os.path.split(self.pathToInput)[1][:-3]
+        save_path = os.path.join( PipelineParameter().cache, "ModifiedEdgeFeatures_%s_%s" % (segFile,inpFile)  )
+        if self.keepOnlyXY:
+            save_path += '_xy'
+        if self.keepOnlyZ:
+            save_path += '_z'
+        save_path += '.h5'
+        return HDF5VolumeTarget( save_path, 'float32' )
 
 
-# TODO implement
 # modify the mc problem by changing the graph to the 'ModifiedAdjacency'
 # and setting xy-edges that connect defected with non-defected nodes to be maximal repulsive
-# maybe weight down the skip edges by their respective skip - range
+# TODO maybe weight down the skip edges by their respective skip - range
 class ModifiedMulticutProblem(luigi.Task):
 
+    pathToSeg = luigi.Parameter()
+    # this can either contain a single path (classifier trained for xy - and z - edges jointly)
+    # or two paths (classfier trained for xy - edges + classifier trained for z - edges separately)
+    pathsToClassifier  = luigi.ListParameter()
+
     def requires(self):
-        pass
+        return {'edge_probabilities' : EdgeProbabilities(self.pathToSeg, self.pathsToClassifier)
+                'modified_adjacency' : ModifiedAdjacency(self.pathToSeg),
+                'rag' : StackedRegionAdjacencyGraph(self.pathToSeg)}
+
+    def run(self):
+        inp = self.input()
+        modified_adjacency = inp['modified_adjacency']
+        rag = inp['rag'].read()
+        edge_costs = inp['edge_probabilities']
+        edge_costs.open()
+        edge_costs = edge_costs.read([0L],[long(edgeCosts.shape[0])])
+        assert len(edge_costs.shape) == 1
+
+        # read the mc parameter
+        with open(PipelineParameter().MCConfigFile, 'r') as f:
+            mc_config = json.load(f)
+
+        # scale the probabilities
+        # this is pretty arbitrary, it used to be 1. / n_tress, but this does not make that much sense for sklearn impl
+        p_min = 0.001
+        p_max = 1. - p_min
+        edge_costs = (p_max - p_min) * edge_costs + p_min
+
+        beta = mc_config["beta"]
+
+        # probabilities to energies, second term is boundary bias
+        edge_costs = np.log( (1. - edge_costs) / edge_costs ) + np.log( (1. - beta) / beta )
+
+        # weight edge costs
+        weighting_scheme = mc_config["weightingScheme"]
+        weight           = mc_config["weight"]
+
+        edge_costs = weight_edge_costs(edge_costs, rag, weighting_scheme, weight)
+
+        assert edge_costs.shape[0] == uvIds.shape[0]
+        assert np.isfinite( edge_costs.min() ), str(edge_costs.min())
+        assert np.isfinite( edge_costs.max() ), str(edge_costs.max())
+
+        # modify the edges costs by setting the ignore edges to be maximally repulsive
+        ignore_edges = modified_adjacency.read('ignore_edges')
+
+        max_repulsive = 2 * edge_costs.max() # max is correct here !?!
+        edge_costs[ignore_edges] = max_repulsive
+
+        # TODO we might also want to weight down the skip-edges according to their range
+        #skip_ranges = modified_adjacency.read('skip_ranges')
+        #skip_edges_begin = rag.numberOfEdges
+        #assert edge_costs.shape[0] - skip_edges_begin == len(skip_ranges), '%i, %i' % (edge_costs.shape[0] - skip_edges_begin, len(skip_ranges))
+        #edge_costs[skip_edges_begin:] /= skip_ranges
+
+        out = self.output()
+
+        out.write(edge_costs,'costs')
+        # write the modified graph
+        out.write(modified_adjacency.read('modified_adjacency'))
+
+
+    def output(self):
+        save_path = os.path.join( PipelineParameter().cache, "ModifiedMulticutProblem.h5" )
+        return HDF5DataTarget( save_path )
 
 
 # TODO implement
