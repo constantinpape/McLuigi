@@ -109,7 +109,7 @@ class BlockwiseMulticutSolver(luigi.Task):
         for l in xrange(self.numberOflevels):
             levelBlockShape = map( lambda x: x*blockFactor, initialBlockShape)
 
-            workflow_logger.info("BlockwiseMulticutSolver: scheduling reduced problem for level %i with block shape: %s" % (l, str(levelBlockShape))
+            workflow_logger.info("BlockwiseMulticutSolver: scheduling reduced problem for level %i with block shape: %s" % (l, str(levelBlockShape)) )
 
             # TODO check that we don't get larger than the actual shape here
             problemHierarchy.append( ReducedProblem(self.pathToSeg, problemHierarchy[-1],
