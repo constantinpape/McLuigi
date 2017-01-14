@@ -42,16 +42,17 @@ class EdgeProbabilities(luigi.Task):
         with open(PipelineParameter().EdgeClassifierConfigFile, 'r') as f:
             cf_config = json.load(f)
 
-        if cf_config["separateEdgeClassification"]:
+        if PipelineParameter().separateEdgeClassification:
             assert len(self.pathsToClassifier) == 2
-
         else:
             assert len(self.pathsToClassifier) == 1
 
         feature_tasks = get_local_features()
 
         cf_tasks = [ExternalClassifier(cfp) for cfp in self.pathsToClassifier]
-        return {"cfs" : cf_tasks, "features" : feature_tasks, "rag" : StackedRegionAdjacencyGraph(self.pathToSeg)}
+        return {"cfs" : cf_tasks,
+                "features" : feature_tasks,
+                "rag" : StackedRegionAdjacencyGraph(self.pathToSeg)}
 
     @run_decorator
     def run(self):
@@ -64,7 +65,7 @@ class EdgeProbabilities(luigi.Task):
         nSubFeats = cf_config["nSubFeats"]
 
         # seperate classfiers for xy - and z - edges
-        if cf_config["separateEdgeClassification"]:
+        if PipelineParameter().separateEdgeClassification:
 
             rag = inp["rag"].read()
             features = inp["features"]
@@ -159,7 +160,7 @@ class EdgeProbabilities(luigi.Task):
                         print "Features loaded, starting prediction"
 
                         readStart = featIndexStart + startType
-                        if cf_config["useXGBoost"]:
+                        if PipelineParameter().useXGBoost:
                             import xgboost as xgb
                             xgb_mat = xgb.DMatrix(featuresType)
                             out.write( [long(readStart)],  cf.predict(xgb_mat)[:,1] )
@@ -199,7 +200,7 @@ class EdgeProbabilities(luigi.Task):
 
                     print "Features loaded, starting prediction"
 
-                    if cf_config["useXGBoost"]:
+                    if PipelineParameter().useXGBoost:
                         import xgboost as xgb
                         xgb_mat = xgb.DMatrix(featuresType)
                         out.write( [long(startType)],  cf.predict(xgb_mat)[:,1] )
@@ -223,7 +224,7 @@ class EdgeProbabilities(luigi.Task):
             for feat in feat_tasks:
                 feat.close()
 
-            if cf_config["useXGBoost"]:
+            if PipelineParameter().useXGBoost:
                 import xgboost as xgb
                 xgb_mat = xgb.DMatrix(features)
                 probs = cf.predict(xgb_mat)[:,1]
@@ -355,7 +356,7 @@ class SingleClassifierFromGt(luigi.Task):
         with open(PipelineParameter().EdgeClassifierConfigFile, 'r') as f:
             cf_config = json.load(f)
 
-        if cf_config["useXGBoost"]:
+        if PipelineParameter().useXGBoost:
             import xgboost as xgb
 
             silent = 1
@@ -392,7 +393,7 @@ class SingleClassifierFromGt(luigi.Task):
 
         save_path = os.path.join( PipelineParameter().cache, "SingleClassifierFromGt"  )
 
-        if cf_config["useXGBoost"]:
+        if PipelineParameter().useXGBoost:
             save_path += "_xgb"
         else:
             save_path += "_sklearn"
@@ -501,7 +502,7 @@ class SingleClassifierFromMultipleInputs(luigi.Task):
         with open(PipelineParameter().EdgeClassifierConfigFile, 'r') as f:
             cf_config = json.load(f)
 
-        if cf_config["useXGBoost"]:
+        if PipelineParameter().useXGBoost:
             import xgboost as xgb
 
             silent = 1
@@ -536,7 +537,7 @@ class SingleClassifierFromMultipleInputs(luigi.Task):
 
         save_path = os.path.join( PipelineParameter().cache, "SingleClassifierFromMultipleInputs"  )
 
-        if cf_config["useXGBoost"]:
+        if PipelineParameter().useXGBoost:
             save_path += "_xgb"
         else:
             save_path += "_sklearn"

@@ -37,5 +37,9 @@ class PipelineParameter(object):
         self.compressionLevel = 5
         # log level
         self.logLevel = logging.INFO
+        # enable using seperate classifier for xy - and z - edges
+        self.separateEdgeClassification = True
+        # choose betweem xgb - gradient boostig and sklearn - random forest
+        self.useXGBoost = True
 
     # TODO range cheks for nThreads, compressionLevel and logLevel with @propery and set property
