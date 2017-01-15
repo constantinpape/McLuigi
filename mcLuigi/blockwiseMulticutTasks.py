@@ -318,7 +318,7 @@ class NodesToInitialBlocks(luigi.Task):
         self.output().writeVlen(blockResult)
 
     def output(self):
-        save_name = "NodesToInitialBlocks_%s.h5" % ("modifed" if PipelineParameter().defectPipeline else "standard",)
+        save_name = "NodesToInitialBlocks.h5" %
         save_path = os.path.join( PipelineParameter().cache, save_name)
         return HDF5DataTarget( save_path )
 
