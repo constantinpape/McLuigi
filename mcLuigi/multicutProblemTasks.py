@@ -62,7 +62,7 @@ class MulticutProblem(luigi.Task):
             self._modified_multicut_proplem(rag, edge_costs)
         else:
             workflow_logger.info("MulticutProblem: computing MulticutProblem for standard pipeline.")
-            self._standard_multicut_problem(rag_edge_costs)
+            self._standard_multicut_problem(rag, edge_costs)
 
         edge_cost_file.close()
 
@@ -177,16 +177,16 @@ class MulticutProblem(luigi.Task):
         # transform edge costs to probabilities
         edge_costs = self._probabilities_to_costs(rag, edge_costs)
 
-        assert edgeCosts.shape[0] == uvIds.shape[0]
-        assert np.isfinite( edgeCosts.min() ), str(edgeCosts.min())
-        assert np.isfinite( edgeCosts.max() ), str(edgeCosts.max())
+        assert edge_costs.shape[0] == uv_ids.shape[0]
+        assert np.isfinite( edge_costs.min() ), str(edge_costs.min())
+        assert np.isfinite( edge_costs.max() ), str(edge_costs.max())
 
         # write concatenation of uvids and edge costs
         out = self.output()
 
-        assert g.numberOfEdges == edgeCosts.shape[0]
+        assert g.numberOfEdges == edge_costs.shape[0]
         out.write( g.serialize(), "graph" )
-        out.write( edgeCosts, "costs")
+        out.write( edge_costs, "costs")
 
 
     def output(self):
