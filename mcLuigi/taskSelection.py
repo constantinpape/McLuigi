@@ -56,29 +56,34 @@ def get_local_features(xyOnly = False, zOnly = False):
     if not isinstance(input_data, list):
         input_data = [input_data,]
 
+    seg = inputs["seg"]
+    if isinstance(seg, list):
+        assert len(seg) == 1, str(seg)
+        seg = seg[0]
+
     if "raw" in features:
         # by convention we assume that the raw data is given as 0th
-        feature_tasks.append( EdgeTask(input_data[0], inputs["seg"]) )
+        feature_tasks.append( EdgeTask(input_data[0], seg) )
         workflow_logger.debug("Calculating Edge Features from raw input: " + input_data[0])
 
     if "prob" in features:
         # by convention we assume that the membrane probs are given as 1st
-        feature_tasks.append( EdgeTask(input_data[1], inputs["seg"] ) )
+        feature_tasks.append( EdgeTask(input_data[1], seg ) )
         workflow_logger.debug("Calculating Edge Features from probability maps: " + input_data[1])
 
     if "affinitiesXY" in features and not zOnly: # specific XY - features -> we keep only these
         # by convention we assume that the xy - affinity channel is given as 1st input
-        feature_tasks.append( EdgeTask(input_data[1], inputs["seg"], keepOnlyXY = True ) )
+        feature_tasks.append( EdgeTask(input_data[1], seg, keepOnlyXY = True ) )
         workflow_logger.debug("Calculating Edge Features from xy affinity maps: " + input_data[1])
 
     if "affinitiesZ" in features and not xyOnly: # specific Z - features -> we keep only these
         # by convention we assume that the z - affinity channel is given as 2nd input
-        feature_tasks.append( EdgeTask(input_data[2], inputs["seg"], keepOnlyZ = True ) )
+        feature_tasks.append( EdgeTask(input_data[2], seg, keepOnlyZ = True ) )
         workflow_logger.debug("Calculating Edge Features from z affinity maps: " + input_data[2])
 
     if "reg" in features:
         # by convention we calculate region features only on the raw data (0th input)
-        feature_tasks.append( RegionTask(input_data[0], inputs["seg"]) )
+        feature_tasks.append( RegionTask(input_data[0], seg) )
         workflow_logger.debug("Calculating Region Features")
 
     # check for invalid keys

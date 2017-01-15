@@ -6,6 +6,7 @@ import luigi
 from taskSelection import get_local_features,get_local_features_for_multiinp
 from customTargets import PickleTarget, HDF5DataTarget, HDF5VolumeTarget
 from dataTasks import DenseGroundtruth, ExternalSegmentation, StackedRegionAdjacencyGraph
+from defectHandlingTasks import ModifiedAdjacency
 
 from pipelineParameter import PipelineParameter
 from tools import config_logger, run_decorator
@@ -126,8 +127,10 @@ class EdgeProbabilities(luigi.Task):
     def requires(self):
         nClassifiers = 2 if PipelineParameter().separateEdgeClassification else 1
         assert len(self.pathsToClassifier) == nClassifiers, "%i, %i" % (self.pathsToClassifier, nClassifiers)
-        return {"features" : get_local_features(),
-                "rag" : StackedRegionAdjacencyGraph(self.pathToSeg)}
+        return_tasks ={"features" : get_local_features(), "rag" : StackedRegionAdjacencyGraph(self.pathToSeg)}
+        if PipelineParameter().defectPipeline:
+            return_tasks['modified_adjacency'] = ModifiedAdjacency(self.pathToSeg)
+        return return_tasks
 
     @run_decorator
     def run(self):
@@ -137,9 +140,15 @@ class EdgeProbabilities(luigi.Task):
         for feat in feature_tasks:
             feat.open()
 
+        if PipelineParameter().defectPipeline:
+            nEdges = inp["modified_adjacency"].read("n_edges_modified")
+            assert nEdges > 0, str(nEdges)
+            workflow_logger.info("EdgeProbabilities: for defect corrected edges. Total number of edges: %i" % nEdges)
+        else:
+            nEdges = rag.numberOfEdges
+            workflow_logger.info("EdgeProbabilities: Total number of edges: %i" % nEdges)
+
         out  = self.output()
-        # TODO need to correct this for modified features
-        nEdges = rag.numberOfEdges
         out.open([nEdges],[min(262144,nEdges)]) # 262144 = chunk size
 
         if PipelineParameter().separateEdgeClassification:
@@ -190,10 +199,16 @@ class EdgeProbabilities(luigi.Task):
 
 
     def _predict_separate(self, rag, feature_tasks, out):
-        # TODO correct for modified features if we have PipelineParameter().defectPipeline = True
-        nEdges   = rag.numberOfEdges
-        nXYEdges = rag.totalNumberOfInSliceEdges
-        nZEdges  = nEdges - nXYEdges
+
+        if PipelineParameter().defectPipeline:
+            nEdges = self.input()["modified_adjacency"].read("n_edges_modified")
+            assert nEdges > 0
+            nXYEdges = rag.totalNumberOfInSliceEdges
+            nZEdges  = nEdges - nXYEdges
+        else:
+            nEdges   = rag.numberOfEdges
+            nXYEdges = rag.totalNumberOfInSliceEdges
+            nZEdges  = nEdges - nXYEdges
 
         nFeatsXY = 0
         nFeatsZ = 0
@@ -384,107 +399,7 @@ class EdgeGroundtruth(luigi.Task):
         return HDF5DataTarget( save_path  )
 
 
-class SingleClassifierFromGt(luigi.Task):
-
-    pathToSeg = luigi.Parameter()
-    pathToGt  = luigi.Parameter()
-    learnXYOnly  = luigi.BoolParameter(default = False)
-    learnZOnly   = luigi.BoolParameter(default = False)
-
-    def requires(self):
-        # This way of generating the features is quite hacky, but it is the
-        # least ugly way I could come up with till now.
-        # and as long as we only use the pipeline for deploymeny it should be alright
-        assert not (self.learnXYOnly and self.learnZOnly)
-        feature_tasks = get_local_features(self.learnXYOnly, self.learnZOnly)
-        return {"gt" : EdgeGroundtruth(self.pathToSeg, self.pathToGt),
-                "features" : feature_tasks,
-                "rag" : StackedRegionAdjacencyGraph(self.pathToSeg)}
-
-    @run_decorator
-    def run(self):
-
-        inp = self.input()
-        gt = inp["gt"].read()
-        feature_tasks = inp["features"]
-
-        if self.learnXYOnly:
-            workflow_logger.info("SingleClassifierFromGt: learning classfier for xy edges.")
-
-            rag = inp["rag"].read()
-            nEdges = rag.numberOfEdges
-            transitionEdge = rag.totalNumberOfInSliceEdges
-
-            gt = gt[:transitionEdge]
-
-            features = []
-            for feat_task in feature_tasks:
-                feat_task.open()
-                assert feat_task.shape[0] == nEdges or feat_task[0] == transitionEdge
-                if feat_task.shape[0] == nEdges:
-                    feat = feat_task.read([0,0],[transitionEdge,feat_task.shape[1]])
-                else:
-                    feat = feat_task.read([0,0],feat_task.shape)
-                features.append(feat)
-                feat_task.close()
-            features = np.concatenate(features, axis = 1)
-
-        elif self.learnZOnly:
-            workflow_logger.info("SingleClassifierFromGt: learning classfier for z edges.")
-
-            rag = inp["rag"].read()
-            nEdges = rag.numberOfEdges
-            transitionEdge = rag.totalNumberOfInSliceEdges
-
-            gt = gt[transitionEdge:]
-
-            features = []
-            for feat_task in feature_tasks:
-                feat_task.open()
-                assert feat_task.shape[0] == nEdges or feat_task[0] == nEdges - transitionEdge
-                if feat_task.shape[0] == nEdges:
-                    feat = feat_task.read([transitionEdge,0],[nEdges,feat_task.shape[1]])
-                else:
-                    feat = feat_task.read([0,0],feat_task.shape)
-                features.append(feat)
-                feat_task.close()
-            features = np.concatenate(features, axis = 1)
-
-        else:
-            for feat_task in feature_tasks:
-                feat_task.open()
-            workflow_logger.info("SingleClassifierFromGt: learning classfier for all edges.")
-            features = np.concatenate( [feat.read([0,0],feat.shape) for feat in feature_tasks], axis = 1 )
-            for feat_task in feature_tasks:
-                feat_task.close()
-
-        assert features.shape[0] == gt.shape[0], str(features.shape[0]) + " , " + str(gt.shape[0])
-
-        classifier = EdgeClassifier()
-        classifier.train(features, gt)
-
-        self.output().write(classifier.get_classifier())
-
-
-    def output(self):
-
-        save_path = os.path.join( PipelineParameter().cache, "SingleClassifierFromGt"  )
-
-        if PipelineParameter().useXGBoost:
-            save_path += "_xgb"
-        else:
-            save_path += "_sklearn"
-
-        if self.learnXYOnly:
-            save_path += "_xy"
-        if self.learnZOnly:
-            save_path += "_z"
-        save_path += ".pkl"
-
-        return PickleTarget(save_path)
-
-
-class SingleClassifierFromMultipleInputs(luigi.Task):
+class LearnClassifierFromGt(luigi.Task):
 
     pathsToSeg = luigi.ListParameter()
     pathsToGt  = luigi.ListParameter()
@@ -492,107 +407,206 @@ class SingleClassifierFromMultipleInputs(luigi.Task):
     learnZOnly   = luigi.BoolParameter(default = False)
 
     def requires(self):
-        # This way of generating the features is quite hacky, but it is the
-        # least ugly way I could come up with till now.
-        # and as long as we only use the pipeline for deploymeny it should be alright
+        assert not (self.learnXYOnly and self.learnZOnly)
         assert len(self.pathsToSeg) == len(self.pathsToGt)
-        feature_tasks = get_local_features_for_multiinp(self.learnXYOnly, self.learnZOnly)
-        assert len(feature_tasks) == len(self.pathsToSeg)
-        gts = [EdgeGroundtruth(self.pathsToSeg[i], self.pathsToGt[i]) for i in xrange(len(self.pathsToSeg))]
-        rag_tasks = [StackedRegionAdjacencyGraph(segp) for segp in self.pathsToSeg]
-        return {"gts" : gts, "features" : feature_tasks, "rags" : rag_tasks}
+        n_inputs = len(self.pathsToSeg)
+
+        if n_inputs == 1:
+            workflow_logger.info("LearnClassifierFromGt: learning classifier from single input")
+            feature_tasks = get_local_features(self.learnXYOnly, self.learnZOnly)
+            return_tasks = {"gt" : EdgeGroundtruth(self.pathsToSeg[0], self.pathsToGt[0]),
+                            "features" : feature_tasks,
+                            "rag" : StackedRegionAdjacencyGraph(self.pathsToSeg[0])}
+        else:
+            workflow_logger.info("LearnClassifierFromGt: learning classifier from %i inputs" % n_inputs)
+            feature_tasks = get_local_features_for_multiinp(self.learnXYOnly, self.learnZOnly)
+            assert len(feature_tasks) == n_inputs
+            return_tasks = {"gt" : [EdgeGroundtruth(self.pathsToSeg[i], self.pathsToGt[i]) for i in xrange(n_inputs)],
+                            "features" : feature_tasks,
+                            "rag" : [StackedRegionAdjacencyGraph(segp) for segp in self.pathsToSeg]}
+        return return_tasks
 
     @run_decorator
     def run(self):
-
         inp = self.input()
-
-        gt_tasks = inp["gts"]
+        gt = inp["gt"]
         feature_tasks = inp["features"]
+        rag = inp["rag"]
 
-        rag_tasks = inp["rags"]
+        n_inputs = len(self.pathsToSeg)
 
-        assert len(feature_tasks) == len(gt_tasks)
+        if n_inputs > 1:
+            n_inputs = len(gt)
+            assert n_inputs == len(rag)
+            assert n_inputs == len(feature_tasks)
 
-        features = []
-        gt = []
+            workflow_logger.info("LearnClassifierFromGt: call learning classifier for %i inputs" % n_inputs)
+            for feat_tasks_i in feature_tasks:
+                for feat in feat_tasks_i:
+                    feat.open()
+            self._learn_classifier_from_multiple_inputs(rag, gt, feature_tasks)
+            for feat_tasks_i in feature_tasks:
+                for feat in feat_tasks_i:
+                    feat.close()
 
-        for i in xrange(len(gt_tasks)):
+        else:
+            workflow_logger.info("LearnClassifierFromGt: call learning classifier for single inputs")
+            for feat in feature_tasks:
+                feat.open()
+            self._learn_classifier_from_single_input(rag, gt, feature_tasks)
+            for feat in feature_tasks:
+                feat.close()
 
-            feat_tasks_i = feature_tasks[i]
-            gt_i = gt_tasks[i].read()
 
-            if self.learnXYOnly:
+    def _learn_classifier_from_single_input(self, rag, gt, feature_tasks):
+        rag = rag.read()
+        gt  = gt.read()
 
-                rag = rag_tasks[i].read()
-                nEdges = rag.numberOfEdges
-                transitionEdge = rag.totalNumberOfInSliceEdges
+        # TODO correct for defects here
+        nEdges = rag.numberOfEdges
+        transitionEdge = rag.totalNumberOfInSliceEdges
 
-                gt_i = gt_i[:transitionEdge]
-
-                features_i = []
-                for feat_task in feat_tasks_i:
-                    feat_task.open()
-                    assert feat_task.shape[0] == nEdges or feat_task.shape[0] == transitionEdge
-                    nFeats = feat_task.shape[1]
-                    feat = feat_task.read([0,0],[transitionEdge,nFeats])
-                    features_i.append(feat)
-                    feat_task.close()
-                features_i = np.concatenate(features_i, axis = 1)
-
-            elif self.learnZOnly:
-
-                rag = rag_tasks[i].read()
-                nEdges = rag.numberOfEdges
-                transitionEdge = rag.totalNumberOfInSliceEdges
-
-                gt_i = gt_i[transitionEdge:]
-
-                features_i = []
-                for feat_task in feat_tasks_i:
-                    feat_task.open()
-                    assert feat_task.shape[0] == nEdges or feat_task.shape[0] == nEdges - transitionEdge
-                    nFeats = feat_task.shape[1]
-                    if feat_task.shape[0] == nEdges:
-                        feat = feat_task.read([transitionEdge,0],[nEdges,nFeats])
-                    else:
-                        feat = feat_task.read([0,0],[feat_task.shape[0],nFeats])
-                    features_i.append(feat)
-                    feat_task.close()
-                features_i = np.concatenate(features_i, axis = 1)
-
-            else:
-                for feat_task in feat_tasks_i:
-                    feat_task.open()
-                workflow_logger.info("SingleClassifierFromMultipleInputs: learning classfier for all edges.")
-                features_i = np.concatenate( [feat.read([0,0],feat.shape) for feat in feat_tasks_i], axis = 1 )
-
-            assert features_i.shape[0] == gt_i.shape[0]
-
-            features.append(features_i)
-            gt.append(gt_i)
-
-        features = np.concatenate( features, axis = 0 )
-        gt    = np.concatenate( gt )
+        if self.learnXYOnly:
+            workflow_logger.info("LearnClassifierFromGt: learning classfier from single input for xy edges only.")
+            features, gt = self._learn_classifier_from_single_input_xy(rag, gt, feature_tasks, nEdges, transitionEdge)
+        elif self.learnZOnly:
+            workflow_logger.info("LearnClassifierFromGt: learning classfier from single input for z edges only.")
+            features, gt = self._learn_classifier_from_single_input_z(rag, gt, feature_tasks, nEdges, transitionEdge)
+        else:
+            workflow_logger.info("LearnClassifierFromGt: learning classfier from single input for all edges.")
+            features = np.concatenate( [feat.read([0,0],feat.shape) for feat in feature_tasks], axis = 1 )
 
         assert features.shape[0] == gt.shape[0], str(features.shape[0]) + " , " + str(gt.shape[0])
-
         classifier = EdgeClassifier()
         classifier.train(features, gt)
         self.output().write(classifier.get_classifier())
 
-    def output(self):
-        save_path = os.path.join( PipelineParameter().cache, "SingleClassifierFromMultipleInputs"  )
+    def _learn_classifier_from_single_input_xy(self, rag, gt, feature_tasks, nEdges, transitionEdge):
+        gt = gt[:transitionEdge]
+        features = []
+        for feat_task in feature_tasks:
+            assert feat_task.shape[0] == nEdges or feat_task[0] == transitionEdge
+            if feat_task.shape[0] == nEdges:
+                feat = feat_task.read([0,0],[transitionEdge,feat_task.shape[1]])
+            else:
+                feat = feat_task.read([0,0],feat_task.shape)
+            features.append(feat)
+        features = np.concatenate(features, axis = 1)
+        return features, gt
 
-        if PipelineParameter().useXGBoost:
-            save_path += "_xgb"
-        else:
-            save_path += "_sklearn"
+    def _learn_classifier_from_single_input_z(self, rag, gt, feature_tasks, nEdges, transitionEdge):
+        gt = gt[transitionEdge:]
+        features = []
+        for feat_task in feature_tasks:
+            assert feat_task.shape[0] == nEdges or feat_task[0] == nEdges - transitionEdge
+            if feat_task.shape[0] == nEdges:
+                feat = feat_task.read([transitionEdge,0],[nEdges,feat_task.shape[1]])
+            else:
+                feat = feat_task.read([0,0],feat_task.shape)
+            features.append(feat)
+        features = np.concatenate(features, axis = 1)
+        return features, gt
+
+
+    def _learn_classifier_from_multiple_inputs(self, rag, gt, feature_tasks):
 
         if self.learnXYOnly:
-            save_path += "_xy"
-        if self.learnZOnly:
-            save_path += "_z"
-        save_path += ".pkl"
+            workflow_logger.info("LearnClassifierFromGt: learning classifier for multiple input for xy edges only.")
+            features, gt = self._learn_classifier_from_multiple_inputs_xy(rag, gt, feature_tasks)
+        elif self.learnZOnly:
+            workflow_logger.info("LearnClassifierFromGt: learning classifier for multiple input for z edges only.")
+            features, gt = self._learn_classifier_from_multiple_inputs_z(rag, gt, feature_tasks)
+        else:
+            workflow_logger.info("LearnClassifierFromGt: learning classifier for multiple input for all edges.")
+            features, gt = self._learn_classifier_from_multiple_inputs_all(rag, gt, feature_tasks)
 
+        assert features.shape[0] == gt.shape[0], str(features.shape[0]) + " , " + str(gt.shape[0])
+        classifier = EdgeClassifier()
+        classifier.train(features, gt)
+        self.output().write(classifier.get_classifier())
+
+
+    def _learn_classifier_from_multiple_inputs_xy(self, rag, gt, feature_tasks):
+        features = []
+        gts = []
+
+        for i in xrange(len(gt)):
+            feat_tasks_i = feature_tasks[i]
+            gt_i = gt[i].read()
+            rag_i = rag[i].read()
+
+            # TODO correct for defect pipeline here
+            nEdges = rag_i.numberOfEdges
+            transitionEdge = rag_i.totalNumberOfInSliceEdges
+
+            gt_i = gt_i[:transitionEdge]
+
+            features_i = []
+            for feat_task in feat_tasks_i:
+                assert feat_task.shape[0] == nEdges or feat_task.shape[0] == transitionEdge
+                nFeats = feat_task.shape[1]
+                feat = feat_task.read([0,0],[transitionEdge,nFeats])
+                features_i.append(feat)
+            features.append(np.concatenate(features_i, axis = 1))
+            gts.append(gt_i)
+
+        features = np.concatenate( features, axis = 0 )
+        gts      = np.concatenate( gts )
+        return features, gts
+
+    def _learn_classifier_from_multiple_inputs_z(self, rag, gt, feature_tasks):
+        features = []
+        gts = []
+
+        for i in xrange(len(gt)):
+            feat_tasks_i = feature_tasks[i]
+            gt_i = gt[i].read()
+            rag_i = rag[i].read()
+
+            # TODO correct for defect pipeline here
+            nEdges = rag_i.numberOfEdges
+            transitionEdge = rag_i.totalNumberOfInSliceEdges
+
+            gt_i = gt_i[transitionEdge:]
+
+            features_i = []
+            for feat_task in feat_tasks_i:
+                assert feat_task.shape[0] == nEdges or feat_task.shape[0] == nEdges - transitionEdge
+                nFeats = feat_task.shape[1]
+                if feat_task.shape[0] == nEdges:
+                    feat = feat_task.read([transitionEdge,0],[nEdges,nFeats])
+                else:
+                    feat = feat_task.read([0,0],[feat_task.shape[0],nFeats])
+                features_i.append(feat)
+
+            features.append(np.concatenate(features_i, axis = 1))
+            gts.append(gt_i)
+
+        features = np.concatenate( features, axis = 0 )
+        gts      = np.concatenate( gts )
+        return features, gts
+
+    def _learn_classifier_from_multiple_inputs_all(self, rag, gt, feature_tasks):
+        features = []
+        gts = []
+        for i in xrange(len(gt)):
+            feat_tasks_i = feature_tasks[i]
+            features.append(np.concatenate( [feat.read([0,0],feat.shape) for feat in feat_tasks_i], axis = 1 ))
+            gts.append(gt[i].read())
+        features = np.concatenate( features, axis = 0 )
+        gts      = np.concatenate( gts )
+        return features, gts
+
+
+    def output(self):
+        ninp_str = "SingleInput" if (len(self.pathsToSeg) == 1) else "MultipleInput"
+        cf_str = "xgb" if PipelineParameter().useXGBoost else "sklearn"
+        if self.learnXYOnly:
+            edgetype_str = "xy"
+        elif self.learnZOnly:
+            edgetype_str = "z"
+        else:
+            edgetype_str = "all"
+        save_path = os.path.join( PipelineParameter().cache,
+            "LearnClassifierFromGt_%s_%s_%s.h5" % (ninp_str,cf_str,edgetype_str) )
         return PickleTarget(save_path)

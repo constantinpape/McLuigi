@@ -176,7 +176,7 @@ class ModifiedAdjacency(luigi.Task):
                 # check if this is a z-edge and if it is, remove it from the adjacency
                 if edge_id > edge_offset:
                     delete_edges.append(edge_id)
-                elif v not in defect_nnodes: # otherwise, add it to the ignore edges, if it v is non-defected
+                elif v not in defect_nodes: # otherwise, add it to the ignore edges, if it v is non-defected
                     ignore_edges.append(edge_id)
 
             # don't need skip edges for first (good) or last slice
@@ -223,6 +223,7 @@ class ModifiedAdjacency(luigi.Task):
         workflow_logger.info("ModifiedAdjacency: introduced %i skip edges due to defects" % (len(skip_edges),) )
 
         ignore_edges.sort()
+        ignore_edges = np.array(ignore_edges, dtype = np.uint32)
         workflow_logger.info("ModifiedAdjacency: found %i ignore edges due to defects" % (len(ignore_edges),) )
 
         # create the modified adjacency
@@ -231,7 +232,8 @@ class ModifiedAdjacency(luigi.Task):
         modified_adjacency.insertEdges(uv_ids)
         # insert skip edges
         modified_adjacency.insertEdges(skip_edges)
-        workflow_logger.info("ModifiedAdjacency: Total number of edges in modified adjacency: %i" % modified_adjacency.numberOfEdges)
+        n_edges_modified = modified_adjacency.numberOfEdges
+        workflow_logger.info("ModifiedAdjacency: Total number of edges in modified adjacency: %i" % n_edges_modified)
 
         out = self.output()
         out.write(modified_adjacency.serialize(), "modified_adjacency")
@@ -240,6 +242,7 @@ class ModifiedAdjacency(luigi.Task):
         out.write(skip_ranges, "skip_ranges")
         out.write(delete_edges, "delete_edges")
         out.write(ignore_edges, "ignore_edges")
+        out.write(n_edges_modified, "n_edges_modified")
 
     def output(self):
         segFile = os.path.split(self.pathToSeg)[1][:-3]
