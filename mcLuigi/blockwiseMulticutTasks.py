@@ -162,7 +162,7 @@ class BlockwiseMulticutSolver(luigi.Task):
         self.output().write(nodeResult)
 
     def output(self):
-        save_path = os.path.join( PipelineParameter().cache, "BlockwiseMulticutSolver.h5")
+        save_path = os.path.join( PipelineParameter().cache, "BlockwiseMulticutSolver_%s.h5" % ("modifed" if PipelineParameter().defectPipeline else "standard",))
         return HDF5DataTarget( save_path )
 
 
@@ -274,7 +274,7 @@ class ReducedProblem(luigi.Task):
 
     def output(self):
         blcksize_str = "_".join( map( str, list(self.blockShape) ) )
-        save_name = "ReducedProblem_" + blcksize_str + ".h5"
+        save_name = "ReducedProblem_%s_%s.h5" % (blcksize_str,"modifed" if PipelineParameter().defectPipeline else "standard")
         save_path = os.path.join( PipelineParameter().cache, save_name)
         return HDF5DataTarget( save_path )
 
@@ -318,7 +318,7 @@ class NodesToInitialBlocks(luigi.Task):
         self.output().writeVlen(blockResult)
 
     def output(self):
-        save_name = "NodesToInitialBlocks.h5"
+        save_name = "NodesToInitialBlocks_%s.h5" % ("modifed" if PipelineParameter().defectPipeline else "standard",)
         save_path = os.path.join( PipelineParameter().cache, save_name)
         return HDF5DataTarget( save_path )
 
@@ -474,6 +474,6 @@ class BlockwiseSubSolver(luigi.Task):
 
     def output(self):
         blcksize_str = "_".join( map( str, list(self.blockShape) ) )
-        save_name = "BlockwiseSubSolver_" + blcksize_str + ".h5"
+        save_name = "BlockwiseSubSolver_%s_%s.h5" % (blcksize_str, "modifed" if PipelineParameter().defectPipeline else "standard")
         save_path = os.path.join( PipelineParameter().cache, save_name)
         return HDF5DataTarget( save_path )

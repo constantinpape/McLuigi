@@ -44,4 +44,12 @@ class PipelineParameter(object):
         # number of chunks that features are split into for out of core probability calculation
         self.nFeatureChunks = 1 # default = 1 -> in core calculation
 
-    # TODO range cheks for nThreads, compressionLevel and logLevel with @propery and set property
+    # TODO range and type cheks via @property and setproperty
+
+    # TODO don't allow setting a field that does not already exist to avoid setting incorrect parameter
+
+    # TODO move all parameter from FeatureConfigFile, MCConfigFile and EdgeClassifierFile here
+
+    # TODO implement load / save via serialization to json
+    # include meta fields to save experiment name and time of execution
+    # hash everything and put into paramstr for being able to re-identify reliably

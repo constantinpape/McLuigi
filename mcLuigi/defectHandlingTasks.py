@@ -231,7 +231,8 @@ class ModifiedAdjacency(luigi.Task):
         # insert original remaining edges
         modified_adjacency.insertEdges(uv_ids)
         # insert skip edges
-        modified_adjacency.insertEdges(skip_edges)
+        if skip_edges.size:
+            modified_adjacency.insertEdges(skip_edges)
         n_edges_modified = modified_adjacency.numberOfEdges
         workflow_logger.info("ModifiedAdjacency: Total number of edges in modified adjacency: %i" % n_edges_modified)
 
@@ -281,58 +282,82 @@ class ModifiedRegionFeatures(luigi.Task):
         delete_edges = modified_adjacency.read('delete_edges')
 
         transition_edge = rag.totalNumberOfInSliceEdges
-        assert delete_edges.min() >= transition_edge
 
-        n_modified = region_feats.shape[0] - delete_edges.shape[0] + skip_edges.shape[0]
-        n_feats = region_feats.shape[1] + 1 # we add an additional feature to indicate the skip range
-        out_shape = [n_modified, n_feats]
-        chunk_shape = [2500,n_feats]
-        out = self.output()
-        out.open(out_shape, chunk_shape)
+        # modify the features only if we have skip edges
+        if skip_edges.size:
 
-        # first, copy the xy-features, adding a 0 column indicating the skip range
-        out.write([0,0],
-            np.c_[region_feats.read([0,0],[transition_edge,region_feats.shape[1]]),np.zeros(transition_edge)])
+            assert skip_ranges.shape[0] == skip_edges.shape[0]
+            assert delete_edges.min() >= transition_edge
 
-        # next, copy the z-edges, leaving out delete edges
-        # add a column of 1s to indicate the skip range
-        prev_edge = transition_edge
-        total_copied = transition_edge
-        for del_edge in delete_edges:
-            if del_edge == prev_edge:
-                prev_edge = del_edge + 1
-                continue
-            n_copy = del_edge - prev_edge
-            out.write([total_copied,0],
-                np.c_[region_feats.read([prev_edge,0],[del_edge,region_feats.shape[1]]),np.ones(n_copy)] )
-            prev_edge = del_edge + 1 # we skip over the del_edge
-            total_copied += n_copy
+            n_modified = region_feats.shape[0] - delete_edges.shape[0] + skip_edges.shape[0]
+            n_feats = region_feats.shape[1] + 1 # we add an additional feature to indicate the skip range
+            out_shape = [n_modified, n_feats]
+            chunk_shape = [2500,n_feats]
+            out = self.output()
+            out.open(out_shape, chunk_shape)
 
-        assert total_copied == region_feats.shape[0] - delete_edges.shape[0], "%i, %i" % (total_copied, region_feats.shape[0] - delete_edges.shape[0])
+            # first, copy the xy-features, adding a 0 column indicating the skip range
+            out.write([0,0],
+                np.c_[region_feats.read([0,0],[transition_edge,region_feats.shape[1]]),np.zeros(transition_edge)])
 
-        # finally, calculate the region features for the skip edges
-        # features based on region statistics
-        n_stat_feats = 16 # magic_nu...
-        region_stats = node_feats.read([0,0],[node_feats.shape[0],n_stat_feats])
+            # next, copy the z-edges, leaving out delete edges
+            # add a column of 1s to indicate the skip range
+            prev_edge = transition_edge
+            total_copied = transition_edge
+            for del_edge in delete_edges:
+                if del_edge == prev_edge:
+                    prev_edge = del_edge + 1
+                    continue
+                n_copy = del_edge - prev_edge
+                out.write([total_copied,0],
+                    np.c_[region_feats.read([prev_edge,0],[del_edge,region_feats.shape[1]]),np.ones(n_copy)] )
+                prev_edge = del_edge + 1 # we skip over the del_edge
+                total_copied += n_copy
 
-        fU = region_stats[skip_edges[:,0],:]
-        fV = region_stats[skip_edges[:,1],:]
+            assert total_copied == region_feats.shape[0] - delete_edges.shape[0], "%i, %i" % (total_copied, region_feats.shape[0] - delete_edges.shape[0])
 
-        skip_stat_feats = np.concatenate([np.minimum(fU,fV),
-            np.maximum(fU,fV),
-            np.abs(fU - fV),
-            fU + fV], axis = 1)
-        out.write([total_copied,0], skip_stat_feats)
+            # finally, calculate the region features for the skip edges
+            # features based on region statistics
+            n_stat_feats = 16 # magic_nu...
+            region_stats = node_feats.read([0,0],[node_feats.shape[0],n_stat_feats])
 
-        # features based on region center differences
-        region_centers = node_feats.read([0,n_stat_feats],[node_feats.shape[0],node_feats.shape[1]])
-        sU = region_centers[skip_edges[:,0],:]
-        sV = region_centers[skip_edges[:,1],:]
-        skip_center_feats = np.c_[(sU - sV)**2, skip_ranges]
+            fU = region_stats[skip_edges[:,0],:]
+            fV = region_stats[skip_edges[:,1],:]
 
-        assert skip_center_feats.shape[0] == skip_stat_feats.shape[0]
-        assert skip_center_feats.shape[1] == out.shape[1] - skip_stat_feats.shape[1]
-        out.write([total_copied,skip_stat_feats.shape[1]], skip_center_feats)
+            skip_stat_feats = np.concatenate([np.minimum(fU,fV),
+                np.maximum(fU,fV),
+                np.abs(fU - fV),
+                fU + fV], axis = 1)
+            out.write([total_copied,0], skip_stat_feats)
+
+            # features based on region center differences
+            region_centers = node_feats.read([0,n_stat_feats],[node_feats.shape[0],node_feats.shape[1]])
+            sU = region_centers[skip_edges[:,0],:]
+            sV = region_centers[skip_edges[:,1],:]
+            skip_center_feats = np.c_[(sU - sV)**2, skip_ranges]
+
+            assert skip_center_feats.shape[0] == skip_stat_feats.shape[0]
+            assert skip_center_feats.shape[1] == out.shape[1] - skip_stat_feats.shape[1]
+            out.write([total_copied,skip_stat_feats.shape[1]], skip_center_feats)
+
+        # we don't have any skip edges, so we only add an extra column, corresponding to the skip range (0 / 1)
+        else:
+            assert not skip_ranges.size
+            assert not delete_edges.size
+
+            n_edges = region_feats.shape[0]
+            n_feats = region_feats.shape[1] + 1 # we add an additional feature to indicate the skip range
+            out_shape = [n_edges, n_feats]
+            chunk_shape = [2500,n_feats]
+            out = self.output()
+            out.open(out_shape, chunk_shape)
+
+            # copy the xy-features, adding a 0 column indicating the skip range
+            out.write([0,0],
+                np.c_[region_feats.read([0,0],[transition_edge,region_feats.shape[1]]),np.zeros(transition_edge)])
+            # copy the z-features, adding a 1 column indicating the skip range
+            out.write([0,0],
+                np.c_[region_feats.read([transition_edge,0],[n_edges,region_feats.shape[1]]),np.zeros(n_edges - transition_edge)])
 
         out.close()
 
@@ -376,69 +401,88 @@ class ModifiedEdgeFeatures(luigi.Task):
         skip_ranges = modified_adjacency.read('skip_ranges')
         delete_edges = modified_adjacency.read('delete_edges')
 
-        transition_edge = rag.totalNumberOfInSliceEdges
-        assert delete_edges.min() >= transition_edge
+        # modify the features only if we have skip edges
+        if skip_edges.size:
+            assert skip_ranges.shape[0] == skip_edges.shape[0]
 
-        n_feats = edge_feats.shape[1]
-        if self.keepOnlyXY:
-            n_modified = edge_feats.shape[0]
+            transition_edge = rag.totalNumberOfInSliceEdges
+            assert delete_edges.min() >= transition_edge
+
+            n_feats = edge_feats.shape[1]
+            if self.keepOnlyXY:
+                n_modified = edge_feats.shape[0]
+            else:
+                n_modified = edge_feats.shape[0] - delete_edges.shape[0] + skip_edges.shape[0]
+
+            out_shape = [n_modified, n_feats]
+            chunk_shape = [2500,n_feats]
+            out = self.output()
+            out.open(out_shape, chunk_shape)
+
+            # we copy the edge feats for xy-edges
+            # don't do this if keepOnlyZ
+            if not self.keepOnlyZ:
+                out.write([0,0], edge_feats.read([0,0], [transition_edge,n_feats]))
+                total_copied = transition_edge
+                prev_edge    = transition_edge
+            else:
+                total_copied = 0
+                prev_edge   = 0
+
+            # copy the z-edges, leaving out delete edges and calculate features for the skip edges
+            # don't do this if keepOnlyXY
+            if not self.keepOnlyXY:
+
+                if self.keepOnlyZ: # if only z features are present, we need to decrement the delete edges by the number of xy edges
+                    delete_edges -= transition_edge
+                    assert np.all(delete_edges > 0)
+
+                for del_edge in delete_edges:
+                    if del_edge == prev_edge:
+                        prev_edge = del_edge + 1
+                        continue
+                    n_copy = del_edge - prev_edge
+                    #print [total_copied,0]
+                    #print [prev_edge,0]
+                    #print [del_edge,n_feats]
+                    out.write([total_copied,0],
+                        edge_feats.read([prev_edge,0], [del_edge,n_feats]) )
+                    prev_edge = del_edge + 1 # we skip over the del_edge
+                    total_copied += n_copy
+
+                assert total_copied == edge_feats.shape[0] - delete_edges.shape[0], "%i, %i" % (total_copied, edge_feats.shape[0] - delete_edges.shape[0])
+
+                # compute skip features with nifty
+                data = inp['data']
+                data.open()
+
+                skip_starts = modified_adjacency.read('skip_starts')
+                #print np.unique(skip_starts)
+
+                skip_feats = nifty.graph.rag.accumulateSkipEdgeFeaturesFromFilters(rag,
+                        data.get(),
+                        [(int(skip_e[0]), int(skip_e[1])) for skip_e in skip_edges], # skip_edges need to be passed as a list of pairs!
+                        skip_ranges,
+                        skip_starts,
+                        PipelineParameter().nThreads )
+                assert skip_feats.shape[0] == skip_edges.shape[0]
+                assert skip_feats.shape[1] == n_feats
+                out.write([total_copied,0], skip_feats)
+
+        # we don't have any skip edges so we only copy
         else:
-            n_modified = edge_feats.shape[0] - delete_edges.shape[0] + skip_edges.shape[0]
+            assert not skip_ranges.size
+            assert not delete_edges.size
 
-        out_shape = [n_modified, n_feats]
-        chunk_shape = [2500,n_feats]
-        out = self.output()
-        out.open(out_shape, chunk_shape)
+            n_edges = edge_feats.shape[0]
+            n_feats = edge_feats.shape[1]
+            out_shape = [n_edges, n_feats]
+            chunk_shape = [2500,n_feats]
+            out = self.output()
+            out.open(out_shape, chunk_shape)
 
-        # we copy the edge feats for xy-edges
-        # don't do this if keepOnlyZ
-        if not self.keepOnlyZ:
-            out.write([0,0], edge_feats.read([0,0], [transition_edge,n_feats]))
-            total_copied = transition_edge
-            prev_edge    = transition_edge
-        else:
-            total_copied = 0
-            prev_edge   = 0
-
-        # copy the z-edges, leaving out delete edges and calculate features for the skip edges
-        # don't do this if keepOnlyXY
-        if not self.keepOnlyXY:
-
-            if self.keepOnlyZ: # if only z features are present, we need to decrement the delete edges by the number of xy edges
-                delete_edges -= transition_edge
-                assert np.all(delete_edges > 0)
-
-            for del_edge in delete_edges:
-                if del_edge == prev_edge:
-                    prev_edge = del_edge + 1
-                    continue
-                n_copy = del_edge - prev_edge
-                #print [total_copied,0]
-                #print [prev_edge,0]
-                #print [del_edge,n_feats]
-                out.write([total_copied,0],
-                    edge_feats.read([prev_edge,0], [del_edge,n_feats]) )
-                prev_edge = del_edge + 1 # we skip over the del_edge
-                total_copied += n_copy
-
-            assert total_copied == edge_feats.shape[0] - delete_edges.shape[0], "%i, %i" % (total_copied, edge_feats.shape[0] - delete_edges.shape[0])
-
-            # compute skip features with nifty
-            data = inp['data']
-            data.open()
-
-            skip_starts = modified_adjacency.read('skip_starts')
-            #print np.unique(skip_starts)
-
-            skip_feats = nifty.graph.rag.accumulateSkipEdgeFeaturesFromFilters(rag,
-                    data.get(),
-                    [(int(skip_e[0]), int(skip_e[1])) for skip_e in skip_edges], # skip_edges need to be passed as a list of pairs!
-                    skip_ranges,
-                    skip_starts,
-                    PipelineParameter().nThreads )
-            assert skip_feats.shape[0] == skip_edges.shape[0]
-            assert skip_feats.shape[1] == n_feats
-            out.write([total_copied,0], skip_feats)
+            # copy all features
+            out.write([0L,0L],edge_feats.read([0L,0L],edge_feats.shape))
 
         out.close()
 
@@ -452,6 +496,39 @@ class ModifiedEdgeFeatures(luigi.Task):
             save_path += '_z'
         save_path += '.h5'
         return HDF5VolumeTarget( save_path, 'float32' )
+
+
+class SkipEdgeLengths(luigi.Task):
+
+    pathToSeg = luigi.Parameter()
+
+    def requires(self):
+        return {'rag' : StackedRegionAdjacencyGraph(self.pathToSeg),
+                'modified_adjacency' : ModifiedAdjacency(self.pathToSeg)}
+
+    @run_decorator
+    def run(self):
+        inp = self.input()
+        rag = inp['rag'].read()
+        mod_adjacency = inp['modified_adjacency']
+        skip_edges = mod_adjacency.read('skip_edges')
+        skip_ranges = mod_adjacency.read('skip_ranges')
+        skip_starts = mod_adjacency.read('skip_starts')
+
+        skip_lens = nifty.graph.rag.getSkipEdgeLengths(rag,
+                        [(int(skip_e[0]), int(skip_e[1])) for skip_e in skip_edges], # skip_edges need to be passed as a list of pairs!
+                        skip_ranges,
+                        skip_starts,
+                        PipelineParameter().nThreads )
+        assert skip_lens.shape[0] == skip_edges.shape[0]
+        workflow_logger.info("SkipEdgeLengths: computed lens in range %i to %i" % (skip_lens.min(),skip_lens.max()))
+
+        self.output().write(skip_lens, 'data')
+
+    def output(self):
+        segFile = os.path.split(self.pathToSeg)[1][:-3]
+        save_path = os.path.join( PipelineParameter().cache, "SkipEdgeLengths_%s.h5" % (segFile,) )
+        return HDF5DataTarget(save_path)
 
 
 # TODO implement

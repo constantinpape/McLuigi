@@ -359,7 +359,8 @@ class EdgeProbabilities(luigi.Task):
             out.write([readStart], classifier.predict(featuresType))
 
     def output(self):
-        save_path = os.path.join(PipelineParameter().cache, "EdgeProbabilities%s.h5" % ("Separate" if PipelineParameter().separateEdgeClassification else "Joint",))
+        save_path = os.path.join(PipelineParameter().cache, "EdgeProbabilities%s_%s.h5" % ("Separate" if PipelineParameter().separateEdgeClassification else "Joint",
+            "modifed" if PipelineParameter().defectPipeline else "standard"))
         return HDF5VolumeTarget(save_path, 'float32')
 
 
@@ -424,6 +425,8 @@ class LearnClassifierFromGt(luigi.Task):
             return_tasks = {"gt" : [EdgeGroundtruth(self.pathsToSeg[i], self.pathsToGt[i]) for i in xrange(n_inputs)],
                             "features" : feature_tasks,
                             "rag" : [StackedRegionAdjacencyGraph(segp) for segp in self.pathsToSeg]}
+        if PipelineParameter().defectPipeline:
+            return_tasks['modified_adjacency'] = [ModifiedAdjacency(self.pathsToSeg[i]) for i in xrange(n_inputs)]
         return return_tasks
 
     @run_decorator
@@ -462,9 +465,13 @@ class LearnClassifierFromGt(luigi.Task):
         rag = rag.read()
         gt  = gt.read()
 
-        # TODO correct for defects here
-        nEdges = rag.numberOfEdges
-        transitionEdge = rag.totalNumberOfInSliceEdges
+        # correct for defects here
+        if PipelineParameter().defectPipeline:
+            nEdges = self.input()["modified_adjacency"][0].read("n_edges_modified")
+            transitionEdge = rag.totalNumberOfInSliceEdges
+        else:
+            nEdges = rag.numberOfEdges
+            transitionEdge = rag.totalNumberOfInSliceEdges
 
         if self.learnXYOnly:
             workflow_logger.info("LearnClassifierFromGt: learning classfier from single input for xy edges only.")
@@ -535,8 +542,11 @@ class LearnClassifierFromGt(luigi.Task):
             gt_i = gt[i].read()
             rag_i = rag[i].read()
 
-            # TODO correct for defect pipeline here
-            nEdges = rag_i.numberOfEdges
+            # correct for defect pipeline here
+            if PipelineParameter().defectPipeline:
+                nEdges = self.input()["modified_adjacency"][i].read("n_edges_modified")
+            else:
+                nEdges = rag_i.numberOfEdges
             transitionEdge = rag_i.totalNumberOfInSliceEdges
 
             gt_i = gt_i[:transitionEdge]
@@ -564,7 +574,10 @@ class LearnClassifierFromGt(luigi.Task):
             rag_i = rag[i].read()
 
             # TODO correct for defect pipeline here
-            nEdges = rag_i.numberOfEdges
+            if PipelineParameter().defectPipeline:
+                nEdges = self.input()["modified_adjacency"][i].read("n_edges_modified")
+            else:
+                nEdges = rag_i.numberOfEdges
             transitionEdge = rag_i.totalNumberOfInSliceEdges
 
             gt_i = gt_i[transitionEdge:]
@@ -607,6 +620,7 @@ class LearnClassifierFromGt(luigi.Task):
             edgetype_str = "z"
         else:
             edgetype_str = "all"
+        defect_str = "modified" if PipelineParameter().defectPipeline else "standard"
         save_path = os.path.join( PipelineParameter().cache,
-            "LearnClassifierFromGt_%s_%s_%s.h5" % (ninp_str,cf_str,edgetype_str) )
+            "LearnClassifierFromGt_%s_%s_%s_%s.h5" % (ninp_str,cf_str,edgetype_str, defect_str) )
         return PickleTarget(save_path)

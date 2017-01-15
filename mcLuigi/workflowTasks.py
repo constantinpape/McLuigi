@@ -103,7 +103,8 @@ class BlockwiseMulticutSegmentation(luigi.Task):
         segOut.open(seg.shape)
 
         nifty.graph.rag.projectScalarNodeDataToPixels(rag, mcNodes, segOut.get() ) # nWorkers = -1, could also set this...
+        # TODO if PipelineParameter().defectPipeline call PostprocessDefectSlices once implemented
 
     def output(self):
-        save_path = os.path.join( PipelineParameter().cache, "BlockwiseMulticutSegmentation.h5" )
+        save_path = os.path.join( PipelineParameter().cache, "BlockwiseMulticutSegmentation_%s.h5" % ("modifed" if PipelineParameter().defectPipeline else "standard",) )
         return HDF5VolumeTarget( save_path, self.dtype, compression = PipelineParameter().compressionLevel )

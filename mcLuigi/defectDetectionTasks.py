@@ -230,7 +230,7 @@ class DefectSliceDetection(luigi.Task):
 
     pathToSeg = luigi.Parameter()
     # we consider a slice as defected, when it is in a bin smaller than binThreshold
-    binThreshold = luigi.IntParameter(default = 1)
+    binThreshold = luigi.IntParameter(default = 0) # TODO this is critical, because if we set it to > 0 we will find defected slices even if none are present
 
     def requires(self):
         return {"seg" : ExternalSegmentation(self.pathToSeg),

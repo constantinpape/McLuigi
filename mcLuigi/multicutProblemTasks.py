@@ -9,7 +9,7 @@ import time
 from dataTasks import StackedRegionAdjacencyGraph
 from learningTasks import EdgeProbabilities
 from customTargets import HDF5DataTarget
-from defectHandlingTasks import ModifiedAdjacency
+from defectHandlingTasks import ModifiedAdjacency, SkipEdgeLengths
 
 from pipelineParameter import PipelineParameter
 from tools import config_logger, run_decorator
@@ -40,6 +40,7 @@ class MulticutProblem(luigi.Task):
                     "rag" : StackedRegionAdjacencyGraph(self.pathToSeg) }
         if PipelineParameter().defectPipeline:
             return_tasks['modified_adjacency'] = ModifiedAdjacency(self.pathToSeg)
+            return_tasks['skip_edge_lengths']  = SkipEdgeLengths(self.pathToSeg)
         return return_tasks
 
     @run_decorator
@@ -52,7 +53,6 @@ class MulticutProblem(luigi.Task):
         edge_cost_file.open()
         len_costs = edge_cost_file.shape[0]
         workflow_logger.info("MulticutProblem: loaded edge costs of len %i" % len_costs)
-
 
         edge_costs = edge_cost_file.read([0L],[long(len_costs)])
         assert len(edge_costs.shape) == 1
@@ -88,10 +88,17 @@ class MulticutProblem(luigi.Task):
         weighting_scheme = mc_config["weightingScheme"]
         weight           = mc_config["weight"]
 
+        edgeLens = rag.edgeLengths()
+        if PipelineParameter().defectPipeline:
+            skipLens = self.input()["skip_edge_lengths"].read()
+            delete_edges = self.input()["modified_adjacency"].read("delete_edges")
+            edgeLens = np.delete(edgeLens, delete_edges)
+            edgeLens = np.concatenate([edgeLens, skipLens])
+            workflow_logger.info("MulticutProblem: removed delete edges and added skipLens to edgeLens")
+        assert edgeLens.shape[0] == edge_costs.shape[0], str(edgeLens.shape[0]) + " , " + str(edge_costs.shape[0])
+
         if weighting_scheme == "z":
             workflow_logger.info("MulticutProblem: weighting edge costs with scheme z and weight " + str(weight) )
-            edgeLens = rag.edgeLengths()
-            assert edgeLens.shape[0] == edge_costs.shape[0], str(edgeLens.shape[0]) + " , " + str(edge_costs.shape[0])
 
             edgeTransition = rag.totalNumberOfInSliceEdges
 
@@ -102,8 +109,6 @@ class MulticutProblem(luigi.Task):
 
         elif weighting_scheme == "xyz":
             workflow_logger.info("MulticutProblem: weighting edge costs with scheme xyz and weight " + str(weight) )
-            edgeLens = rag.edgeLengths()
-            assert edgesLen.shape[0] == edge_costs.shape[0]
 
             edgeTransition = rag.totalNumberOfInSliceEdges
 
@@ -116,8 +121,6 @@ class MulticutProblem(luigi.Task):
 
         elif weighting_scheme == "all":
             workflow_logger.info("MulticutProblem: weighting edge costs with scheme all and weight " + str(weight) )
-            edgeLens = rag.edgeLengths()
-            assert edgesLen.shape[0] == edge_costs.shape[0]
 
             edge_max  = float( np.max( edgesLens) )
             w  = weight * edgeLens / edge_max
@@ -159,7 +162,7 @@ class MulticutProblem(luigi.Task):
 
         out = self.output()
         out.write(edge_costs,'costs')
-        out.write( g.serialize() )
+        out.write( g.serialize(), 'graph' )
 
 
     def _standard_multicut_problem(self, rag, edge_costs):
@@ -187,5 +190,5 @@ class MulticutProblem(luigi.Task):
 
 
     def output(self):
-        save_path = os.path.join( PipelineParameter().cache, "StandardMulticutProblem.h5" )
+        save_path = os.path.join( PipelineParameter().cache, "MulticutProblem_%s.h5" % ("modifed" if PipelineParameter().defectPipeline else "standard",) )
         return HDF5DataTarget( save_path )
