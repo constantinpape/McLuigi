@@ -19,16 +19,13 @@ import time
 import json
 import cPickle as pickle
 
-if PipelineParameter().useXGBoost
-    import xgboost as xgb
-else:
-    from sklearn.ensemble import RandomForestClassifier
 
 
 # init the workflow logger
 workflow_logger = logging.getLogger(__name__)
 config_logger(workflow_logger)
 
+# TODO log important params like n_rounds and n_trees
 # wrapper for xgboost / sklearn.rf classifier
 class EdgeClassifier(object):
 
@@ -38,12 +35,13 @@ class EdgeClassifier(object):
 
     def train(self, x, y):
         assert x.shape[0] == y.shape[0]
-        if use_xgb:
+        if self.use_xgb:
             self._train_xgb(x,y)
         else:
             self._train_rf(x,y)
 
     def _train_xgb(self,x,y):
+        import xgboost as xgb
         # read the classifier parameter
         with open(PipelineParameter().EdgeClassifierConfigFile, 'r') as f:
             cf_config = json.load(f)
@@ -57,10 +55,12 @@ class EdgeClassifier(object):
             'colsample_by_tree' : cf_config['xgbColsample'],
             'subsample' : cf_config['xgbSubsample'],
             'silent' : silent }
+        n_rounds = cf_config['xgbNumRounds']
         xgb_mat = xgb.DMatrix(x, label = y)
-        self.cf = xgb.train(xgb_params, xgb_mat, cf_config['xgbNumRounds'])
+        self.cf = xgb.train(xgb_params, xgb_mat, n_rounds)
 
     def _train_rf(self,x,y):
+        from sklearn.ensemble import RandomForestClassifier
         with open(PipelineParameter().EdgeClassifierConfigFile, 'r') as f:
             cf_config = json.load(f)
         verbose = 0
@@ -83,6 +83,7 @@ class EdgeClassifier(object):
             return self._predict_rf(x)
 
     def _predict_xgb(self, x):
+        import xgboost as xgb
         xgb_mat = xgb.DMatrix(x)
         return self.cf.predict(x)[:,1]
 
@@ -91,12 +92,13 @@ class EdgeClassifier(object):
 
     def load(self, path):
         assert os.path.exists(path), path
+        # TODO assert that we have the right type - xgb vs rf
         with open(path) as f:
             self.cf = pickle.load(f)
 
     def get_classifier(self):
         assert self.cf is not None, "Need to load or train a classifier first."
-        return self.classifier
+        return self.cf
 
 
 class EdgeProbabilities(luigi.Task):
@@ -393,7 +395,7 @@ class SingleClassifierFromGt(luigi.Task):
             for feat_task in feature_tasks:
                 feat_task.open()
             workflow_logger.info("SingleClassifierFromGt: learning classfier for all edges.")
-            features = np.concatenate( [feat.read() for feat in feature_tasks], axis = 1 )
+            features = np.concatenate( [feat.read([0,0],feat.shape) for feat in feature_tasks], axis = 1 )
             for feat_task in feature_tasks:
                 feat_task.close()
 
@@ -508,8 +510,10 @@ class SingleClassifierFromMultipleInputs(luigi.Task):
                 features_i = np.concatenate(features_i, axis = 1)
 
             else:
+                for feat_task in feat_tasks_i:
+                    feat_task.open()
                 workflow_logger.info("SingleClassifierFromMultipleInputs: learning classfier for all edges.")
-                features_i = np.concatenate( [feat.read([0,0],feat.shape) for feat in feature_tasks_i], axis = 1 )
+                features_i = np.concatenate( [feat.read([0,0],feat.shape) for feat in feat_tasks_i], axis = 1 )
 
             assert features_i.shape[0] == gt_i.shape[0]
 
@@ -525,8 +529,9 @@ class SingleClassifierFromMultipleInputs(luigi.Task):
         with open(PipelineParameter().EdgeClassifierConfigFile, 'r') as f:
             cf_config = json.load(f)
 
+        classifier = EdgeClassifier()
         classifier.train(features, gt)
-        self.output().write(classifier.get())
+        self.output().write(classifier.get_classifier())
 
     def output(self):
         with open(PipelineParameter().EdgeClassifierConfigFile, 'r') as f:

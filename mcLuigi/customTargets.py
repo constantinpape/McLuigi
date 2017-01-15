@@ -107,18 +107,23 @@ class HDF5VolumeTarget(FileSystemTarget):
 
 
     def write(self, start, data):
-        if not os.path.exists(self.path):
-            self.makedirs()
-        self.array.writeSubarray(start, data)
+        try:
+            if not os.path.exists(self.path):
+                self.makedirs()
+            self.array.writeSubarray(start, data)
+        except AttributeError:
+            raise RuntimeError("You must call open once before calling read or write!")
 
     def read(self, start, stop):
-        return self.array.readSubarray(start, stop)
+        try:
+            return self.array.readSubarray(start, stop)
+        except AttributeError:
+            raise RuntimeError("You must call open once before calling read or write!")
 
     def get(self):
         return self.array
 
 
-# TODO this is not really necessary and it should be possible to do it all with the nifty target
 class HDF5DataTarget(FileSystemTarget):
     """
     Target for in ram data
