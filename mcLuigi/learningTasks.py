@@ -19,11 +19,27 @@ import time
 import json
 import cPickle as pickle
 
-
-
 # init the workflow logger
 workflow_logger = logging.getLogger(__name__)
 config_logger(workflow_logger)
+
+try:
+    import xgboost as xgb
+    have_xgb = True
+except ImportError:
+    workflow_logger.info("xgboost is not installed!")
+    have_xgb = False
+
+try:
+    from sklearn.ensemble import RandomForestClassifier
+    have_rf = True
+except ImportError:
+    workflow_logger.info("sklearn is not installed!")
+    have_rf = False
+
+if (not have_xgb) and (not have_rf):
+    raise ImportError("Could not import xgboost and sklearn!")
+
 
 # TODO log important params like n_rounds and n_trees
 # wrapper for xgboost / sklearn.rf classifier
@@ -31,6 +47,10 @@ class EdgeClassifier(object):
 
     def __init__(self):
         self.use_xgb = PipelineParameter().useXGBoost
+        if self.use_xgb:
+            assert have_xgb, "Trying to use xgb, which could not be imorted."
+        else:
+            assert have_rf, "Trying to use sklearn, which could not be imorted."
         self.cf = None
 
     def train(self, x, y):
@@ -41,7 +61,6 @@ class EdgeClassifier(object):
             self._train_rf(x,y)
 
     def _train_xgb(self,x,y):
-        import xgboost as xgb
         # read the classifier parameter
         with open(PipelineParameter().EdgeClassifierConfigFile, 'r') as f:
             cf_config = json.load(f)
@@ -60,7 +79,6 @@ class EdgeClassifier(object):
         self.cf = xgb.train(xgb_params, xgb_mat, n_rounds)
 
     def _train_rf(self,x,y):
-        from sklearn.ensemble import RandomForestClassifier
         with open(PipelineParameter().EdgeClassifierConfigFile, 'r') as f:
             cf_config = json.load(f)
         verbose = 0
@@ -83,9 +101,8 @@ class EdgeClassifier(object):
             return self._predict_rf(x)
 
     def _predict_xgb(self, x):
-        import xgboost as xgb
         xgb_mat = xgb.DMatrix(x)
-        return self.cf.predict(x)[:,1]
+        return self.cf.predict(xgb_mat)[:,1]
 
     def _predict_rf(self, x):
         return self.cf.predict_proba(x)[:,1]
@@ -103,190 +120,232 @@ class EdgeClassifier(object):
 
 class EdgeProbabilities(luigi.Task):
 
-    pathToSeg = luigi.Parameter()
-    pathsToClassifier = luigi.ListParameter()
+    pathToSeg              = luigi.Parameter()
+    pathsToClassifier      = luigi.ListParameter()
 
     def requires(self):
-
-        if PipelineParameter().separateEdgeClassification:
-            assert len(self.pathsToClassifier) == 2
-        else:
-            assert len(self.pathsToClassifier) == 1
-
-        feature_tasks = get_local_features()
-
-        return {"features" : feature_tasks,
+        nClassifiers = 2 if PipelineParameter().separateEdgeClassification else 1
+        assert len(self.pathsToClassifier) == nClassifiers, "%i, %i" % (self.pathsToClassifier, nClassifiers)
+        return {"features" : get_local_features(),
                 "rag" : StackedRegionAdjacencyGraph(self.pathToSeg)}
 
     @run_decorator
     def run(self):
-
         inp = self.input()
-        # read the classifier parameter
-        with open(PipelineParameter().EdgeClassifierConfigFile, 'r') as f:
-            cf_config = json.load(f)
-        nSubFeats = cf_config["nSubFeats"]
+        rag = inp["rag"].read()
+        feature_tasks = inp["features"]
+        for feat in feature_tasks:
+            feat.open()
 
-        # seperate classfiers for xy - and z - edges
+        out  = self.output()
+        # TODO need to correct this for modified features
+        nEdges = rag.numberOfEdges
+        out.open([nEdges],[min(262144,nEdges)]) # 262144 = chunk size
+
         if PipelineParameter().separateEdgeClassification:
-
-            rag = inp["rag"].read()
-            features = inp["features"]
-
-            nEdges   = rag.numberOfEdges
-            nXYEdges = rag.totalNumberOfInSliceEdges
-            nZEdges  = nEdges - nXYEdges
-
-            nFeatsXY = 0
-            nFeatsZ = 0
-            for feat in features:
-                feat.open()
-                if feat.shape[0] == nEdges:
-                    nFeatsXY += feat.shape[1]
-                    nFeatsZ += feat.shape[1]
-                elif feat.shape[0] == nXYEdges:
-                    nFeatsXY += feat.shape[1]
-                elif feat.shape[0] == nZEdges:
-                    nFeatsZ += feat.shape[1]
-                else:
-                    raise RuntimeError("Number of features: " + str(feat.shape[0]) + " does not match number of edges (Total: " + str(nEdges) + ", XY: " + str(nXYEdges) + ", Z: " + str(nZEdges) + " )")
-
-            out = self.output()
-
-            out.open([nEdges],[min(262144,nEdges)])
-
-            for i, feat_type in enumerate( ['xy', 'z'] ):
-                print "Predicting", feat_type, "features"
-                classifier = EdgeClassifier()
-                classifier.load(self.pathsToClassifier[i])
-
-                nEdgesType = nXYEdges
-                nEdgesNonType = nZEdges
-                startType  = 0
-                endType    = nXYEdges
-                nFeatsTotal = nFeatsXY
-                if feat_type == 'z':
-                    nEdgesType = nZEdges
-                    nEdgesNonType = nXYEdges
-                    startType = nXYEdges
-                    endType = nEdges
-                    nFeatsTotal = nFeatsZ
-
-                print "FeatType:", feat_type
-                print "Edges from", startType, "to", endType
-
-                # if nSubfeats > 1 we split feats to avoid memory error
-
-                if nSubFeats > 1:
-
-                    for subFeats in xrange(nSubFeats):
-                        print subFeats, '/', nSubFeats
-                        featIndexStart = int(float(subFeats)/nSubFeats * nEdgesType)
-                        featIndexEnd   = int(float(subFeats+1)/nSubFeats * nEdgesType)
-                        if subFeats == nSubFeats:
-                            featIndexEnd = nEdgesType
-                        nEdgesSub = featIndexEnd - featIndexStart
-
-                        featuresType = np.zeros( (nEdgesSub, nFeatsTotal), dtype = 'float32' )
-                        featOffset = 0
-
-                        for ii, feat in enumerate(features):
-                            #print "Loading feat", ii, "/", len(features)
-
-                            nFeats = feat.shape[0]
-
-                            if nFeats == nEdges:
-                                #print "Feat common for xy and z"
-                                readStart = featIndexStart + startType
-                                readEnd   = featIndexEnd + startType
-                                featuresType[:,featOffset:featOffset+feat.shape[1]] = feat.read(
-                                        [long(readStart),0L],
-                                        [long(readEnd),long(feat.shape[1])]
-                                    )
-
-                            elif nFeats == nEdgesType:
-                                #print "Only", feat_type, "feature"
-                                featuresType[:,featOffset:featOffset+feat.shape[1]] = feat.read(
-                                        [long(featIndexStart),0L],
-                                        [long(featIndexEnd), long(feat.shape[1])]
-                                    )
-
-                            elif nFeats == nEdgesNonType:
-                                #print "Not", feat_type, "feature"
-                                continue
-
-                            else:
-                                raise RuntimeError("Number of features: " + str(nFeats) + " does not match number of edges (Total: " + str(nEdges) + ", XY: " + str(nXYEdges) + ", Z: " + str(nZEdges) + " )")
-
-                            featOffset += feat.shape[1]
-
-                        #featuresType = np.concatenate( featuresType, axis = 1 )
-                        print "Features loaded, starting prediction"
-
-                        readStart = long(featIndexStart + startType)
-                        out.write([readStart], classifier.predict(featuresType))
-
-                else: # we don't split the features along the edges
-
-                    featuresType = np.zeros( (nEdgesType, nFeatsTotal), dtype = 'float32' )
-                    featOffset = 0
-
-                    for ii, feat in enumerate(features):
-                        #print "Loading feat", ii, "/", len(features)
-
-                        nFeats = feat.shape[0]
-
-                        if nFeats == nEdges:
-                            #print "Feat common for xy and z"
-                            featuresType[:,featOffset:featOffset+feat.shape[1]] = feat.read(
-                                [long(startType),0L], [long(endType),long(feat.shape[1])])
-
-                        elif nFeats == nEdgesType:
-                            #print "Only", feat_type, "feature"
-                            featuresType[:,featOffset:featOffset+feat.shape[1]] = feat.read(
-                                    [0L,0L],
-                                    feat.shape
-                                )
-
-                        elif nFeats == nEdgesNonType:
-                            #print "Not", feat_type, "feature"
-                            continue
-
-                        else:
-                            raise RuntimeError("Number of features: " + str(nFeats) + " does not match number of edges (Total: " + str(nEdges) + ", XY: " + str(nXYEdges) + ", Z: " + str(nZEdges) + " )")
-
-                        featOffset += feat.shape[1]
-
-                    print "Features loaded, starting prediction"
-                    out.write([long(startType)], classifier.predict(featuresType))
-
-            out.close()
-            for feat in features:
-                feat.close()
-
-        # same classfier for xy - and z - edges
+            workflow_logger.info("EdgeProbabilities: predicting xy - and z - edges separately.")
+            self._predict_separate(rag, feature_tasks, out)
         else:
+            if PipelineParameter().nFeatureChunks > 1:
+                workflow_logger.info("EdgeProbabilities: predicting xy - and z - edges jointly out of core.")
+                self._predict_joint_out_of_core(rag, feature_tasks, out)
+            else:
+                workflow_logger.info("EdgeProbabilities: predicting xy - and z - edges jointly in core.")
+                self._predict_joint_in_core(rag, feature_tasks, out)
 
-            feat_tasks = inp["features"]
-            for feat in feat_tasks:
-                feat.open()
+        for feat in feature_tasks:
+            feat.close()
+        out.close()
 
+
+    def _predict_joint_in_core(self, rag, feature_tasks, out):
+        classifier = EdgeClassifier()
+        classifier.load(self.pathsToClassifier[0])
+        features = np.concatenate( [feat.read([0,0],feat.shape) for feat in feature_tasks], axis = 1 )
+        for feat in feature_tasks:
+            feat.close()
+        probs = classifier.predict(features)
+        out.write([0L],probs)
+
+
+    def _predict_joint_out_of_core(self, rag, feature_tasks, out):
+        classifier = EdgeClassifier()
+        classifier.load(self.pathsToClassifier[0])
+        nEdges = rag.numberOfEdges
+
+        nSubFeats = PipelineParameter().nFeatureChunks
+        assert nSubFeats > 1, nSubFeats
+        for subFeats in xrange(nSubFeats):
+            print subFeats, '/', nSubFeats
+            featIndexStart = int(float(subFeats)/nSubFeats * nEdges)
+            featIndexEnd   = int(float(subFeats+1)/nSubFeats * nEdges)
+            if subFeats == nSubFeats:
+                featIndexEnd = nEdges
+            nEdgesSub = featIndexEnd - featIndexStart
+
+            featuresSub = np.concatenate( [feat.read([featIndexStart,0],[featIndexEnd,feat.shape[1]]) for feat in feature_tasks], axis = 1 )
+            assert featuresSub.shape[0] == nEdgesSub
+            probsSub = classifier.predict(featuresSub)
+            out.write([featIndexStart],probsSub)
+
+
+    def _predict_separate(self, rag, feature_tasks, out):
+        # TODO correct for modified features if we have PipelineParameter().defectPipeline = True
+        nEdges   = rag.numberOfEdges
+        nXYEdges = rag.totalNumberOfInSliceEdges
+        nZEdges  = nEdges - nXYEdges
+
+        nFeatsXY = 0
+        nFeatsZ = 0
+        for feat in feature_tasks:
+            if feat.shape[0] == nEdges:
+                nFeatsXY += feat.shape[1]
+                nFeatsZ += feat.shape[1]
+            elif feat.shape[0] == nXYEdges:
+                nFeatsXY += feat.shape[1]
+            elif feat.shape[0] == nZEdges:
+                nFeatsZ += feat.shape[1]
+            else:
+                raise RuntimeError("Number of features: %i does not match number of edges (Total: %i, XY: %i, Z: %i )" % (feat.shape[0],nEdges,nXYEdges,nZEdges))
+
+        for i, feat_type in enumerate( ['xy', 'z'] ):
+            print "Predicting", feat_type, "features"
             classifier = EdgeClassifier()
-            classifier.load(self.pathsToClassifier[0])
-            features = np.concatenate( [feat.read([0,0],feat.shape) for feat in inp["features"]], axis = 1 )
+            classifier.load(self.pathsToClassifier[i])
 
-            for feat in feat_tasks:
-                feat.close()
+            nEdgesType = nXYEdges
+            nEdgesNonType = nZEdges
+            startType  = 0
+            endType    = nXYEdges
+            nFeatsTotal = nFeatsXY
+            if feat_type == 'z':
+                nEdgesType = nZEdges
+                nEdgesNonType = nXYEdges
+                startType = nXYEdges
+                endType = nEdges
+                nFeatsTotal = nFeatsZ
 
-            probs = classifier.predict(features)
+            if PipelineParameter().nFeatureChunks > 1:
+                workflow_logger.info("EdgeProbabilities: running separate prediction for %s edges out of core" % feat_type)
+                self._predict_separate_out_of_core(classifier,
+                        feature_tasks,
+                        out,
+                        nEdges,
+                        nEdgesType,
+                        nEdgesNonType,
+                        startType,
+                        endType,
+                        nFeatsTotal)
+            else:
+                workflow_logger.info("EdgeProbabilities: running separate prediction for %s edges in core" % feat_type)
+                self._predict_separate_in_core(classifier,
+                        feature_tasks,
+                        out,
+                        nEdges,
+                        nEdgesType,
+                        nEdgesNonType,
+                        startType,
+                        endType,
+                        nFeatsTotal)
 
-            out  = self.output()
-            out.open([nEdges],[min(262144,nEdges)])
-            self.output().write([0L],probs)
+
+    # In core prediction for edge type
+    def _predict_separate_in_core(self,
+            classifier,
+            feature_tasks,
+            out,
+            nEdges,
+            nEdgesType,
+            nEdgesNonType,
+            startType,
+            endType,
+            nFeatsTotal):
+
+            # In core prediction
+            featuresType = np.zeros( (nEdgesType, nFeatsTotal), dtype = 'float32' )
+            featOffset = 0
+
+            for ii, feat in enumerate(feature_tasks):
+                nFeats = feat.shape[0]
+                if nFeats == nEdges:
+                    #print "Feat common for xy and z"
+                    featuresType[:,featOffset:featOffset+feat.shape[1]] = feat.read(
+                        [long(startType),0L], [long(endType),long(feat.shape[1])])
+                elif nFeats == nEdgesType:
+                    #print "Only", feat_type, "feature"
+                    featuresType[:,featOffset:featOffset+feat.shape[1]] = feat.read(
+                            [0L,0L],
+                            feat.shape
+                        )
+                elif nFeats == nEdgesNonType:
+                    #print "Not", feat_type, "feature"
+                    continue
+                else:
+                    raise RuntimeError("Number of features: %i does not match number of edges (Total: %i, XY: %i, Z: %i )" % (nFeats,nEdges,nXYEdges,nZEdges))
+                featOffset += feat.shape[1]
+
+            print "Features loaded, starting prediction"
+            out.write([long(startType)], classifier.predict(featuresType))
+
+
+    # Out of core prediction for edge type
+    def _predict_separate_out_of_core(self,
+            classifier,
+            feature_tasks,
+            out,
+            nEdges,
+            nEdgesType,
+            nEdgesNonType,
+            startType, endType,
+            nFeatsTotal):
+
+        nSubFeats = PipelineParameter().nFeatureChunks
+        assert nSubFeats > 1, str(nSubFeats)
+        for subFeats in xrange(nSubFeats):
+            print subFeats, '/', nSubFeats
+            featIndexStart = int(float(subFeats)/nSubFeats * nEdgesType)
+            featIndexEnd   = int(float(subFeats+1)/nSubFeats * nEdgesType)
+            if subFeats == nSubFeats:
+                featIndexEnd = nEdgesType
+            nEdgesSub = featIndexEnd - featIndexStart
+
+            featuresType = np.zeros( (nEdgesSub, nFeatsTotal), dtype = 'float32' )
+            featOffset = 0
+
+            for ii, feat in enumerate(feature_tasks):
+                nFeats = feat.shape[0]
+                if nFeats == nEdges:
+                    #print "Feat common for xy and z"
+                    readStart = featIndexStart + startType
+                    readEnd   = featIndexEnd + startType
+                    featuresType[:,featOffset:featOffset+feat.shape[1]] = feat.read(
+                            [long(readStart),0L],
+                            [long(readEnd),long(feat.shape[1])]
+                        )
+                elif nFeats == nEdgesType:
+                    #print "Only", feat_type, "feature"
+                    featuresType[:,featOffset:featOffset+feat.shape[1]] = feat.read(
+                            [long(featIndexStart),0L],
+                            [long(featIndexEnd), long(feat.shape[1])]
+                        )
+                elif nFeats == nEdgesNonType:
+                    #print "Not", feat_type, "feature"
+                    continue
+                else:
+                    raise RuntimeError("Number of features: %i does not match number of edges (Total: %i, XY: %i, Z: %i )" % (nFeats,nEdges,nXYEdges,nZEdges))
+
+                featOffset += feat.shape[1]
+
+            # TODO do we really not need this concatenation?
+            #featuresType = np.concatenate( featuresType, axis = 1 )
+            print "Features loaded, starting prediction"
+
+            readStart = long(featIndexStart + startType)
+            out.write([readStart], classifier.predict(featuresType))
 
     def output(self):
-        save_path = os.path.join( PipelineParameter().cache, "EdgeProbabilities.h5"  )
-        return HDF5VolumeTarget( save_path, 'float32'   )
+        save_path = os.path.join(PipelineParameter().cache, "EdgeProbabilities%s.h5" % ("Separate" if PipelineParameter().separateEdgeClassification else "Joint",))
+        return HDF5VolumeTarget(save_path, 'float32')
 
 
 # TODO fuzzy mapping in nifty ?!
@@ -401,10 +460,6 @@ class SingleClassifierFromGt(luigi.Task):
 
         assert features.shape[0] == gt.shape[0], str(features.shape[0]) + " , " + str(gt.shape[0])
 
-        # read the classifier parameter
-        with open(PipelineParameter().EdgeClassifierConfigFile, 'r') as f:
-            cf_config = json.load(f)
-
         classifier = EdgeClassifier()
         classifier.train(features, gt)
 
@@ -412,9 +467,6 @@ class SingleClassifierFromGt(luigi.Task):
 
 
     def output(self):
-
-        with open(PipelineParameter().EdgeClassifierConfigFile, 'r') as f:
-            cf_config = json.load(f)
 
         save_path = os.path.join( PipelineParameter().cache, "SingleClassifierFromGt"  )
 
@@ -525,18 +577,11 @@ class SingleClassifierFromMultipleInputs(luigi.Task):
 
         assert features.shape[0] == gt.shape[0], str(features.shape[0]) + " , " + str(gt.shape[0])
 
-        # read the classifier parameter
-        with open(PipelineParameter().EdgeClassifierConfigFile, 'r') as f:
-            cf_config = json.load(f)
-
         classifier = EdgeClassifier()
         classifier.train(features, gt)
         self.output().write(classifier.get_classifier())
 
     def output(self):
-        with open(PipelineParameter().EdgeClassifierConfigFile, 'r') as f:
-            cf_config = json.load(f)
-
         save_path = os.path.join( PipelineParameter().cache, "SingleClassifierFromMultipleInputs"  )
 
         if PipelineParameter().useXGBoost:

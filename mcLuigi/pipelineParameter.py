@@ -41,5 +41,7 @@ class PipelineParameter(object):
         self.separateEdgeClassification = True
         # choose betweem xgb - gradient boostig and sklearn - random forest
         self.useXGBoost = True
+        # number of chunks that features are split into for out of core probability calculation
+        self.nFeatureChunks = 1 # default = 1 -> in core calculation
 
     # TODO range cheks for nThreads, compressionLevel and logLevel with @propery and set property
