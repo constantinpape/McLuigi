@@ -51,6 +51,9 @@ class PipelineParameter(object):
         # number of chunks that features are split into for out of core probability calculation
         self.nFeatureChunks = 1 # default = 1 -> in core calculation
 
+        ### multicut and blockwise parameter
+        self.globalTimeLimit = 60*60*10 # time limit in seconds / 10 hours
+
     # TODO range and type cheks via @property and setproperty
 
     # TODO don't allow setting a field that does not already exist to avoid setting incorrect parameter

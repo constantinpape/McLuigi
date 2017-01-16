@@ -4,7 +4,7 @@
 import luigi
 
 from pipelineParameter import PipelineParameter
-from dataTasks import StackedRegionAdjacencyGraph, ExternalSegmentation
+from dataTasks import ExternalSegmentation
 from customTargets import HDF5DataTarget
 
 from tools import config_logger, run_decorator
@@ -67,17 +67,16 @@ def fusion_moves(g, costs, blockId, nThreads = 1, isGlobal = False):
     # then run the actual fusion moves solver warmstarted with greedy result
 
     if isGlobal: # time limit and verbose for global problem:
-        tLim = 60*60*10 # time limit in seconds / 10 hours
-        visitor = obj.multicutVerboseVisitor(1,tLim)
+        visitor = obj.multicutVerboseVisitor(1,PipelineParameter().globalTimeLimit)
         ret = solver.optimize(nodeLabels=ret,visitor=visitor)
     else:
         ret = solver.optimize(nodeLabels=ret)
-
-
     t_inf = time.time() - t_inf
 
     if isGlobal:
-        workflow_logger.debug("Inference for global problem with fusion moves solver in " + str(t_inf) + " s")
+        energy = obj.evalNodeLabels(ret)
+        workflow_logger.info("Inference for global problem with fusion moves solver in " + str(t_inf) + " s")
+        workflow_logger.info("Energy of the solution: %f" % energy)
     else:
         workflow_logger.debug("Inference for block " + str(blockId) + " with fusion moves solver in " + str(t_inf) + " s")
 

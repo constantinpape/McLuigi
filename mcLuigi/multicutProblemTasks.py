@@ -82,7 +82,11 @@ class MulticutProblem(luigi.Task):
         beta = mc_config["beta"]
 
         # probabilities to energies, second term is boundary bias
-        edgeCosts = np.log( (1. - edge_costs) / edge_costs ) + np.log( (1. - beta) / beta )
+        edge_costs = np.log( (1. - edge_costs) / edge_costs ) + np.log( (1. - beta) / beta )
+        workflow_logger.info("MulticutProblem: cost statistics before weighting: mean: %f, std: %f, min: %f, max: %f" % (np.mean(edge_costs),
+            np.std(edge_costs),
+            edge_costs.min(),
+            edge_costs.max()))
 
         # weight edge costs
         weighting_scheme = mc_config["weightingScheme"]
@@ -128,6 +132,12 @@ class MulticutProblem(luigi.Task):
 
         else:
             workflow_logger.info("MulticutProblem: using non-weighted edge costs" )
+
+        if weighting_scheme in ("z","xyz","all"):
+            workflow_logger.info("MulticutProblem: cost statistics before weighting: mean: %f, std: %f, min: %f, max: %f" % (np.mean(edge_costs),
+                np.std(edge_costs),
+                edge_costs.min(),
+                edge_costs.max()))
 
         return edge_costs
 
