@@ -29,8 +29,15 @@ class PipelineParameter(object):
 
         # flag to switch between pipeline for anisotropic and isotropic (not implemented yet) data
         self.anisotropicPipeline = True
+
+        ### Parameter for defect detection and handling
         # flag to switch between pipeline for normal data and defected data
         self.defectPipeline = False
+        # Number of bins for the histogram of number of segments per slice
+        self.nBinsSliceStatistics = 16
+        # histogram threshold for the defect slicce detection
+        self.binThreshold = 0 # -> 0 means we don't detect any defects ! This needs to be tuned for every ds !
+
         # number of threads
         self.nThreads = multiprocessing.cpu_count()
         # compression level

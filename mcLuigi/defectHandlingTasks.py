@@ -34,7 +34,7 @@ class DefectsToNodes(luigi.Task):
 
     def requires(self):
         return {'seg' : ExternalSegmentation(self.pathToSeg),
-                'defects' : DefectSliceDetection(self.pathToSeg)} # need to tweek binThreshold w/ the default param
+                'defects' : DefectSliceDetection(self.pathToSeg)}
 
     @run_decorator
     def run(self):

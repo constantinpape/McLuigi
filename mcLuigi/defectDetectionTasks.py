@@ -96,7 +96,6 @@ class OversegmentationPatchStatistics(luigi.Task):
 class OversegmentationSliceStatistics(luigi.Task):
 
     pathToSeg = luigi.Parameter()
-    nBins = luigi.Parameter(default = 16) # TODO this needs to be fine-tuned together with binThreshold of DefectSliceDetection
 
     def requires(self):
         return ExternalSegmentation(self.pathToSeg)
@@ -131,7 +130,8 @@ class OversegmentationSliceStatistics(luigi.Task):
         std  = np.std(segs_per_slice)
 
         # calculate histogram to have a closer look at the stats
-        histo, bin_edges = np.histogram(segs_per_slice, bins = self.nBins)
+        nBins = PipelineParameter().nBinsSliceStatistics
+        histo, bin_edges = np.histogram(segs_per_slice, bins = nBins)
         #bins = np.array([(bin_edges[b] + bin_edges[b+1]) / 2 for b in xrange(n_bins)])
 
         out = self.output()
@@ -142,7 +142,8 @@ class OversegmentationSliceStatistics(luigi.Task):
 
     def output(self):
         segFile = os.path.split(self.pathToSeg)[1][:-3]
-        save_path = os.path.join( PipelineParameter().cache, "OversegmentationSliceStatistics_%s.h5" % (segFile,) )
+        save_path = os.path.join( PipelineParameter().cache, "OversegmentationSliceStatistics_%s_nBins%i.h5" % (segFile,
+            PipelineParameter().nBinsSliceStatistics) )
         return HDF5DataTarget(save_path)
 
 
@@ -229,8 +230,6 @@ class DefectPatchDetection(luigi.Task):
 class DefectSliceDetection(luigi.Task):
 
     pathToSeg = luigi.Parameter()
-    # we consider a slice as defected, when it is in a bin smaller than binThreshold
-    binThreshold = luigi.IntParameter(default = 0) # TODO this is critical, because if we set it to > 0 we will find defected slices even if none are present
 
     def requires(self):
         return {"seg" : ExternalSegmentation(self.pathToSeg),
@@ -242,7 +241,8 @@ class DefectSliceDetection(luigi.Task):
         seg = inp["seg"]
         bin_edges = inp["stats"].read("bin_edges")
 
-        threshold = bin_edges[self.binThreshold]
+        binThreshold = PipelineParameter().binThreshold
+        threshold = bin_edges[binThreshold]
 
         seg.open()
         out = self.output()
@@ -291,7 +291,7 @@ class DefectSliceDetection(luigi.Task):
 
     def output(self):
         segFile = os.path.split(self.pathToSeg)[1][:-3]
-        save_path = os.path.join( PipelineParameter().cache, "DefectSliceDetection_%s.h5" % (segFile,) )
+        save_path = os.path.join( PipelineParameter().cache, "DefectSliceDetection_%s_binThreshold%i.h5" % (segFile,PipelineParameter().binThreshold) )
         return HDF5VolumeTarget(save_path, dtype = 'uint8', compression = PipelineParameter().compressionLevel)
 
 
