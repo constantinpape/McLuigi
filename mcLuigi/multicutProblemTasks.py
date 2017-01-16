@@ -157,7 +157,7 @@ class MulticutProblem(luigi.Task):
         ignore_edges = modified_adjacency.read('ignore_edges')
 
         if ignore_edges.size:
-            max_repulsive = 2 * edge_costs.max() # TODO max is correct here !?!
+            max_repulsive = 2 * edge_costs.min() # TODO min correct here !?!
             edge_costs[ignore_edges] = max_repulsive
 
         # TODO we might also want to weight down the skip-edges according to their range
