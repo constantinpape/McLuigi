@@ -107,6 +107,8 @@ class HDF5VolumeTarget(FileSystemTarget):
 
 
     def write(self, start, data):
+        # to avoid errors in python glue code
+        start = list(map(long,start))
         try:
             if not os.path.exists(self.path):
                 self.makedirs()
@@ -115,6 +117,9 @@ class HDF5VolumeTarget(FileSystemTarget):
             raise RuntimeError("You must call open once before calling read or write!")
 
     def read(self, start, stop):
+        # to avoid errors in python glue code
+        start = list(map(long,start))
+        stop = list(map(long,stop))
         try:
             return self.array.readSubarray(start, stop)
         except AttributeError:
