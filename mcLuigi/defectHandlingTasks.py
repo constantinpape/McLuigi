@@ -556,37 +556,3 @@ class SkipEdgeLengths(luigi.Task):
         segFile = os.path.split(self.pathToSeg)[1][:-3]
         save_path = os.path.join( PipelineParameter().cache, "SkipEdgeLengths_%s.h5" % (segFile,) )
         return HDF5DataTarget(save_path)
-
-
-# replace the segmentation in completely defected slices with adjacent slice
-class PostprocessDefectedSlices(luigi.Task):
-
-    pathToSeg = luigi.Parameter()
-    segmentationTask = luigi.TaskParameter()
-    dtype = luigi.Parameter(default = 'uint32')
-
-    def requires(self):
-        return {'segmentation' : segmentationTask,
-                'defects' : DefectSliceDetection(self.pathToSeg) }
-
-    @run_decorator
-    def run(self):
-        inp = self.input()
-        segmentation = inp['segmentation']
-        segmentation.open()
-        defects = inp['defects']
-        defects.open()
-
-        out = self.output()
-        out.open(segmentation.shape,segmentation.chunkShape)
-
-        # TODO
-        # find defected slices and correct by replacement
-
-        segmentation.close()
-        defects.close()
-        out.close()
-
-    def output(self):
-        save_path = os.path.join(PipelineParameter().cache,) # TODO
-        return HDF5VolumeTarget(save_path, self.dtype)

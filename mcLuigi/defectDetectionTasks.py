@@ -283,11 +283,19 @@ class DefectSliceDetection(luigi.Task):
 
         # log the defects
         workflow_logger.info("DefectSliceDetection: total number of defected slices: %i" % np.sum(defect_indications))
+        defect_slices = []
         for z in xrange(seg.shape[0]):
             if defect_indications[z]:
+                defect_slices.append(z)
                 workflow_logger.info("DefectSliceDetection: slice %i is defected." % (z,))
 
         out.close()
+        # slightly hacky way to also save the last of defected slices in addition to the mask
+        segFile = os.path.split(self.pathToSeg)[1][:-3]
+        save_path = os.path.join( PipelineParameter().cache, "DefectSliceDetection_%s_nBins%i_binThreshold%i.h5" % (segFile,
+            PipelineParameter().nBinsSliceStatistics,
+            PipelineParameter().binThreshold) )
+        vigra.writeHDF5(np.array(defect_slices), save_path, 'defect_slices')
 
     def output(self):
         segFile = os.path.split(self.pathToSeg)[1][:-3]
