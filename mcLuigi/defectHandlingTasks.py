@@ -91,7 +91,9 @@ class DefectsToNodes(luigi.Task):
 
     def output(self):
         segFile = os.path.split(self.pathToSeg)[1][:-3]
-        save_path = os.path.join( PipelineParameter().cache, "DefectsToNodes_%s.h5" % (segFile,) )
+        save_path = os.path.join( PipelineParameter().cache, "DefectsToNodes_%s_nBins%i_binThreshold%i.h5" % (segFile,
+            PipelineParameter().nBinsSliceStatistics,
+            PipelineParameter().binThreshold) )
         return HDF5DataTarget(save_path)
 
 
@@ -118,7 +120,7 @@ class ModifiedAdjacency(luigi.Task):
         seg.open()
 
         # make sure that z is monotonically increasing (not strictly!)
-        assert np.all(np.diff(nodes_z) >= 0), "Defected slice index is not increasing monotonically!"
+        assert np.all(np.diff(nodes_z.astype(int)) >= 0), "Defected slice index is not increasing monotonically!"
 
         edge_offset = rag.totalNumberOfInSliceEdges
         ny = long(seg.shape[1])
@@ -234,6 +236,14 @@ class ModifiedAdjacency(luigi.Task):
         assert skip_edges.shape[0] == skip_ranges.shape[0]
         assert skip_starts.shape[0] == skip_ranges.shape[0]
         workflow_logger.info("ModifiedAdjacency: introduced %i skip edges due to defects" % len(skip_edges) )
+
+        # reorder the skip edges s.t. skip_starts are monotonically increasing
+        sort_indices = np.argsort(skip_starts)
+        skip_edges = skip_edges[sort_indices]
+        skip_ranges = skip_ranges[sort_indices]
+        skip_starts = skip_starts[sort_indices]
+        # make sure that z is monotonically increasing (not strictly!)
+        assert np.all(np.diff(skip_starts.astype(int)) >= 0), "Start index of skip edges must increase monotonically."
 
         ignore_edges = np.unique(ignore_edges).astype(np.uint32)
         workflow_logger.info("ModifiedAdjacency: found %i ignore edges due to defects" % len(ignore_edges) )
@@ -463,7 +473,7 @@ class ModifiedEdgeFeatures(luigi.Task):
                     #print [prev_edge,0]
                     #print [del_edge,n_feats]
                     out.write([total_copied,0],
-                        edge_feats.read([long(prev_edge),0L], [long(del_edge),long(n_feats)]) )
+                        edge_feats.read([prev_edge,0], [del_edge,n_feats]) )
                     prev_edge = del_edge + 1 # we skip over the del_edge
                     total_copied += n_copy
 
