@@ -350,30 +350,29 @@ class BlockwiseSubSolver(luigi.Task):
         inp = self.input()
         seg = inp["seg"]
         seg.open()
-
         problem = inp["problem"]
         costs = problem.read("costs")
+        nodes2blocks = inp["nodes2blocks"].read()
 
         graph = nifty.graph.UndirectedGraph()
         graph.deserialize( problem.read("graph") )
         numberOfEdges = graph.numberOfEdges
 
-        if self.level == 0:
-            global2newNodes = None
-        else:
-            global2newNodes = problem.read("global2new")
+        global2newNodes = None if self.level == 0 else problem.read("global2new")
 
-        # function for subproblem extraction
-        # extraction for every level
-        #def extract_subproblem(blockBegin, blockEnd):
-        #    nodeList = np.unique( seg.read(blockBegin, blockEnd) )
-        #    if self.level != 0:
-        #        nodeList = np.unique( global2newNodes[nodeList] )
+        workflow_logger.info("BlockwiseSubSolver: Starting extraction of subproblems.")
+        t_extract = time.time()
+        subproblems = self._run_subproblems_extraction(seg, graph, nodes2blocks, global2newNodes)
+        workflow_logger.info( "BlockwiseSubSolver: Extraction time for subproblems %f s" % (time.time() - t_extract,) )
 
-        #    inner_edges, outer_edges, subgraph = graph.extractSubgraphFromNodes(nodeList)
-        #    return np.array(inner_edges), np.array(outer_edges), subgraph
+        workflow_logger.info("BlockwiseSubSolver: Starting solvers for subproblems.")
+        t_inf_total = time.time()
+        self._solve_subroplems(costs, subproblems, numberOfEdges)
+        workflow_logger.info( "BlockwiseSubSolver: Inference time total for subproblems %f s" % (time.time() - t_inf_total,))
 
-        nodes2blocks = inp["nodes2blocks"].read()
+        seg.close()
+
+    def _run_subproblems_extraction(self, seg, graph, nodes2blocks, global2newNodes):
 
         # get the initial blocking
         with open(PipelineParameter().MCConfigFile, 'r') as f:
@@ -391,56 +390,46 @@ class BlockwiseSubSolver(luigi.Task):
             if self.level != 0:
                 nodeList = np.unique( global2newNodes[nodeList] )
             workflow_logger.debug("BlockwiseSubSolver: block id %i: Number of nodes %i" % (blockId,nodeList.shape[0]) )
+            # TODO need to reimplement function for deleted and skip edges in case of defect correction
             inner_edges, outer_edges, subgraph = graph.extractSubgraphFromNodes(nodeList)
             return np.array(inner_edges), np.array(outer_edges), subgraph
-
 
         blockOverlap = list(self.blockOverlap)
         blocking = nifty.tools.blocking( roiBegin = [0L,0L,0L], roiEnd = seg.shape, blockShape = self.blockShape )
         numberOfBlocks = blocking.numberOfBlocks
 
-        #nWorkers = 1
-        nWorkers = min( numberOfBlocks, PipelineParameter().nThreads )
-
-        t_extract = time.time()
-
         # sequential for debugging
         #subProblems = []
         #for blockId in xrange(numberOfBlocks):
-
         #    # nifty blocking
         #    block = blocking.getBlockWithHalo(blockId, blockOverlap).outerBlock
         #    blockBegin, blockEnd = block.begin, block.end
         #    workflow_logger.debug( "Block id " + str(blockId) + " start " + str(blockBegin) + " end " + str(blockEnd) )
-
         #    subProblems.append( extract_subproblem( blockId, blockBegin, blockEnd ) )
 
+        nWorkers = min( numberOfBlocks, PipelineParameter().nThreads )
         # parallel
         with futures.ThreadPoolExecutor(max_workers=nWorkers) as executor:
             tasks = []
             for blockId in xrange(numberOfBlocks):
-
                 block = blocking.getBlockWithHalo(blockId, blockOverlap).outerBlock
                 blockBegin, blockEnd = block.begin, block.end
-
                 workflow_logger.debug("BlockwiseSubSolver: block id %i start %s end %s" % (blockId, str(blockBegin), str(blockEnd)) )
                 tasks.append( executor.submit( extract_subproblem, blockId, blockBegin, blockEnd ) )
-
             subProblems = [task.result() for task in tasks]
 
         assert len(subProblems) == numberOfBlocks, str(len(subProblems)) + " , " + str(numberOfBlocks)
+        return subProblems
 
-        t_extract = time.time() - t_extract
-        workflow_logger.info( "BlockwiseSubSolver: Extraction time for subproblems %f s" % (t_extract,) )
 
-        t_inf_total = time.time()
-
+    def _solve_subroplems(self, costs, subProblems, numberOfEdges):
         # sequential for debugging
         #subResults = []
         #for blockId, subProblem in enumerate(subProblems):
         #    #print subProblem[0]
         #    subResults.append( fusion_moves( subProblem[2], costs[subProblem[0]], blockId, 1 ) )
 
+        nWorkers = min( len(subProblems), PipelineParameter().nThreads )
         with futures.ThreadPoolExecutor(max_workers=nWorkers) as executor:
             tasks = []
             for blockId, subProblem in enumerate(subProblems):
@@ -448,14 +437,11 @@ class BlockwiseSubSolver(luigi.Task):
                     costs[subProblem[0]], blockId, 1 ) )
         subResults = [task.result() for task in tasks]
 
-        t_inf_total = time.time() - t_inf_total
-        workflow_logger.info( "BlockwiseSubSolver: Inference time total for subproblems %f s" % (t_inf_total,))
-
         cutEdges = np.zeros( numberOfEdges, dtype = np.uint8 )
 
         assert len(subResults) == len(subProblems), str(len(subResults)) + " , " + str(len(subProblems))
 
-        for blockId in xrange(numberOfBlocks):
+        for blockId in xrange(len(subProblems)):
 
             # get the cut edges from the subproblem
             nodeResult = subResults[blockId]
