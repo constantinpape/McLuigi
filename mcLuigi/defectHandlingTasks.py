@@ -214,17 +214,29 @@ class ModifiedAdjacency(luigi.Task):
 
         assert len(skip_edges) == len(skip_ranges)
 
-        delete_edges.sort()
+        delete_edges = np.unique(delete_edges).astype(np.uint32)
         uv_ids = np.delete(uv_ids,delete_edges,axis=0)
-        workflow_logger.info("ModifiedAdjacency: deleted %i z-edges due to defects" % (len(delete_edges),) )
+        workflow_logger.info("ModifiedAdjacency: deleted %i z-edges due to defects" % len(delete_edges) )
 
         skip_edges = np.array(skip_edges, dtype = np.uint32)
-        skip_ranges = np.array(skip_ranges, dtype = np.uint32)
-        workflow_logger.info("ModifiedAdjacency: introduced %i skip edges due to defects" % (len(skip_edges),) )
+        skips_before_unique = skip_edges.shape[0]
 
-        ignore_edges.sort()
-        ignore_edges = np.array(ignore_edges, dtype = np.uint32)
-        workflow_logger.info("ModifiedAdjacency: found %i ignore edges due to defects" % (len(ignore_edges),) )
+        # make the skip edges unique, keeping rows (see http://stackoverflow.com/questions/16970982/find-unique-rows-in-numpy-array):
+        skips_view = np.ascontiguousarray(skip_edges).view(np.dtype((np.void, skip_edges.dtype.itemsize * skip_edges.shape[1])))
+        _, idx = np.unique(skips_view, return_index=True)
+        skip_edges = skip_edges[idx]
+        workflow_logger.debug("ModifiedAdjacency: Removed %i duplicate skip edges" % (skips_before_unique - skip_edges.shape[0]) )
+
+        skip_ranges = np.array(skip_ranges, dtype = np.uint32)
+        skip_ranges = skip_ranges[idx]
+        skip_starts = np.array(skip_starts, dtype = np.uint32)
+        skip_starts = skip_starts[idx]
+        assert skip_edges.shape[0] == skip_ranges.shape[0]
+        assert skip_starts.shape[0] == skip_ranges.shape[0]
+        workflow_logger.info("ModifiedAdjacency: introduced %i skip edges due to defects" % len(skip_edges) )
+
+        ignore_edges = np.unique(ignore_edges).astype(np.uint32)
+        workflow_logger.info("ModifiedAdjacency: found %i ignore edges due to defects" % len(ignore_edges) )
 
         # create the modified adjacency
         modified_adjacency = nifty.graph.UndirectedGraph(int(n_nodes))
@@ -234,6 +246,7 @@ class ModifiedAdjacency(luigi.Task):
         if skip_edges.size:
             modified_adjacency.insertEdges(skip_edges)
         n_edges_modified = modified_adjacency.numberOfEdges
+        assert n_edges_modified == rag.numberOfEdges - delete_edges.shape[0] + skip_edges.shape[0], "%i, %i" % (n_edges_modified, rag.numberOfEdges - delete_edges.shape[0] + skip_edges.shape[0])
         workflow_logger.info("ModifiedAdjacency: Total number of edges in modified adjacency: %i" % n_edges_modified)
 
         out = self.output()
@@ -400,6 +413,7 @@ class ModifiedEdgeFeatures(luigi.Task):
         skip_edges = modified_adjacency.read('skip_edges')
         skip_ranges = modified_adjacency.read('skip_ranges')
         delete_edges = modified_adjacency.read('delete_edges')
+        n_edges_modified = modified_adjacency.read('n_edges_modified')
 
         # modify the features only if we have skip edges
         if skip_edges.size:
@@ -413,6 +427,9 @@ class ModifiedEdgeFeatures(luigi.Task):
                 n_modified = edge_feats.shape[0]
             else:
                 n_modified = edge_feats.shape[0] - delete_edges.shape[0] + skip_edges.shape[0]
+
+            if (not self.keepOnlyZ) and (not self.keepOnlyXY):
+                assert n_modified == n_edges_modified, "%i, %i" % (n_modified, n_edges_modified)
 
             out_shape = [n_modified, n_feats]
             chunk_shape = [2500,n_feats]
@@ -446,7 +463,7 @@ class ModifiedEdgeFeatures(luigi.Task):
                     #print [prev_edge,0]
                     #print [del_edge,n_feats]
                     out.write([total_copied,0],
-                        edge_feats.read([prev_edge,0], [del_edge,n_feats]) )
+                        edge_feats.read([long(prev_edge),0L], [long(del_edge),long(n_feats)]) )
                     prev_edge = del_edge + 1 # we skip over the del_edge
                     total_copied += n_copy
 
@@ -531,9 +548,35 @@ class SkipEdgeLengths(luigi.Task):
         return HDF5DataTarget(save_path)
 
 
-# TODO implement
 # replace the segmentation in completely defected slices with adjacent slice
 class PostprocessDefectedSlices(luigi.Task):
 
+    pathToSeg = luigi.Parameter()
+    segmentationTask = luigi.TaskParameter()
+    dtype = luigi.Parameter(default = 'uint32')
+
     def requires(self):
-        pass
+        return {'segmentation' : segmentationTask,
+                'defects' : DefectSliceDetection(self.pathToSeg) }
+
+    @run_decorator
+    def run(self):
+        inp = self.input()
+        segmentation = inp['segmentation']
+        segmentation.open()
+        defects = inp['defects']
+        defects.open()
+
+        out = self.output()
+        out.open(segmentation.shape,segmentation.chunkShape)
+
+        # TODO
+        # find defected slices and correct by replacement
+
+        segmentation.close()
+        defects.close()
+        out.close()
+
+    def output(self):
+        save_path = os.path.join(PipelineParameter().cache,) # TODO
+        return HDF5VolumeTarget(save_path, self.dtype)
