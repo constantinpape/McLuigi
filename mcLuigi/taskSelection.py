@@ -27,9 +27,6 @@ def get_local_features(xyOnly = False, zOnly = False):
     # load the paths to input files
     with open(PipelineParameter().InputFile, 'r') as f:
         inputs = json.load(f)
-    # load the feature config
-    with open(PipelineParameter().FeatureConfigFile, 'r') as f:
-        feat_params = json.load(f)
 
     # choose the appropriate feature tasks (normal vs. defect handling) <- pipelineParams.defectPipeline
     # TODO (anisotropic vs. isotropic) <- pipelineParams.anisotropicPipeline
@@ -42,11 +39,9 @@ def get_local_features(xyOnly = False, zOnly = False):
         EdgeTask   = EdgeFeatures
         RegionTask = RegionFeatures
 
-    features = feat_params["features"]
-
+    features = PipelineParameter().features
     if not isinstance(features, list):
         features = [features,]
-
     feature_tasks = []
 
     input_data = inputs["data"]
@@ -105,9 +100,6 @@ def get_local_features_for_multiinp(xyOnly = False, zOnly = False):
     # load the paths to input files
     with open(PipelineParameter().InputFile, 'r') as f:
         inputs = json.load(f)
-    # load the feature config
-    with open(PipelineParameter().FeatureConfigFile, 'r') as f:
-        feat_params = json.load(f)
 
     # choose the appropriate feature tasks (normal vs. defect handling) <- pipelineParams.defectPipeline
     # TODO (anisotropic vs. isotropic) <- pipelineParams.anisotropicPipeline
@@ -120,7 +112,7 @@ def get_local_features_for_multiinp(xyOnly = False, zOnly = False):
         EdgeTask   = EdgeFeatures
         RegionTask = RegionFeatures
 
-    features = feat_params["features"]
+    features = PipelineParameter().features
     if not isinstance(features, list):
         features = [features,]
 
