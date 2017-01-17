@@ -134,10 +134,8 @@ class StitchGraph(luigi.Task):
 
     def requires(self):
 
-        with open(PipelineParameter().MCConfigFile, 'r') as f:
-            mc_config = json.load(f)
-        blockShape = mc_config["blockShape"]
-        blockOverlap = mc_config["blockOverlap"]
+        blockShape   = PipelineParameter().multicutBlockShape
+        blockOverlap = PipelineParameter().multicutBlockOverlap
 
         nodes2blocks = NodesToInitialBlocks(self.pathToSeg, self.blockShape, self.blockOverlap)
 
@@ -150,7 +148,6 @@ class StitchGraph(luigi.Task):
 
 
     def run(self):
-
         inp = self.input()
 
         nodes2blocks = inp["nodes2blocks"].read()
@@ -159,10 +156,8 @@ class StitchGraph(luigi.Task):
 
         nBlocks = len(nodes2blocks)
 
-        with open(PipelineParameter().MCConfigFile, 'r') as f:
-            mc_config = json.load(f)
-        blockShape = mc_config["blockShape"]
-        blockOverlap = mc_config["blockOverlap"]
+        blockShape   = PipelineParameter().multicutBlockShape
+        blockOverlap = PipelineParameter().multicutBlockOverlap
 
         blocking = nifty.blocking(roiBegin = [0L,0L,0L], roiEnd = rag.shape, blockShape = blockShape)
         assert blocking.numberOfBlocks == nBlocks

@@ -69,17 +69,13 @@ class MulticutProblem(luigi.Task):
 
     def _probabilities_to_costs(self, rag, edge_costs):
 
-        # read the mc parameter
-        with open(PipelineParameter().MCConfigFile, 'r') as f:
-            mc_config = json.load(f)
-
         # scale the probabilities
         # this is pretty arbitrary, it used to be 1. / n_tress, but this does not make that much sense for sklearn impl
         p_min = 0.001
         p_max = 1. - p_min
         edge_costs = (p_max - p_min) * edge_costs + p_min
 
-        beta = mc_config["beta"]
+        beta = PipelineParameter().multicutBeta
 
         # probabilities to energies, second term is boundary bias
         edge_costs = np.log( (1. - edge_costs) / edge_costs ) + np.log( (1. - beta) / beta )
@@ -89,8 +85,8 @@ class MulticutProblem(luigi.Task):
             edge_costs.max()))
 
         # weight edge costs
-        weighting_scheme = mc_config["weightingScheme"]
-        weight           = mc_config["weight"]
+        weighting_scheme = PipelineParameter().multicutWeightingScheme
+        weight           = PipelineParameter().multicutWeight
 
         edgeLens = rag.edgeLengths()
         if PipelineParameter().defectPipeline:

@@ -52,7 +52,20 @@ class PipelineParameter(object):
         self.nFeatureChunks = 1 # default = 1 -> in core calculation
 
         ### multicut and blockwise parameter
-        self.globalTimeLimit = 60*60*10 # time limit in seconds / 10 hours
+        self.multicutVerbose = 0
+        self.multicutSigmaFusion = 10.
+        self.multicutNumParallelProposals = 1
+        self.multicutNumThreadsFusion = 1
+        self.multicutNumFuse = 2
+        self.multicutBeta = 0.5,
+        self.multicutWeightingScheme = "z",
+        self.multicutWeight = 16
+        self.multicutSeedFraction = 0.005
+        self.multicutNumIt = 2500
+        self.multicutNumItStop = 20
+        self.multicutBlockShape = [50,512,512]
+        self.multicutBlockOverlap = [5,20,20]
+        self.multicutGlobalTimeLimit = 60*60*10 # time limit in seconds / 10 hours
 
     # TODO range and type cheks via @property and setproperty
 

@@ -31,10 +31,6 @@ class McSolverFusionMoves(luigi.Task):
     @run_decorator
     def run(self):
 
-        # read the mc parameter
-        with open(PipelineParameter().MCConfigFile, 'r') as f:
-            mc_config = json.load(f)
-
         mcProblem = self.input()
 
         g = nifty.graph.UndirectedGraph()
@@ -55,23 +51,25 @@ class McSolverFusionMoves(luigi.Task):
         ret    = greedy.optimize()
         workflow_logger.info("McSolverFusionMoves: energy of the greedy solution %f" % obj.evalNodeLabels(ret) )
 
-        ilpFac = obj.multicutIlpFactory(ilpSolver='cplex',verbose=mc_config["verbose"],
+        ilpFac = obj.multicutIlpFactory(ilpSolver='cplex',
+            verbose=PipelineParameter().multicutVerbose,
             addThreeCyclesConstraints=True,
             addOnlyViolatedThreeCyclesConstraints=True
         )
 
         solver = obj.fusionMoveBasedFactory(
-            verbose=mc_config["verbose"],
+            verbose=PipelineParameter().multicutVerbose,
             fusionMove=obj.fusionMoveSettings(mcFactory=ilpFac),
-            proposalGen=obj.watershedProposals(sigma=mc_config["sigmaFusion"],seedFraction=mc_config["seedFraction"]),
-            numberOfIterations=mc_config["numIt"],
-            numberOfParallelProposals=mc_config["numParallelProposals"],
-            numberOfThreads=mc_config["numThreadsFusion"],
-            stopIfNoImprovement=mc_config["numItStop"],
-            fuseN=mc_config["numFuse"],
+            proposalGen=obj.watershedProposals(sigma=PipelineParameter().multicutSigmaFusion,
+                seedFraction=PipelineParameter().multicutSeedFraction),
+            numberOfIterations=PipelineParameter().multicutNumIt,
+            numberOfParallelProposals=PipelineParameter().multicutNumParallelProposals,
+            numberOfThreads=PipelineParameter().multicutNumThreadsFusion,
+            stopIfNoImprovement=PipelineParameter().multicutNumItStop,
+            fuseN=PipelineParameter().multicutNumFuse,
         ).create(obj)
 
-        if mc_config["verbose"]:
+        if PipelineParameter().multicutVerbose:
             visitor = obj.multicutVerboseVisitor(1)
             ret = solver.optimize(nodeLabels=ret, visitor=visitor)
         else:
@@ -107,11 +105,6 @@ class McSolverExact(luigi.Task):
 
     @run_decorator
     def run(self):
-
-        # read the mc parameter
-        with open(PipelineParameter().MCConfigFile, 'r') as f:
-            mc_config = json.load(f)
-
         mcProblem = self.input()
 
         g = nifty.graph.UndirectedGraph()

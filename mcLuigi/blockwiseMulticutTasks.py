@@ -27,10 +27,6 @@ config_logger(workflow_logger)
 
 def fusion_moves(g, costs, blockId, nThreads = 1, isGlobal = False):
 
-    # read the mc parameter
-    with open(PipelineParameter().MCConfigFile, 'r') as f:
-        mc_config = json.load(f)
-
     assert g.numberOfEdges == costs.shape[0]
 
     obj = nifty.graph.multicut.multicutObjective(g, costs)
@@ -49,14 +45,15 @@ def fusion_moves(g, costs, blockId, nThreads = 1, isGlobal = False):
         nParallel = 2 * nThreads
 
     solver = obj.fusionMoveBasedFactory(
-        verbose=mc_config["verbose"],
+        verbose=PipelineParameter().mulicutVerbose,
         fusionMove=obj.fusionMoveSettings(mcFactory=ilpFac),
-        proposalGen=obj.watershedProposals(sigma=mc_config["sigmaFusion"],seedFraction=mc_config["seedFraction"]),
-        numberOfIterations=mc_config["numIt"],
+        proposalGen=obj.watershedProposals(sigma=PipelineParameter().multicutSigmaFusion,
+            seedFraction=PipelineParameter().multicutSeedFraction),
+        numberOfIterations=PipelineParameter().multicutNumIt,
         numberOfThreads=nThreads,
         numberOfParallelProposals=nParallel,
-        stopIfNoImprovement=mc_config["numItStop"],
-        fuseN=mc_config["numFuse"],
+        stopIfNoImprovement=PipelineParameter().multicutNumItStop,
+        fuseN=PipelineParameter().multicutNumFuse,
     ).create(obj)
 
     t_inf = time.time()
@@ -67,7 +64,7 @@ def fusion_moves(g, costs, blockId, nThreads = 1, isGlobal = False):
     # then run the actual fusion moves solver warmstarted with greedy result
 
     if isGlobal: # time limit and verbose for global problem:
-        visitor = obj.multicutVerboseVisitor(1,PipelineParameter().globalTimeLimit)
+        visitor = obj.multicutVerboseVisitor(1,PipelineParameter().multicutGlobalTimeLimit)
         ret = solver.optimize(nodeLabels=ret,visitor=visitor)
     else:
         ret = solver.optimize(nodeLabels=ret)
@@ -93,14 +90,10 @@ class BlockwiseMulticutSolver(luigi.Task):
     numberOflevels = luigi.Parameter()
 
     def requires(self):
-        # read the mc parameter
-        with open(PipelineParameter().MCConfigFile, 'r') as f:
-            mc_config = json.load(f)
-
         # block size in first hierarchy level
-        initialBlockShape = mc_config["blockShape"]
+        initialBlockShape = PipelineParameter().multicutBlockShape
         # block overlap, for now same for each hierarchy lvl
-        blockOverlap = mc_config["blockOverlap"]
+        blockOverlap = PipelineParameter().multicutBlockOverlap
 
         problemHierarchy = [self.globalProblem,]
         blockFactor = 1
@@ -334,10 +327,8 @@ class BlockwiseSubSolver(luigi.Task):
 
     def requires(self):
 
-        with open(PipelineParameter().MCConfigFile, 'r') as f:
-            mc_config = json.load(f)
-        initialShape = mc_config["blockShape"]
-        overlap      = mc_config["blockOverlap"]
+        initialShape = PipelineParameter().multicutBlockShape
+        overlap      = PipelineParameter().multicutBlockOverlap
 
         nodes2blocks = NodesToInitialBlocks(self.pathToSeg, initialShape, overlap)
         return { "seg" : ExternalSegmentation(self.pathToSeg), "problem" : self.problem , "nodes2blocks" : nodes2blocks }
@@ -374,11 +365,9 @@ class BlockwiseSubSolver(luigi.Task):
     def _run_subproblems_extraction(self, seg, graph, nodes2blocks, global2newNodes):
 
         # get the initial blocking
-        with open(PipelineParameter().MCConfigFile, 'r') as f:
-            mc_config = json.load(f)
         # block size in first hierarchy level
-        initialBlockShape = mc_config["blockShape"]
-        initialOverlap = list(mc_config["blockOverlap"])
+        initialBlockShape =  PipelineParameter().multicutBlockShape
+        initialOverlap = list(PipelineParameter().multicutBlockOverlap)
         initialBlocking = nifty.tools.blocking( roiBegin = [0L,0L,0L], roiEnd = seg.shape, blockShape = initialBlockShape )
 
         # function for subproblem extraction

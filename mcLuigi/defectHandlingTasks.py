@@ -169,6 +169,7 @@ class ModifiedAdjacency(luigi.Task):
 
             return new_skip_edges, new_skip_ranges
 
+        # TODO impl in C++ to speed up!
         for i, u in enumerate(defect_nodes):
             print i, '/', len(defect_nodes)
             z = long(nodes_z[i])
