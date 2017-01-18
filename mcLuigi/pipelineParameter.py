@@ -39,7 +39,7 @@ class PipelineParameter(object):
         self.binThreshold = 0 # -> 0 means we don't detect any defects ! This needs to be tuned for every ds !
 
         # feature string
-        features = ["raw","affinitiesXY","affinitiesZ","reg"] # for non-affinity maps replace 'affinitiesXY/Z' with prob
+        self.features = ["raw","affinitiesXY","affinitiesZ","reg"] # for non-affinity maps replace 'affinitiesXY/Z' with prob
 
         # number of threads
         self.nThreads = multiprocessing.cpu_count()

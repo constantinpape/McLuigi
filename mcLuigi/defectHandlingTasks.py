@@ -141,11 +141,15 @@ class ModifiedAdjacency(luigi.Task):
         uv_ids = rag.uvIds()
         n_nodes = uv_ids.max() + 1
 
+        # TODO speed up below by impl in C++ and then
+        # parallelization over all non-interacting slices
+        # function get_skip_edges_z in nifty that returns skip_edges, etc for that slice
+
         # returns skip edges from nodes in lower slice to nodes in the above slices for the defected nodes
         # if nodes in above slice is also defected, recursively calls itself and goes one slice up
         def get_skip_edges(z_up, z_dn, bb_begin, bb_end, mask, nodes_dn, seg_dn):
 
-            seg_up = seg.read([z_up] + bb_begin, [z_up+1] + bb_end).squeeze()
+            seg_up = seg.read([z_up] + bb_begin, [z_up+1] + bb_end)[0,:,:]
             nodes_up = vigra.analysis.unique(seg_up[mask])
 
             skip_range = z_up - z_dn
@@ -169,8 +173,10 @@ class ModifiedAdjacency(luigi.Task):
 
             return new_skip_edges, new_skip_ranges
 
-        # TODO impl in C++ to speed up!
         for i, u in enumerate(defect_nodes):
+        #for i in xrange(54457,len(defect_nodes)):
+        #    u = defect_nodes[i]
+
             print i, '/', len(defect_nodes)
             z = long(nodes_z[i])
 
@@ -196,11 +202,13 @@ class ModifiedAdjacency(luigi.Task):
 
             where_in_bb = (np.array(map(lambda x : x - begin_u[0], where_node[0]), dtype = np.uint32),
                     np.array(map(lambda x : x - begin_u[1], where_node[1]), dtype = np.uint32) )
+
             mask = np.zeros( tuple(map(lambda x,y: x - y, end_u, begin_u)), dtype = bool)
+
             mask[where_in_bb] = 1
 
             # find the lower nodes for skip connections
-            seg_dn = seg.read([z-1] + begin_u, [z] + end_u).squeeze()
+            seg_dn = seg.read([z-1] + begin_u, [z] + end_u)[0,:,:]
             nodes_dn = vigra.analysis.unique(seg_dn[mask])
 
             # we discard defected nodes in the lower slice (if present), because these were already taken care of

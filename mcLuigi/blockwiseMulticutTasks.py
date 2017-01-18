@@ -72,8 +72,8 @@ def fusion_moves(g, costs, blockId, nThreads = 1, isGlobal = False):
 
     if isGlobal:
         energy = obj.evalNodeLabels(ret)
-        workflow_logger.info("Inference for global problem with fusion moves solver in " + str(t_inf) + " s")
-        workflow_logger.info("Energy of the solution: %f" % energy)
+        workflow_logger.debug("Inference for global problem with fusion moves solver in " + str(t_inf) + " s")
+        workflow_logger.debug("Energy of the solution: %f" % energy)
     else:
         workflow_logger.debug("Inference for block " + str(blockId) + " with fusion moves solver in " + str(t_inf) + " s")
 
