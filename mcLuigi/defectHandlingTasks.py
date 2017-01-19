@@ -129,101 +129,49 @@ class ModifiedAdjacency(luigi.Task):
         # loop over the defect nodes and find the skip edges,
         # compute the modify adjacency
 
-        skip_edges   = [] # the skip edges that run over the defects in z
-        skip_ranges  = [] # z-distance of the skip edges
-        skip_starts  = [] # starting slices of the skip edges
         delete_edges = [] # the z-edges between defected and non-defected nodes that are deleted from the graph
         ignore_edges = [] # the xy-edges between defected and non-defected nodes, that will be set to maximally repulsive weights
 
-        prev_z = -1
+        skip_edges   = [] # the skip edges that run over the defects in z
+        skip_ranges  = [] # z-distance of the skip edges
+        skip_starts  = [] # starting slices of the skip edges
 
         # get the original rag adjacency
         uv_ids = rag.uvIds()
         n_nodes = uv_ids.max() + 1
 
-        # TODO speed up below by impl in C++ and then
-        # parallelization over all non-interacting slices
-        # function get_skip_edges_z in nifty that returns skip_edges, etc for that slice
+        defect_slices = np.unique(nodes_z)
 
-        # returns skip edges from nodes in lower slice to nodes in the above slices for the defected nodes
-        # if nodes in above slice is also defected, recursively calls itself and goes one slice up
-        def get_skip_edges(z_up, z_dn, bb_begin, bb_end, mask, nodes_dn, seg_dn):
+        # FIXME TODO can't do this here once we have individual defect patches
+        consecutive_defect_slices = np.split(defect_slices, np.where(np.diff(defect_slices) != 1)[0] + 1)
+        has_lower_defect_list = []
+        for consec in consecutive_defect_slices:
+            if len(consec) > 1:
+                has_lower_defect_list.extend(consec[1:])
+        print has_lower_defect_list
 
-            seg_up = seg.read([z_up] + bb_begin, [z_up+1] + bb_end)[0,:,:]
-            nodes_up = vigra.analysis.unique(seg_up[mask])
+        for i, z in enumerate(defect_slices):
+            print 'Processing slice', z, ':', i, '/', len(defect_slices)
+            has_lower_defect = z in has_lower_defect_list
+            delete_edges_z, ignore_edges_z, skip_edges_z, skip_ranges_z = nifty.graph.rag.getSkipEdgesForSlice(
+                rag,
+                int(z),
+                defect_nodes,
+                defect_nodes[nodes_z==z],
+                has_lower_defect)
 
-            skip_range = z_up - z_dn
-            new_skip_edges = []
-            new_skip_ranges = []
+            print len(delete_edges_z)
+            print len(ignore_edges_z)
+            print len(skip_edges_z)
+            print len(skip_ranges_z)
 
-            for u_dn in nodes_dn:
-                # find coordinates of node in lower slice and interesect with mask
-                where_dn = seg_dn == u_dn
-                mask_dn = np.logical_and(where_dn, mask)
-                # find intersecting nodes in upper slice and find the nodes with overlap
-                connected_nodes = np.unique(seg_up[mask_dn])
-                # if any of the nodes is defected go to the next slice
-                # TODO Don't know if this is the best way to do it, but already much better than skipping the whole slice
-                if np.any([nn in defect_nodes for nn in connected_nodes]):
-                    new_skip_edges, new_skip_ranges = get_skip_edges(z_up+1,z_dn,bb_begin,bb_end,mask,nodes_dn,seg_dn)
-                    break
-                else:
-                    new_skip_edges.extend( [[min(u_dn,cc),max(u_dn,cc)] for cc in connected_nodes] )
-                    new_skip_ranges.extend( [skip_range for _ in xrange(len(connected_nodes))] )
+            delete_edges.extend(delete_edges_z)
+            ignore_edges.extend(ignore_edges_z)
 
-            return new_skip_edges, new_skip_ranges
-
-        for i, u in enumerate(defect_nodes):
-        #for i in xrange(54457,len(defect_nodes)):
-        #    u = defect_nodes[i]
-
-            print i, '/', len(defect_nodes)
-            z = long(nodes_z[i])
-
-            # remove edges and find edges connecting defected to non defected nodes
-            for v, edge_id in rag.nodeAdjacency(long(u)):
-                # check if this is a z-edge and if it is, remove it from the adjacency
-                if edge_id > edge_offset:
-                    delete_edges.append(edge_id)
-                elif v not in defect_nodes: # otherwise, add it to the ignore edges, if it v is non-defected
-                    ignore_edges.append(edge_id)
-
-            # don't need skip edges for first (good) or last slice
-            if z == 0 or z == seg.shape[0] - 1:
-                continue
-
-            if prev_z != z: # only read the segmentations if we haven't loaded it yet
-                seg_z = seg.read([z,0L,0L],[z+1,ny,nx]).squeeze()
-
-            # find the node coordinates and the corresponding bounding box and the mask projected to the bounding box
-            where_node = np.where(seg_z==u)
-            begin_u = [min(where_node[0]),min(where_node[1])]
-            end_u   = [max(where_node[0])+1,max(where_node[1])+1]
-
-            where_in_bb = (np.array(map(lambda x : x - begin_u[0], where_node[0]), dtype = np.uint32),
-                    np.array(map(lambda x : x - begin_u[1], where_node[1]), dtype = np.uint32) )
-
-            mask = np.zeros( tuple(map(lambda x,y: x - y, end_u, begin_u)), dtype = bool)
-
-            mask[where_in_bb] = 1
-
-            # find the lower nodes for skip connections
-            seg_dn = seg.read([z-1] + begin_u, [z] + end_u)[0,:,:]
-            nodes_dn = vigra.analysis.unique(seg_dn[mask])
-
-            # we discard defected nodes in the lower slice (if present), because these were already taken care of
-            # in previous iterations
-            nodes_dn = np.array([nn for nn in nodes_dn if nn not in defect_nodes])
-
-            if nodes_dn.size: # only do stuff if the array is not empty
-                skip_edges_u, skip_ranges_u = get_skip_edges(z+1, z-1, begin_u, end_u, mask, nodes_dn, seg_dn)
-                skip_edges.extend(skip_edges_u)
-                skip_ranges.extend(skip_ranges_u)
-                skip_starts.extend(len(skip_edges_u) * [z-1])
-
-            prev_z = z
-
-        assert len(skip_edges) == len(skip_ranges)
+            assert len(skip_edges_z) == len(skip_ranges_z)
+            skip_edges.extend(skip_edges_z)
+            skip_ranges.extend(skip_ranges_z)
+            skip_starts.extend(len(skip_edges_z) * [z])
 
         delete_edges = np.unique(delete_edges).astype(np.uint32)
         uv_ids = np.delete(uv_ids,delete_edges,axis=0)
@@ -231,6 +179,7 @@ class ModifiedAdjacency(luigi.Task):
 
         skip_edges = np.array(skip_edges, dtype = np.uint32)
         skips_before_unique = skip_edges.shape[0]
+        print skip_edges.shape
 
         # make the skip edges unique, keeping rows (see http://stackoverflow.com/questions/16970982/find-unique-rows-in-numpy-array):
         skips_view = np.ascontiguousarray(skip_edges).view(np.dtype((np.void, skip_edges.dtype.itemsize * skip_edges.shape[1])))

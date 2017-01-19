@@ -307,4 +307,3 @@ class DefectSliceDetection(luigi.Task):
 
 # TODO detection with svm, potentially followed by object detection
 # TODO combination of svm and ws-stat detectios
-
