@@ -152,22 +152,32 @@ class ModifiedAdjacency(luigi.Task):
                 has_lower_defect_list.extend(consec[1:])
         print "Slices with lower defect slice:", has_lower_defect_list
 
-        for i, z in enumerate(defect_slices):
-            print 'Processing slice', z, ':', i, '/', len(defect_slices)
+        def get_skip_edges_from_nifty(z, i):
             has_lower_defect = z in has_lower_defect_list
             delete_edges_z, ignore_edges_z, skip_edges_z, skip_ranges_z = nifty.graph.rag.getSkipEdgesForSlice(
                 rag,
                 int(z),
                 defect_node_dict,
                 has_lower_defect)
+            print 'Finished processing slice', z, ':', i, '/', len(defect_slices)
+            return z, delete_edges_z, ignore_edges_z, skip_edges_z, skip_ranges_z
 
-            delete_edges.extend(delete_edges_z)
-            ignore_edges.extend(ignore_edges_z)
+        with futures.ThreadPoolExecutor(max_workers = PipelineParameter().nThreads) as executor:
+            tasks = []
+            for i,z in enumerate(defect_slices):
+                tasks.append( executor.submit(get_skip_edges_from_nifty, z, i) )
 
-            assert len(skip_edges_z) == len(skip_ranges_z)
-            skip_edges.extend(skip_edges_z)
-            skip_ranges.extend(skip_ranges_z)
-            skip_starts.extend(len(skip_edges_z) * [z-1])
+            for task in tasks:
+
+                z, delete_edges_z, ignore_edges_z, skip_edges_z, skip_ranges_z = task.result()
+
+                delete_edges.extend(delete_edges_z)
+                ignore_edges.extend(ignore_edges_z)
+
+                assert len(skip_edges_z) == len(skip_ranges_z)
+                skip_edges.extend(skip_edges_z)
+                skip_ranges.extend(skip_ranges_z)
+                skip_starts.extend(len(skip_edges_z) * [z-1])
 
         delete_edges = np.unique(delete_edges).astype(np.uint32)
         uv_ids = np.delete(uv_ids,delete_edges,axis=0)
