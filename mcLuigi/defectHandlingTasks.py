@@ -142,13 +142,15 @@ class ModifiedAdjacency(luigi.Task):
 
         defect_slices = np.unique(nodes_z)
 
+        defect_node_dict = {int(z) : list(defect_nodes[nodes_z == z].astype(int)) for z in defect_slices}
+
         # FIXME TODO can't do this here once we have individual defect patches
         consecutive_defect_slices = np.split(defect_slices, np.where(np.diff(defect_slices) != 1)[0] + 1)
         has_lower_defect_list = []
         for consec in consecutive_defect_slices:
             if len(consec) > 1:
                 has_lower_defect_list.extend(consec[1:])
-        print has_lower_defect_list
+        print "Slices with lower defect slice:", has_lower_defect_list
 
         for i, z in enumerate(defect_slices):
             print 'Processing slice', z, ':', i, '/', len(defect_slices)
@@ -156,14 +158,8 @@ class ModifiedAdjacency(luigi.Task):
             delete_edges_z, ignore_edges_z, skip_edges_z, skip_ranges_z = nifty.graph.rag.getSkipEdgesForSlice(
                 rag,
                 int(z),
-                defect_nodes,
-                defect_nodes[nodes_z==z],
+                defect_node_dict,
                 has_lower_defect)
-
-            print len(delete_edges_z)
-            print len(ignore_edges_z)
-            print len(skip_edges_z)
-            print len(skip_ranges_z)
 
             delete_edges.extend(delete_edges_z)
             ignore_edges.extend(ignore_edges_z)
@@ -171,7 +167,7 @@ class ModifiedAdjacency(luigi.Task):
             assert len(skip_edges_z) == len(skip_ranges_z)
             skip_edges.extend(skip_edges_z)
             skip_ranges.extend(skip_ranges_z)
-            skip_starts.extend(len(skip_edges_z) * [z])
+            skip_starts.extend(len(skip_edges_z) * [z-1])
 
         delete_edges = np.unique(delete_edges).astype(np.uint32)
         uv_ids = np.delete(uv_ids,delete_edges,axis=0)
