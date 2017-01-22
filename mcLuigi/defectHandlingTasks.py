@@ -162,6 +162,19 @@ class ModifiedAdjacency(luigi.Task):
             print 'Finished processing slice', z, ':', i, '/', len(defect_slices)
             return z, delete_edges_z, ignore_edges_z, skip_edges_z, skip_ranges_z
 
+        # non-parallel for debugging
+        #for i, z in enumerate(defect_slices):
+        #    z, delete_edges_z, ignore_edges_z, skip_edges_z, skip_ranges_z = get_skip_edges_from_nifty(z,i)
+
+        #    delete_edges.extend(delete_edges_z)
+        #    ignore_edges.extend(ignore_edges_z)
+
+        #    assert len(skip_edges_z) == len(skip_ranges_z)
+        #    skip_edges.extend(skip_edges_z)
+        #    skip_ranges.extend(skip_ranges_z)
+        #    skip_starts.extend(len(skip_edges_z) * [z-1])
+
+        # parallel
         with futures.ThreadPoolExecutor(max_workers = PipelineParameter().nThreads) as executor:
             tasks = []
             for i,z in enumerate(defect_slices):
@@ -185,13 +198,13 @@ class ModifiedAdjacency(luigi.Task):
 
         skip_edges = np.array(skip_edges, dtype = np.uint32)
         skips_before_unique = skip_edges.shape[0]
-        print skip_edges.shape
 
+        print skip_edges.shape
         # make the skip edges unique, keeping rows (see http://stackoverflow.com/questions/16970982/find-unique-rows-in-numpy-array):
         skips_view = np.ascontiguousarray(skip_edges).view(np.dtype((np.void, skip_edges.dtype.itemsize * skip_edges.shape[1])))
         _, idx = np.unique(skips_view, return_index=True)
         skip_edges = skip_edges[idx]
-        workflow_logger.debug("ModifiedAdjacency: Removed %i duplicate skip edges" % (skips_before_unique - skip_edges.shape[0]) )
+        workflow_logger.info("ModifiedAdjacency: Removed %i duplicate skip edges" % (skips_before_unique - skip_edges.shape[0]) )
 
         skip_ranges = np.array(skip_ranges, dtype = np.uint32)
         skip_ranges = skip_ranges[idx]
@@ -453,8 +466,8 @@ class ModifiedEdgeFeatures(luigi.Task):
                 skip_feats = nifty.graph.rag.accumulateSkipEdgeFeaturesFromFilters(rag,
                         data.get(),
                         [(int(skip_e[0]), int(skip_e[1])) for skip_e in skip_edges], # skip_edges need to be passed as a list of pairs!
-                        skip_ranges,
-                        skip_starts,
+                        list(skip_ranges),
+                        list(skip_starts),
                         PipelineParameter().nThreads )
                 assert skip_feats.shape[0] == skip_edges.shape[0]
                 assert skip_feats.shape[1] == n_feats
@@ -508,9 +521,10 @@ class SkipEdgeLengths(luigi.Task):
 
         skip_lens = nifty.graph.rag.getSkipEdgeLengths(rag,
                         [(int(skip_e[0]), int(skip_e[1])) for skip_e in skip_edges], # skip_edges need to be passed as a list of pairs!
-                        skip_ranges,
-                        skip_starts,
+                        list(skip_ranges),
+                        list(skip_starts),
                         PipelineParameter().nThreads )
+        skip_lens = np.array(skip_lens, dtype = 'uint32')
         assert skip_lens.shape[0] == skip_edges.shape[0]
         workflow_logger.info("SkipEdgeLengths: computed lens in range %i to %i" % (skip_lens.min(),skip_lens.max()))
 
