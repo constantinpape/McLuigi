@@ -300,18 +300,36 @@ class ModifiedRegionFeatures(luigi.Task):
             out.write([0,0],
                 np.c_[region_feats.read([0,0],[transition_edge,region_feats.shape[1]]),np.zeros(transition_edge)])
 
+            print "In-shape: ", region_feats.shape
+            print "Out-shape: ", out.shape
+            print "Del edges:", delete_edges.shape
+
             # next, copy the z-edges, leaving out delete edges
             # add a column of 1s to indicate the skip range
             prev_edge = transition_edge
             total_copied = transition_edge
-            for del_edge in delete_edges:
-                if del_edge == prev_edge:
-                    prev_edge = del_edge + 1
-                    continue
-                n_copy = del_edge - prev_edge
+
+            consecutive_deletes = np.split(delete_edges,
+                    np.where(np.diff(delete_edges) != 1)[0] + 1)
+
+            # keep edges
+            keep_edge_intervals = []
+            if prev_edge != consecutive_deletes[0][0]:
+                keep_edge_intervals.append([prev_edge, consecutive_deletes[0][0]])
+
+            keep_edge_intervals.extend(
+                [[consecutive_deletes[i][-1]+1, consecutive_deletes[i+1][0]] for i in xrange(len(consecutive_deletes)-1)])
+
+            if consecutive_deletes[-1][-1] != region_feats.shape[0] - 1:
+                keep_edge_intervals.append([consecutive_deletes[-1][-1]+1,edge_feats.shape[0]])
+
+            #print keep_edge_intervals
+            for keep_start, keep_stop in keep_edge_intervals:
+                #print keep_start, keep_stop
+                n_copy = keep_stop - keep_start
+                assert n_copy > 0, str(n_copy)
                 out.write([total_copied,0],
-                    np.c_[region_feats.read([prev_edge,0],[del_edge,region_feats.shape[1]]),np.ones(n_copy)] )
-                prev_edge = del_edge + 1 # we skip over the del_edge
+                    np.c_[region_feats.read([keep_start,0], [keep_stop,region_feats.shape[1]]), np.ones(n_copy)] )
                 total_copied += n_copy
 
             assert total_copied == region_feats.shape[0] - delete_edges.shape[0], "%i, %i" % (total_copied, region_feats.shape[0] - delete_edges.shape[0])
@@ -385,6 +403,7 @@ class ModifiedEdgeFeatures(luigi.Task):
 
     @run_decorator
     def run(self):
+        import ipdb
 
         inp = self.input()
         rag = inp['rag'].read()
@@ -423,6 +442,8 @@ class ModifiedEdgeFeatures(luigi.Task):
             out = self.output()
             out.open(out_shape, chunk_shape)
 
+            print "Out-shape:", out.shape
+
             # we copy the edge feats for xy-edges
             # don't do this if keepOnlyZ
             if not self.keepOnlyZ:
@@ -441,18 +462,31 @@ class ModifiedEdgeFeatures(luigi.Task):
                     delete_edges -= transition_edge
                     assert np.all(delete_edges > 0)
 
-                for del_edge in delete_edges:
-                    if del_edge == prev_edge:
-                        prev_edge = del_edge + 1
-                        continue
-                    n_copy = del_edge - prev_edge
-                    #print [total_copied,0]
-                    #print [prev_edge,0]
-                    #print [del_edge,n_feats]
+                consecutive_deletes = np.split(delete_edges,
+                        np.where(np.diff(delete_edges) != 1)[0] + 1)
+
+                # keep edges
+                keep_edge_intervals = []
+                if prev_edge != consecutive_deletes[0][0]:
+                    keep_edge_intervals.append([prev_edge, consecutive_deletes[0][0]])
+
+                keep_edge_intervals.extend(
+                    [[consecutive_deletes[i][-1]+1, consecutive_deletes[i+1][0]] for i in xrange(len(consecutive_deletes)-1)])
+
+                if consecutive_deletes[-1][-1] != edge_feats.shape[0] - 1:
+                    keep_edge_intervals.append([consecutive_deletes[-1][-1]+1,edge_feats.shape[0]])
+
+                print keep_edge_intervals
+                for keep_start, keep_stop in keep_edge_intervals:
+                    print keep_start, keep_stop
+                    n_copy = keep_stop - keep_start
+                    assert n_copy > 0, str(n_copy)
                     out.write([total_copied,0],
-                        edge_feats.read([prev_edge,0], [del_edge,n_feats]) )
-                    prev_edge = del_edge + 1 # we skip over the del_edge
+                        edge_feats.read([keep_start,0], [keep_stop,n_feats]) )
                     total_copied += n_copy
+
+                if not total_copied == edge_feats.shape[0] - delete_edges.shape[0]:
+                    ipdb.set_trace()
 
                 assert total_copied == edge_feats.shape[0] - delete_edges.shape[0], "%i, %i" % (total_copied, edge_feats.shape[0] - delete_edges.shape[0])
 
@@ -469,6 +503,7 @@ class ModifiedEdgeFeatures(luigi.Task):
                         list(skip_ranges),
                         list(skip_starts),
                         PipelineParameter().nThreads )
+
                 assert skip_feats.shape[0] == skip_edges.shape[0]
                 assert skip_feats.shape[1] == n_feats
                 out.write([total_copied,0], skip_feats)
