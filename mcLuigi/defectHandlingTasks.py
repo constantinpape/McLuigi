@@ -280,6 +280,7 @@ class ModifiedRegionFeatures(luigi.Task):
         skip_edges = modified_adjacency.read('skip_edges')
         skip_ranges = modified_adjacency.read('skip_ranges')
         delete_edges = modified_adjacency.read('delete_edges')
+        n_edges_modified = modified_adjacency.read('n_edges_modified')
 
         transition_edge = rag.totalNumberOfInSliceEdges
 
@@ -291,14 +292,18 @@ class ModifiedRegionFeatures(luigi.Task):
 
             n_modified = region_feats.shape[0] - delete_edges.shape[0] + skip_edges.shape[0]
             n_feats = region_feats.shape[1] + 1 # we add an additional feature to indicate the skip range
+            assert n_modified == n_edges_modified, "%i, %i" % (n_modified, n_edges_modified)
+
             out_shape = [n_modified, n_feats]
             chunk_shape = [2500,n_feats]
             out = self.output()
             out.open(out_shape, chunk_shape)
 
             # first, copy the xy-features, adding a 0 column indicating the skip range
-            out.write([0,0],
-                np.c_[region_feats.read([0,0],[transition_edge,region_feats.shape[1]]),np.zeros(transition_edge)])
+            #out.write([0,0],
+            #    np.c_[region_feats.read([0,0],[transition_edge,region_feats.shape[1]]),np.zeros(transition_edge)])
+
+            out.write([0,0], np.c_[region_feats.read([0,0],[transition_edge,region_feats.shape[1]]),np.zeros(transition_edge)])
 
             print "In-shape: ", region_feats.shape
             print "Out-shape: ", out.shape
@@ -321,15 +326,18 @@ class ModifiedRegionFeatures(luigi.Task):
                 [[consecutive_deletes[i][-1]+1, consecutive_deletes[i+1][0]] for i in xrange(len(consecutive_deletes)-1)])
 
             if consecutive_deletes[-1][-1] != region_feats.shape[0] - 1:
-                keep_edge_intervals.append([consecutive_deletes[-1][-1]+1,edge_feats.shape[0]])
+                keep_edge_intervals.append([consecutive_deletes[-1][-1]+1,region_feats.shape[0]])
 
             #print keep_edge_intervals
             for keep_start, keep_stop in keep_edge_intervals:
                 #print keep_start, keep_stop
                 n_copy = keep_stop - keep_start
+                print keep_start, keep_stop
                 assert n_copy > 0, str(n_copy)
-                out.write([total_copied,0],
-                    np.c_[region_feats.read([keep_start,0], [keep_stop,region_feats.shape[1]]), np.ones(n_copy)] )
+                assert keep_stop <= region_feats.shape[0], "%i, %i" % (keep_stop, region_feats.shape[0])
+                temp = np.c_[region_feats.read([keep_start,0], [keep_stop,region_feats.shape[1]]), np.ones(n_copy)]
+                print temp.shape
+                out.write([total_copied,0], temp)
                 total_copied += n_copy
 
             assert total_copied == region_feats.shape[0] - delete_edges.shape[0], "%i, %i" % (total_copied, region_feats.shape[0] - delete_edges.shape[0])
@@ -403,7 +411,6 @@ class ModifiedEdgeFeatures(luigi.Task):
 
     @run_decorator
     def run(self):
-        import ipdb
 
         inp = self.input()
         rag = inp['rag'].read()
