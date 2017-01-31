@@ -60,8 +60,8 @@ class PipelineParameter(object):
         self.multicutNumParallelProposals = 1
         self.multicutNumThreadsFusion = 1
         self.multicutNumFuse = 2
-        self.multicutBeta = 0.5,
-        self.multicutWeightingScheme = "z",
+        self.multicutBeta = 0.5
+        self.multicutWeightingScheme = "z"
         self.multicutWeight = 16
         self.multicutSeedFraction = 0.005
         self.multicutNumIt = 2500
