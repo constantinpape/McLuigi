@@ -4,7 +4,7 @@ Multicut workflow for large connectomics data.
 Using luigi for pipelining and caching processing steps.
 Most of the computations are done out-of-core using hdf5 as backend and implementations from nifty
 
-## Installattion
+## Installation
 
 To run the pipeline, you need the following python libraries:
 
