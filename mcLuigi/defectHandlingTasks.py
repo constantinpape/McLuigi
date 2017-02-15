@@ -344,7 +344,7 @@ class ModifiedRegionFeatures(luigi.Task):
 
             # finally, calculate the region features for the skip edges
             # features based on region statistics
-            n_stat_feats = 16 # magic_nu...
+            n_stat_feats = 17 # magic_nu...
             region_stats = node_feats.read([0,0],[node_feats.shape[0],n_stat_feats])
 
             fU = region_stats[skip_edges[:,0],:]
@@ -483,17 +483,12 @@ class ModifiedEdgeFeatures(luigi.Task):
                 if consecutive_deletes[-1][-1] != edge_feats.shape[0] - 1:
                     keep_edge_intervals.append([consecutive_deletes[-1][-1]+1,edge_feats.shape[0]])
 
-                print keep_edge_intervals
                 for keep_start, keep_stop in keep_edge_intervals:
-                    print keep_start, keep_stop
                     n_copy = keep_stop - keep_start
                     assert n_copy > 0, str(n_copy)
                     out.write([total_copied,0],
                         edge_feats.read([keep_start,0], [keep_stop,n_feats]) )
                     total_copied += n_copy
-
-                if not total_copied == edge_feats.shape[0] - delete_edges.shape[0]:
-                    ipdb.set_trace()
 
                 assert total_copied == edge_feats.shape[0] - delete_edges.shape[0], "%i, %i" % (total_copied, edge_feats.shape[0] - delete_edges.shape[0])
 

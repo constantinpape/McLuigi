@@ -32,6 +32,7 @@ except ImportError:
     have_xgb = False
 
 try:
+    # TODO change to vigra rf3 and benchmark prediction
     from sklearn.ensemble import RandomForestClassifier
     have_rf = True
 except ImportError:
@@ -371,27 +372,31 @@ class EdgeGroundtruth(luigi.Task):
     pathToGt  = luigi.Parameter()
 
     def requires(self):
-        return {"gt" : DenseGroundtruth(self.pathToGt), "rag" : StackedRegionAdjacencyGraph(self.pathToSeg) }
+        if PipelineParameter().defectPipeline:
+            return {"gt" : DenseGroundtruth(self.pathToGt),
+                    "rag" : StackedRegionAdjacencyGraph(self.pathToSeg),
+                    "modified_adjacency" : ModifiedAdjacency(self.pathToSeg)}
+        else:
+            return {"gt" : DenseGroundtruth(self.pathToGt), "rag" : StackedRegionAdjacencyGraph(self.pathToSeg) }
 
     @run_decorator
     def run(self):
-
         inp = self.input()
         gt = inp["gt"]
         gt.open()
         rag = inp["rag"].read()
-
         nodeGt = nifty.graph.rag.gridRagAccumulateLabels(rag, gt.get())
-        uvIds = rag.uvIds()
-
+        if PipelineParameter().defectPipeline:
+            mod_adjacency = nifty.graph.UndirectedGraph()
+            mod_adjacency.deserialize(inp["modified_adjacency"].read("modified_adjacency"))
+            uvIds = mod_adjacency.uvIds()
+        else:
+            uvIds = rag.uvIds()
         uGt = nodeGt[ uvIds[:,0] ]
         vGt = nodeGt[ uvIds[:,1] ]
-
         edgeGt = (uGt != vGt).astype(np.uint8)
-
         assert (np.unique(edgeGt) == np.array([0,1])).all(), str(np.unique(edgeGt))
         assert edgeGt.shape[0] == uvIds.shape[0]
-
         self.output().write(edgeGt)
 
     def output(self):
@@ -459,7 +464,6 @@ class LearnClassifierFromGt(luigi.Task):
             self._learn_classifier_from_single_input(rag, gt, feature_tasks)
             for feat in feature_tasks:
                 feat.close()
-
 
     def _learn_classifier_from_single_input(self, rag, gt, feature_tasks):
         rag = rag.read()
@@ -622,5 +626,5 @@ class LearnClassifierFromGt(luigi.Task):
             edgetype_str = "all"
         defect_str = "modified" if PipelineParameter().defectPipeline else "standard"
         save_path = os.path.join( PipelineParameter().cache,
-            "LearnClassifierFromGt_%s_%s_%s_%s.h5" % (ninp_str,cf_str,edgetype_str, defect_str) )
+            "LearnClassifierFromGt_%s_%s_%s_%s.pkl" % (ninp_str,cf_str,edgetype_str, defect_str) )
         return PickleTarget(save_path)

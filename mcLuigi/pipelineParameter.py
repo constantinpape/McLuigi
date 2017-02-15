@@ -23,8 +23,7 @@ class PipelineParameter(object):
         # Input Files
         self.cache = "/tmp/mc_cache"
         self.InputFile = ""
-        self.FeatureConfigFile = ""
-        self.MCConfigFile = ""
+        # TODO move these parameter inside PParameter too
         self.EdgeClassifierConfigFile = ""
 
         # flag to switch between pipeline for anisotropic and isotropic (not implemented yet) data
@@ -39,7 +38,8 @@ class PipelineParameter(object):
         self.binThreshold = 0 # -> 0 means we don't detect any defects ! This needs to be tuned for every ds !
 
         # feature string
-        self.features = ["raw","affinitiesXY","affinitiesZ","reg"] # for non-affinity maps replace 'affinitiesXY/Z' with prob
+        #self.features = ["raw","affinitiesXY","affinitiesZ","reg"] # for non-affinity maps replace 'affinitiesXY/Z' with prob
+        self.features = ["raw","prob","reg"] # for non-affinity maps replace 'affinitiesXY/Z' with prob
 
         # number of threads
         self.nThreads = multiprocessing.cpu_count()
@@ -48,7 +48,7 @@ class PipelineParameter(object):
         # log level
         self.logLevel = logging.INFO
         # enable using seperate classifier for xy - and z - edges
-        self.separateEdgeClassification = True
+        self.separateEdgeClassification = False
         # choose betweem xgb - gradient boostig and sklearn - random forest
         self.useXGBoost = True
         # number of chunks that features are split into for out of core probability calculation

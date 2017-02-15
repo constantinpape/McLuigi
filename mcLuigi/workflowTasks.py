@@ -26,77 +26,21 @@ import nifty
 workflow_logger = logging.getLogger(__name__)
 config_logger(workflow_logger)
 
-
-class MulticutSegmentation(luigi.Task):
+class SegmentationWorkflow(luigi.Task):
 
     pathToSeg = luigi.Parameter()
     pathsToClassifier  = luigi.ListParameter()
     dtype = luigi.Parameter(default = 'uint32')
 
     def requires(self):
-        return { "McNodes" : McSolverFusionMoves(
-                    MulticutProblem(self.pathToSeg, self.pathsToClassifier) ),
-                "Rag" : StackedRegionAdjacencyGraph(self.pathToSeg),
-                "Seg" : ExternalSegmentation(self.pathToSeg)}
-
-    @run_decorator
-    def run(self):
-
-        inp = self.input()
-        rag = inp["Rag"].read()
-        mcNodes = inp["McNodes"].read()
-        seg = inp["Seg"]
-
-        seg.open()
-        shape = seg.shape
-
-        assert mcNodes.shape[0] == rag.numberOfNodes
-
-        # get rid of 0 because we don't want it as segment label because it is reserved for the ignore label
-        if 0 in mcNodes:
-            mcNodes += 1
-
-        if np.dtype(self.dtype) != np.dtype(mcNodes.dtype):
-            self.dtype = mcNodes.dtype
-
-        segOut = self.output()
-        segOut.open(seg.shape)
-
-        nifty.graph.rag.projectScalarNodeDataToPixels(rag, mcNodes, segOut.get() ) # nWorkers = -1, could also set this...
-
-        seg.close()
-        segOut.close()
-
-
-    def output(self):
-        save_path = os.path.join( PipelineParameter().cache, "MulticutSegmentation.h5" )
-        return HDF5VolumeTarget( save_path, self.dtype, compression = PipelineParameter().compressionLevel)
-
-
-class BlockwiseMulticutSegmentation(luigi.Task):
-
-    pathToSeg = luigi.Parameter()
-    pathsToClassifier  = luigi.ListParameter()
-
-    dtype = luigi.Parameter(default = 'uint32')
-    numberOfLevels = luigi.IntParameter(default = 2)
-
-    def requires(self):
-        return_tasks = {"mc_nodes" : BlockwiseMulticutSolver( self.pathToSeg,
-                                     MulticutProblem(self.pathToSeg, self.pathsToClassifier),
-                                     self.numberOfLevels ),
-                        "rag" : StackedRegionAdjacencyGraph(self.pathToSeg),
-                        "seg" : ExternalSegmentation(self.pathToSeg)}
-        if PipelineParameter().defectPipeline:
-            return_tasks["defect_slices"] = DefectSliceDetection(self.pathToSeg)
-        return return_tasks
+        raise AttributeError("Segmentation Workflow should never be called, call Multicut Segmentation or BlockwiseMulticutSegmentation instead!")
 
     @run_decorator
     def run(self):
 
         inp = self.input()
         rag = inp["rag"].read()
-        mc_nodes = inp["mc_nodes"].read()
+        mc_nodes = inp["mc_nodes"].read().astype(self.dtype)
         seg = inp["seg"]
 
         seg.open()
@@ -104,23 +48,21 @@ class BlockwiseMulticutSegmentation(luigi.Task):
         out = self.output()
         out.open(seg.shape)
 
-        workflow_logger.info("BlockwiseMulticutSegmentation: Projecting node result to segmentation.")
+        workflow_logger.info("SegmentationWorkflow: Projecting node result to segmentation.")
         self._project_result_to_segmentation(rag, mc_nodes, out)
 
         out.close()
         seg.close()
 
         if PipelineParameter().defectPipeline:
-            workflow_logger.info("BlockwiseMulticutSegmentation: Postprocessing defected slices.")
+            workflow_logger.info("SegmentationWorkflow: Postprocessing defected slices.")
             self._postprocess_defected_slices(inp, out)
-
 
 
     def _project_result_to_segmentation(self, rag, mc_nodes, out):
         assert mc_nodes.shape[0] == rag.numberOfNodes
         # get rid of 0 because we don't want it as segment label because it is reserved for the ignore label
-        if 0 in mc_nodes:
-            mc_nodes += 1
+        mc_nodes, _, _ = vigra.analysis.relabelConsecutive(mc_nodes, start_label = 0, keep_zeros = False)
         if np.dtype(self.dtype) != np.dtype(mc_nodes.dtype):
                 self.dtype = mc_nodes.dtype
         nifty.graph.rag.projectScalarNodeDataToPixels(rag, mc_nodes, out.get(), 5 )
@@ -165,10 +107,42 @@ class BlockwiseMulticutSegmentation(luigi.Task):
             out_ds = f['data']
             for z in defected_slices:
                 replace_z = replace_slice[z]
-                workflow_logger.info("BlockwiseMulticutSegmentation: replacing defected slice %i by %i" % (z,replace_z))
+                workflow_logger.info("SegmentationWorkflow: replacing defected slice %i by %i" % (z,replace_z))
                 replace = out_ds[replace_z]
                 out_ds[z] = replace
 
+    def output(self):
+        raise AttributeError("Segmentation Workflow should never be called, call Multicut Segmentation or BlockwiseMulticutSegmentation instead!")
+
+
+class MulticutSegmentation(SegmentationWorkflow):
+
+    def requires(self):
+        return_tasks = { "mc_nodes" : McSolverFusionMoves(MulticutProblem(self.pathToSeg, self.pathsToClassifier) ),
+                "rag" : StackedRegionAdjacencyGraph(self.pathToSeg),
+                "seg" : ExternalSegmentation(self.pathToSeg)}
+        if PipelineParameter().defectPipeline:
+            return_tasks["defect_slices"] = DefectSliceDetection(self.pathToSeg)
+        return return_tasks
+
+    def output(self):
+        save_path = os.path.join( PipelineParameter().cache, "MulticutSegmentation.h5" )
+        return HDF5VolumeTarget( save_path, self.dtype, compression = PipelineParameter().compressionLevel)
+
+
+class BlockwiseMulticutSegmentation(SegmentationWorkflow):
+
+    numberOfLevels = luigi.IntParameter(default = 2)
+
+    def requires(self):
+        return_tasks = {"mc_nodes" : BlockwiseMulticutSolver( self.pathToSeg,
+                                     MulticutProblem(self.pathToSeg, self.pathsToClassifier),
+                                     self.numberOfLevels ),
+                        "rag" : StackedRegionAdjacencyGraph(self.pathToSeg),
+                        "seg" : ExternalSegmentation(self.pathToSeg)}
+        if PipelineParameter().defectPipeline:
+            return_tasks["defect_slices"] = DefectSliceDetection(self.pathToSeg)
+        return return_tasks
 
     def output(self):
         save_path = os.path.join( PipelineParameter().cache, "BlockwiseMulticutSegmentation_%s.h5" % ("modifed" if PipelineParameter().defectPipeline else "standard",) )

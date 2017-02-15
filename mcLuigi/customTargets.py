@@ -83,6 +83,9 @@ class HDF5VolumeTarget(FileSystemTarget):
             assert shape != None, "HDF5VolumeTarget needs to be initialised with a shape, when creating a new file"
             self.shape = shape
             if chunkShape != None:
+                assert len(chunkShape) == len(self.shape)
+                for dd in range(len(self.shape)):
+                    assert chunkShape[dd] <= self.shape[dd]
                 self.chunkShape = chunkShape
             else:
                 self.chunkShape = [1, min(self.shape[1], 512), min(self.shape[2], 512)]
@@ -110,8 +113,6 @@ class HDF5VolumeTarget(FileSystemTarget):
         # to avoid errors in python glue code
         start = list(map(long,start))
         try:
-            if not os.path.exists(self.path):
-                self.makedirs()
             self.array.writeSubarray(start, data)
         except AttributeError:
             raise RuntimeError("You must call open once before calling read or write!")

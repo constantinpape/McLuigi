@@ -68,7 +68,7 @@ class RegionNodeFeatures(luigi.Task):
 
         out = self.output()
         out_shape = [nNodes, nFeats]
-        chunk_shape = [5000, out_shape[1]]
+        chunk_shape = [min(5000,nNodes), out_shape[1]]
         out.open(out_shape, chunk_shape)
 
         # get region statistics with the vigra region feature extractor for a single slice
@@ -96,7 +96,6 @@ class RegionNodeFeatures(luigi.Task):
             startOut = [ long(minNode) ,0L]
             assert regionStatisticsSlice.shape[0] == maxNode + 1 - minNode
             out.write(startOut, regionStatisticsSlice)
-
             return True
 
         # sequential for debugging
