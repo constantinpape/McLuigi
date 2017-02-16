@@ -20,9 +20,7 @@ config_logger(workflow_logger)
 
 # read the feature configuration from PipelineParams.FeatureConfigFile
 # and return the corresponding feature tasks
-def get_local_features(xyOnly = False, zOnly = False):
-
-    assert not (xyOnly and zOnly)
+def get_local_features():
 
     # load the paths to input files
     with open(PipelineParameter().InputFile, 'r') as f:
@@ -63,12 +61,12 @@ def get_local_features(xyOnly = False, zOnly = False):
         feature_tasks.append( EdgeTask(input_data[1], seg ) )
         workflow_logger.debug("get_local_features: calculating Edge Features from probability maps: " + input_data[1])
 
-    if "affinitiesXY" in features and not zOnly: # specific XY - features -> we keep only these
+    if "affinitiesXY" in features: # specific XY - features -> we keep only these
         # by convention we assume that the xy - affinity channel is given as 1st input
         feature_tasks.append( EdgeTask(input_data[1], seg, keepOnlyXY = True ) )
         workflow_logger.debug("get_local_features: calculating Edge Features from xy affinity maps: " + input_data[1])
 
-    if "affinitiesZ" in features and not xyOnly: # specific Z - features -> we keep only these
+    if "affinitiesZ" in features: # specific Z - features -> we keep only these
         # by convention we assume that the z - affinity channel is given as 2nd input
         feature_tasks.append( EdgeTask(input_data[2], seg, keepOnlyZ = True ) )
         workflow_logger.debug("get_local_features: calculating Edge Features from z affinity maps: " + input_data[2])
@@ -93,9 +91,7 @@ def get_local_features(xyOnly = False, zOnly = False):
 
 # read the feature configuration from PipelineParams.FeatureConfigFile
 # and return the corresponding feature tasks
-def get_local_features_for_multiinp(xyOnly = False, zOnly = False):
-
-    assert not (xyOnly and zOnly)
+def get_local_features_for_multiinp():
 
     # load the paths to input files
     with open(PipelineParameter().InputFile, 'r') as f:
@@ -143,13 +139,13 @@ def get_local_features_for_multiinp(xyOnly = False, zOnly = False):
             feature_tasks[i].append( EdgeTask(input_data[inp1], segs[i] ) )
             workflow_logger.debug("get_local_features_for_multiinp: calculating Edge Features from probability maps: " + input_data[inp1])
 
-        if "affinitiesXY" in features and not zOnly:
+        if "affinitiesXY" in features:
             assert nInpPerSeg == 3
             # by convention we assume that the xy - affinity channel is given as 1st input
             feature_tasks[i].append( EdgeTask(input_data[inp1], segs[i], keepOnlyXY = True ) )
             workflow_logger.debug("get_local_features_for_multiinp: calculating Edge Features from xy affinity maps: " + input_data[inp1])
 
-        if "affinitiesZ" in features and not xyOnly:
+        if "affinitiesZ" in features:
             assert nInpPerSeg == 3
             # by convention we assume that the z - affinity channel is given as 2nd input
             feature_tasks[i].append( EdgeTask(input_data[inp2], segs[i], keepOnlyZ = True ) )

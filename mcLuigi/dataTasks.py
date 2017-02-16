@@ -192,8 +192,9 @@ class DenseGroundtruth(luigi.Task):
 
         gt = self.input()
         gt.open()
-        # FIXME this is only feasible for small enough data, for larger data we need blockwise connected components
-        gt_labeled = vigra.analysis.labelVolumeWithBackground( gt.read([0,0,0], gt.shape) )
+        # label volume causes problems for cremi...
+        #gt_labeled = vigra.analysis.labelVolumeWithBackground( gt.read([0,0,0], gt.shape) )
+        gt_labeled, _, _ = vigra.analysis.relabelConsecutive( gt.read([0,0,0], gt.shape) )
 
         out = self.output()
         out.open(gt.shape)

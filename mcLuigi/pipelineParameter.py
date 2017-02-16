@@ -23,8 +23,6 @@ class PipelineParameter(object):
         # Input Files
         self.cache = "/tmp/mc_cache"
         self.InputFile = ""
-        # TODO move these parameter inside PParameter too
-        self.EdgeClassifierConfigFile = ""
 
         # flag to switch between pipeline for anisotropic and isotropic (not implemented yet) data
         self.anisotropicPipeline = True
@@ -48,11 +46,12 @@ class PipelineParameter(object):
         # log level
         self.logLevel = logging.INFO
         # enable using seperate classifier for xy - and z - edges
-        self.separateEdgeClassification = False
-        # choose betweem xgb - gradient boostig and sklearn - random forest
-        self.useXGBoost = True
+        self.separateEdgeClassification = True
         # number of chunks that features are split into for out of core probability calculation
         self.nFeatureChunks = 1 # default = 1 -> in core calculation
+        # rf params: number of trees and max depth
+        self.nTrees = 500
+        self.maxDepth = 12
 
         ### multicut and blockwise parameter
         self.multicutVerbose = 0

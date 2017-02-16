@@ -29,7 +29,7 @@ config_logger(workflow_logger)
 class SegmentationWorkflow(luigi.Task):
 
     pathToSeg = luigi.Parameter()
-    pathsToClassifier  = luigi.ListParameter()
+    pathToClassifier  = luigi.Parameter()
     dtype = luigi.Parameter(default = 'uint32')
 
     def requires(self):
@@ -118,7 +118,7 @@ class SegmentationWorkflow(luigi.Task):
 class MulticutSegmentation(SegmentationWorkflow):
 
     def requires(self):
-        return_tasks = { "mc_nodes" : McSolverFusionMoves(MulticutProblem(self.pathToSeg, self.pathsToClassifier) ),
+        return_tasks = { "mc_nodes" : McSolverFusionMoves(MulticutProblem(self.pathToSeg, self.pathToClassifier) ),
                 "rag" : StackedRegionAdjacencyGraph(self.pathToSeg),
                 "seg" : ExternalSegmentation(self.pathToSeg)}
         if PipelineParameter().defectPipeline:
@@ -136,7 +136,7 @@ class BlockwiseMulticutSegmentation(SegmentationWorkflow):
 
     def requires(self):
         return_tasks = {"mc_nodes" : BlockwiseMulticutSolver( self.pathToSeg,
-                                     MulticutProblem(self.pathToSeg, self.pathsToClassifier),
+                                     MulticutProblem(self.pathToSeg, self.pathToClassifier),
                                      self.numberOfLevels ),
                         "rag" : StackedRegionAdjacencyGraph(self.pathToSeg),
                         "seg" : ExternalSegmentation(self.pathToSeg)}

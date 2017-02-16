@@ -344,7 +344,7 @@ class ModifiedRegionFeatures(luigi.Task):
 
             # finally, calculate the region features for the skip edges
             # features based on region statistics
-            n_stat_feats = 17 # magic_nu...
+            n_stat_feats = 16 # magic_nu...
             region_stats = node_feats.read([0,0],[node_feats.shape[0],n_stat_feats])
 
             fU = region_stats[skip_edges[:,0],:]
@@ -363,7 +363,7 @@ class ModifiedRegionFeatures(luigi.Task):
             skip_center_feats = np.c_[(sU - sV)**2, skip_ranges]
 
             assert skip_center_feats.shape[0] == skip_stat_feats.shape[0]
-            assert skip_center_feats.shape[1] == out.shape[1] - skip_stat_feats.shape[1]
+            assert skip_center_feats.shape[1] == out.shape[1] - skip_stat_feats.shape[1], str(skip_center_feats.shape[1]) + " , "  + str(out.shape[1] - skip_stat_feats.shape[1])
             out.write([total_copied,skip_stat_feats.shape[1]], skip_center_feats)
 
         # we don't have any skip edges, so we only add an extra column, corresponding to the skip range (0 / 1)
