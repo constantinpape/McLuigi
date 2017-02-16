@@ -14,6 +14,7 @@ from tools import config_logger, run_decorator
 import logging
 
 import numpy as np
+import vigra
 import nifty
 import os
 import time
@@ -87,13 +88,17 @@ class EdgeClassifier(object):
         if cf_config['verbose']:
             verbose = 2
         # TODO use cf_config.get(key, default) instead of cf_config[key] with sensible defaults
-        self.cf = RandomForestClassifier(n_jobs = cf_config['sklearnNJobs'],
-            n_estimators     = cf_config['sklearnNtrees'],
-            verbose          = verbose,
-            max_depth        = cf_config['sklearnMaxDepth'],
-            min_samples_leaf = cf_config['sklearnMinSamplesLeaf'],
-            bootstrap        = cf_config['sklearnBootstrap'])
-        self.cf.fit(x, y)
+        #self.cf = RandomForestClassifier(n_jobs = cf_config['sklearnNJobs'],
+        #    n_estimators     = cf_config['sklearnNtrees'],
+        #    verbose          = verbose,
+        #    max_depth        = cf_config['sklearnMaxDepth'],
+        #    min_samples_leaf = cf_config['sklearnMinSamplesLeaf'],
+        #    bootstrap        = cf_config['sklearnBootstrap'])
+        #self.cf.fit(x, y)
+        self.cf = vigra.learning.RandomForest3(x.astype('float32'), y.astype('uint32'),
+            n_threads = PipelineParameter().nThreads,
+            treeCount = cf_config['sklearnNtrees'],
+            max_depth  = cf_config['sklearnMaxDepth'])
 
     def predict(self, x):
         assert self.cf is not None, "Need to load or train a classifier before predicting."
@@ -107,13 +112,21 @@ class EdgeClassifier(object):
         return self.cf.predict(xgb_mat)[:,1]
 
     def _predict_rf(self, x):
-        return self.cf.predict_proba(x)[:,1]
+        #return self.cf.predict_proba(x)[:,1]
+        pred = self.cf.predictProbabilities(x,n_threads = PipelineParameter().nThreads )[:,1]
+        #FIXME vigra rf3 produces some nans, need to fix this
+        pred /= self.cf.treeCount()
+        pred[np.isnan(pred)] = 0.5
+        assert not np.isnan(pred).any()
+        return pred
 
-    def load(self, path):
+    def load(self, path, key = ''):
         assert os.path.exists(path), path
-        # TODO assert that we have the right type - xgb vs rf
-        with open(path) as f:
-            self.cf = pickle.load(f)
+        if self.use_xgb:
+            with open(path) as f:
+                self.cf = pickle.load(f)
+        else:
+            self.cf = vigra.learning.RandomForest3(str(path), key)
 
     def get_classifier(self):
         assert self.cf is not None, "Need to load or train a classifier first."
@@ -170,7 +183,7 @@ class EdgeProbabilities(luigi.Task):
 
     def _predict_joint_in_core(self, rag, feature_tasks, out):
         classifier = EdgeClassifier()
-        classifier.load(self.pathsToClassifier[0])
+        classifier.load(self.pathsToClassifier[0], 'data')
         features = np.concatenate( [feat.read([0,0],feat.shape) for feat in feature_tasks], axis = 1 )
         for feat in feature_tasks:
             feat.close()
@@ -534,7 +547,8 @@ class LearnClassifierFromGt(luigi.Task):
         assert features.shape[0] == gt.shape[0], str(features.shape[0]) + " , " + str(gt.shape[0])
         classifier = EdgeClassifier()
         classifier.train(features, gt)
-        self.output().write(classifier.get_classifier())
+        #self.output().write(classifier.get_classifier())
+        classifier.get_classifier().writeHDF5(str(self.output().path), 'data')
 
 
     def _learn_classifier_from_multiple_inputs_xy(self, rag, gt, feature_tasks):
@@ -626,5 +640,6 @@ class LearnClassifierFromGt(luigi.Task):
             edgetype_str = "all"
         defect_str = "modified" if PipelineParameter().defectPipeline else "standard"
         save_path = os.path.join( PipelineParameter().cache,
-            "LearnClassifierFromGt_%s_%s_%s_%s.pkl" % (ninp_str,cf_str,edgetype_str, defect_str) )
-        return PickleTarget(save_path)
+            "LearnClassifierFromGt_%s_%s_%s_%s.h5" % (ninp_str,cf_str,edgetype_str, defect_str) )
+        #return PickleTarget(save_path)
+        return HDF5DataTarget(save_path)
