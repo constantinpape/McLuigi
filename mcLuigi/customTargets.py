@@ -83,7 +83,7 @@ class HDF5VolumeTarget(FileSystemTarget):
             assert shape != None, "HDF5VolumeTarget needs to be initialised with a shape, when creating a new file"
             self.shape = shape
             if chunkShape != None:
-                assert len(chunkShape) == len(self.shape)
+                assert len(chunkShape) == len(self.shape), str(len(chunkShape)) + " , " + str(len(self.shape))
                 for dd in range(len(self.shape)):
                     assert chunkShape[dd] <= self.shape[dd]
                 self.chunkShape = chunkShape

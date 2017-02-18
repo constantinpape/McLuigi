@@ -199,51 +199,57 @@ class ModifiedAdjacency(luigi.Task):
         skip_edges = np.array(skip_edges, dtype = np.uint32)
         skips_before_unique = skip_edges.shape[0]
 
-        print skip_edges.shape
-        # make the skip edges unique, keeping rows (see http://stackoverflow.com/questions/16970982/find-unique-rows-in-numpy-array):
-        skips_view = np.ascontiguousarray(skip_edges).view(np.dtype((np.void, skip_edges.dtype.itemsize * skip_edges.shape[1])))
-        _, idx = np.unique(skips_view, return_index=True)
-        skip_edges = skip_edges[idx]
-        workflow_logger.info("ModifiedAdjacency: Removed %i duplicate skip edges" % (skips_before_unique - skip_edges.shape[0]) )
-
-        skip_ranges = np.array(skip_ranges, dtype = np.uint32)
-        skip_ranges = skip_ranges[idx]
-        skip_starts = np.array(skip_starts, dtype = np.uint32)
-        skip_starts = skip_starts[idx]
-        assert skip_edges.shape[0] == skip_ranges.shape[0]
-        assert skip_starts.shape[0] == skip_ranges.shape[0]
-        workflow_logger.info("ModifiedAdjacency: introduced %i skip edges due to defects" % len(skip_edges) )
-
-        # reorder the skip edges s.t. skip_starts are monotonically increasing
-        sort_indices = np.argsort(skip_starts)
-        skip_edges = skip_edges[sort_indices]
-        skip_ranges = skip_ranges[sort_indices]
-        skip_starts = skip_starts[sort_indices]
-        # make sure that z is monotonically increasing (not strictly!)
-        assert np.all(np.diff(skip_starts.astype(int)) >= 0), "Start index of skip edges must increase monotonically."
-
-        ignore_edges = np.unique(ignore_edges).astype(np.uint32)
-        workflow_logger.info("ModifiedAdjacency: found %i ignore edges due to defects" % len(ignore_edges) )
-
-        # create the modified adjacency
-        modified_adjacency = nifty.graph.UndirectedGraph(int(n_nodes))
-        # insert original remaining edges
-        modified_adjacency.insertEdges(uv_ids)
-        # insert skip edges
+        # TODO need to take care of corner cases when we have delete edges but no skip edges...
         if skip_edges.size:
-            modified_adjacency.insertEdges(skip_edges)
-        n_edges_modified = modified_adjacency.numberOfEdges
-        assert n_edges_modified == rag.numberOfEdges - delete_edges.shape[0] + skip_edges.shape[0], "%i, %i" % (n_edges_modified, rag.numberOfEdges - delete_edges.shape[0] + skip_edges.shape[0])
-        workflow_logger.info("ModifiedAdjacency: Total number of edges in modified adjacency: %i" % n_edges_modified)
+            # make the skip edges unique, keeping rows (see http://stackoverflow.com/questions/16970982/find-unique-rows-in-numpy-array):
+            skips_view = np.ascontiguousarray(skip_edges).view(np.dtype((np.void, skip_edges.dtype.itemsize * skip_edges.shape[1])))
+            _, idx = np.unique(skips_view, return_index=True)
+            skip_edges = skip_edges[idx]
+            workflow_logger.info("ModifiedAdjacency: Removed %i duplicate skip edges" % (skips_before_unique - skip_edges.shape[0]) )
 
-        out = self.output()
-        out.write(modified_adjacency.serialize(), "modified_adjacency")
-        out.write(skip_edges, "skip_edges")
-        out.write(skip_starts, "skip_starts")
-        out.write(skip_ranges, "skip_ranges")
-        out.write(delete_edges, "delete_edges")
-        out.write(ignore_edges, "ignore_edges")
-        out.write(n_edges_modified, "n_edges_modified")
+            skip_ranges = np.array(skip_ranges, dtype = np.uint32)
+            skip_ranges = skip_ranges[idx]
+            skip_starts = np.array(skip_starts, dtype = np.uint32)
+            skip_starts = skip_starts[idx]
+            assert skip_edges.shape[0] == skip_ranges.shape[0]
+            assert skip_starts.shape[0] == skip_ranges.shape[0]
+            workflow_logger.info("ModifiedAdjacency: introduced %i skip edges due to defects" % len(skip_edges) )
+
+            # reorder the skip edges s.t. skip_starts are monotonically increasing
+            sort_indices = np.argsort(skip_starts)
+            skip_edges = skip_edges[sort_indices]
+            skip_ranges = skip_ranges[sort_indices]
+            skip_starts = skip_starts[sort_indices]
+            # make sure that z is monotonically increasing (not strictly!)
+            assert np.all(np.diff(skip_starts.astype(int)) >= 0), "Start index of skip edges must increase monotonically."
+
+            ignore_edges = np.unique(ignore_edges).astype(np.uint32)
+            workflow_logger.info("ModifiedAdjacency: found %i ignore edges due to defects" % len(ignore_edges) )
+
+            # create the modified adjacency
+            modified_adjacency = nifty.graph.UndirectedGraph(int(n_nodes))
+            # insert original remaining edges
+            modified_adjacency.insertEdges(uv_ids)
+            # insert skip edges
+            if skip_edges.size:
+                modified_adjacency.insertEdges(skip_edges)
+            n_edges_modified = modified_adjacency.numberOfEdges
+            assert n_edges_modified == rag.numberOfEdges - delete_edges.shape[0] + skip_edges.shape[0], "%i, %i" % (n_edges_modified, rag.numberOfEdges - delete_edges.shape[0] + skip_edges.shape[0])
+            workflow_logger.info("ModifiedAdjacency: Total number of edges in modified adjacency: %i" % n_edges_modified)
+            modified_adjacency = modified_adjacency.serialize()
+            out = self.output()
+            out.write(True, "has_defects")
+            out.write(modified_adjacency, "modified_adjacency")
+            out.write(skip_edges, "skip_edges")
+            out.write(skip_starts, "skip_starts")
+            out.write(skip_ranges, "skip_ranges")
+            out.write(delete_edges, "delete_edges")
+            out.write(ignore_edges, "ignore_edges")
+            out.write(n_edges_modified, "n_edges_modified")
+
+        else:
+            workflow_logger.info("ModifiedAdjacency: No defects, writing dummy data")
+            self.output().write(False, "has_defects")
 
     def output(self):
         segFile = os.path.split(self.pathToSeg)[1][:-3]
@@ -275,14 +281,24 @@ class ModifiedRegionFeatures(luigi.Task):
         region_feats = inp['region_feats']
         region_feats.open()
 
+        transition_edge = rag.totalNumberOfInSliceEdges
+
         # the modified edge connectivity
         modified_adjacency = inp['modified_adjacency']
+        if not modified_adjacency.read('has_defects'):
+            out = self.output()
+            out_shape = [region_feats.shape[0], region_feats.shape[1] + 1]
+            chunk_shape = [2500,out_shape[1]]
+            out.open(out_shape,chunk_shape)
+            fake_ranges = np.concatenate( [np.zeros(transition_edge), np.ones(rag.numberOfEdges - transition_edge)]).astype('float32')
+            assert fake_ranges.shape[0] == rag.numberOfEdges
+            out.write([0,0], np.c_[region_feats.read([0,0],region_feats.shape), fake_ranges] )
+            return
+
         skip_edges = modified_adjacency.read('skip_edges')
         skip_ranges = modified_adjacency.read('skip_ranges')
         delete_edges = modified_adjacency.read('delete_edges')
         n_edges_modified = modified_adjacency.read('n_edges_modified')
-
-        transition_edge = rag.totalNumberOfInSliceEdges
 
         # modify the features only if we have skip edges
         if skip_edges.size:
@@ -423,6 +439,14 @@ class ModifiedEdgeFeatures(luigi.Task):
 
         # the modified edge connectivity
         modified_adjacency = inp['modified_adjacency']
+        if not modified_adjacency.read('has_defects'):
+            out = self.output()
+            out_shape = edge_feats.shape
+            chunk_shape = [2500,out_shape[1]]
+            out.open(out_shape,chunk_shape)
+            out.write([0,0], edge_feats.read([0,0],edge_feats.shape))
+            return
+
         skip_edges = modified_adjacency.read('skip_edges')
         skip_ranges = modified_adjacency.read('skip_ranges')
         delete_edges = modified_adjacency.read('delete_edges')
@@ -552,6 +576,11 @@ class SkipEdgeLengths(luigi.Task):
         inp = self.input()
         rag = inp['rag'].read()
         mod_adjacency = inp['modified_adjacency']
+
+        if not modified_adjacency.read('has_defects'):
+            self.output().write(np.empty(0), 'data')
+            return
+
         skip_edges = mod_adjacency.read('skip_edges')
         skip_ranges = mod_adjacency.read('skip_ranges')
         skip_starts = mod_adjacency.read('skip_starts')

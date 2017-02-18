@@ -36,6 +36,7 @@ class PipelineParameter(object):
         self.binThreshold = 0 # -> 0 means we don't detect any defects ! This needs to be tuned for every ds !
 
         # feature string
+        # FIXME in the current form z-affnity are toxic for defects!
         #self.features = ["raw","affinitiesXY","affinitiesZ","reg"] # for non-affinity maps replace 'affinitiesXY/Z' with prob
         self.features = ["raw","prob","reg"] # for non-affinity maps replace 'affinitiesXY/Z' with prob
 
