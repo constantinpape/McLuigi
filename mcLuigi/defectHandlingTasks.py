@@ -577,7 +577,7 @@ class SkipEdgeLengths(luigi.Task):
         rag = inp['rag'].read()
         mod_adjacency = inp['modified_adjacency']
 
-        if not modified_adjacency.read('has_defects'):
+        if not mod_adjacency.read('has_defects'):
             self.output().write(np.empty(0), 'data')
             return
 
