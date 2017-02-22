@@ -374,7 +374,7 @@ class BlockwiseSubSolver(luigi.Task):
             if self.level != 0:
                 nodeList = np.unique( global2newNodes[nodeList] )
             workflow_logger.debug("BlockwiseSubSolver: block id %i: Number of nodes %i" % (blockId,nodeList.shape[0]) )
-            inner_edges, outer_edges, subgraph = graph.extractSubgraphFromNodes(nodeList)
+            inner_edges, outer_edges, subgraph = graph.extractSubgraphFromNodes(nodeList.tolist())
             return np.array(inner_edges), np.array(outer_edges), subgraph
 
         blockOverlap = list(self.blockOverlap)
@@ -384,12 +384,14 @@ class BlockwiseSubSolver(luigi.Task):
         # sequential for debugging
         #subProblems = []
         #for blockId in xrange(numberOfBlocks):
-        #    print "Running block:", blockId
-        #    # nifty blocking
+        #    print "Running block:", blockId, "/", numberOfBlocks
+        #    t_block = time.time()
+
         #    block = blocking.getBlockWithHalo(blockId, blockOverlap).outerBlock
         #    blockBegin, blockEnd = block.begin, block.end
         #    workflow_logger.debug( "Block id " + str(blockId) + " start " + str(blockBegin) + " end " + str(blockEnd) )
-        #    subProblems.append( extract_subproblem( blockId, blockBegin, blockEnd ) )
+        #    subBlocks = initialBlocking.getBlockIdsInBoundingBox(blockBegin, blockEnd, initialOverlap)
+        #    subProblems.append( extract_subproblem( blockId, subBlocks ) )
 
         nWorkers = min( numberOfBlocks, PipelineParameter().nThreads )
         #nWorkers = 2

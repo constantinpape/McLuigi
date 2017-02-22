@@ -303,6 +303,7 @@ class EdgeProbabilities(luigi.Task):
 
             print "Features loaded, starting prediction"
             readStart = long(featIndexStart + startType)
+            assert classifier.featureCount() == featuresType.shape[1], "%i , %i" % (classifier.featureCount(), featuresType.shape[1])
             probsSub = classifier.predictProbabilities(featuresType.astype('float32'), n_threads = PipelineParameter().nThreads)[:,1]
             probsSub /= classifier.treeCount()
             probsSub[np.isnan(probsSub)] = 0.5
