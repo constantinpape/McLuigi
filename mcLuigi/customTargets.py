@@ -231,24 +231,28 @@ class StackedRagTarget(FileSystemTarget):
 
     def write(self, rag, labelsPath, labelsKey = "data"):
         self.makedirs()
-        serialization = rag.serialize()
-        vigra.writeHDF5(serialization, self.path, "data")
+        nifty.graph.rag.writeStackedRagToHdf5(rag, self.path)
         vigra.writeHDF5(labelsPath, self.path, "labelsPath")
         vigra.writeHDF5(labelsKey, self.path, "labelsKey")
 
+    # read and deserialize the rag
     def read(self):
         labelsPath = vigra.readHDF5(self.path, "labelsPath")
         labelsKey = vigra.readHDF5(self.path, "labelsKey")
-        serialization = vigra.readHDF5(self.path, "data")
 
         h5_file = nifty.hdf5.openFile(labelsPath)
         labels = nifty.hdf5.Hdf5ArrayUInt32(h5_file, labelsKey)
+        nNodes = vigra.readHDF5(self.path, "numberOfNodes")
 
-        nNodes = serialization[0]
-        rag = nifty.graph.rag.gridRagStacked2DHdf5(labels, nNodes,
-                serialization = serialization)
+        return nifty.graph.rag.readStackedRagFromHdf5(labels, nNodes, self.path)
 
-        return rag
+    # only read sub-parts
+    def readKey(self, key):
+        with h5py.File(self.path,'r') as f:
+            if not key in f.keys():
+                print "The key", key, "is not in", f.keys()
+                raise KeyError("Key not found!")
+        return vigra.readHDF5(self.path, key)
 
     def shape(self):
         return rag.shape
