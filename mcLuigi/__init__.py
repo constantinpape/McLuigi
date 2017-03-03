@@ -7,3 +7,5 @@ from defectDetectionTasks import OversegmentationSliceStatistics, DefectSliceDet
 from defectHandlingTasks import DefectsToNodes, ModifiedAdjacency, ModifiedRegionFeatures, ModifiedEdgeFeatures, SkipEdgeLengths
 from multicutProblemTasks import MulticutProblem
 from tools import config_logger, run_decorator
+
+from blockwiseMulticutTasks import NodesToInitialBlocks

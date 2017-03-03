@@ -6,6 +6,7 @@ import luigi
 from pipelineParameter import PipelineParameter
 from dataTasks import ExternalSegmentation
 from customTargets import HDF5DataTarget
+from defectDetectionTasks import DefectSliceDetection
 
 from tools import config_logger, run_decorator
 
@@ -276,36 +277,36 @@ class NodesToInitialBlocks(luigi.Task):
 
     blockShape   = luigi.ListParameter()
     blockOverlap = luigi.ListParameter()
+    dtype        = luigi.ListParameter('uint32')
 
     def requires(self):
-        return ExternalSegmentation(self.pathToSeg)
+        if PipelineParameter().defectPipeline:
+            return {"seg" : ExternalSegmentation(self.pathToSeg),
+                    "defect_slices" : DefectSliceDetection(self.pathToSeg)}
+        else:
+            return {"seg" : ExternalSegmentation(self.pathToSeg) }
 
     @run_decorator
     def run(self):
 
-        seg = self.input()
+        inp = self.input()
+        seg = inp["seg"]
         seg.open()
 
-        t_extract = time.time()
+        if PipelineParameter().defectPipeline:
+            defectSlices = vigra.readHDF5(inp["defect_slices"].path, 'defect_slices').astype('int64').tolist()
+        else:
+            defectSlices = []
 
         blocking = nifty.tools.blocking( roiBegin = [0L,0L,0L], roiEnd = seg.shape, blockShape = self.blockShape )
         numberOfBlocks = blocking.numberOfBlocks
         blockOverlap = list(self.blockOverlap)
 
-        def nodes_to_block(blockId):
-            block = blocking.getBlockWithHalo(blockId, blockOverlap).outerBlock
-            blockBegin, blockEnd = block.begin, block.end
-            return np.unique( seg.read(blockBegin, blockEnd) )
-
-        #nWorkers = 1
         nWorkers = min( numberOfBlocks, PipelineParameter().nThreads )
+        #nWorkers = 1
+        blockResult = nifty.tools.nodesToBlocksStacked(seg.get(), blocking, blockOverlap, defectSlices, nWorkers)
 
-        with futures.ThreadPoolExecutor(max_workers=nWorkers) as executor:
-            tasks = []
-            for blockId in xrange(numberOfBlocks):
-                tasks.append( executor.submit(nodes_to_block, blockId) )
-            blockResult = np.array([fut.result() for fut in tasks])
-
+        blockResult = [np.array(bRes,dtype=self.dtype) for bRes in blockResult]
         self.output().writeVlen(blockResult)
 
     def output(self):

@@ -248,7 +248,9 @@ class EdgeFeatures(luigi.Task):
 
         out.open(out_shape, chunk_shape)
 
-        edge_features = nifty.graph.rag.accumulateEdgeFeaturesFromFilters(rag, data, out.get(), self.keepOnlyXY, self.keepOnlyZ, PipelineParameter().nThreads)
+        edge_features = nifty.graph.rag.accumulateEdgeFeaturesFromFilters(rag, data, out.get(),
+                #self.keepOnlyXY, self.keepOnlyZ, 1)
+                self.keepOnlyXY, self.keepOnlyZ, PipelineParameter().nThreads)
 
         out.close()
 
