@@ -34,9 +34,9 @@ class RegionNodeFeatures(luigi.Task):
 
     def requires(self):
         return {
-                "Data" : InputData(self.pathToInput),
-                "Seg" : ExternalSegmentation(self.pathToSeg),
-                "Rag" : StackedRegionAdjacencyGraph(self.pathToSeg)
+                "data" : InputData(self.pathToInput),
+                "seg" : ExternalSegmentation(self.pathToSeg),
+                "rag" : StackedRegionAdjacencyGraph(self.pathToSeg)
                 }
 
     @run_decorator
@@ -44,9 +44,8 @@ class RegionNodeFeatures(luigi.Task):
 
         inp = self.input()
 
-        data = inp["Data"]
-        seg  = inp["Seg"]
-        rag  = inp["Rag"].read()
+        data = inp["data"]
+        seg  = inp["seg"]
 
         data.open()
         seg.open()
@@ -55,8 +54,8 @@ class RegionNodeFeatures(luigi.Task):
 
         assert data.shape == seg.shape, str(data.shape) + " , " + str(seg.shape)
 
-        minMaxNodeSlice = rag.minMaxLabelPerSlice().astype('uint32')
-        nNodes = rag.numberOfNodes
+        minMaxNodeSlice = inp['rag'].readKey('minMaxLabelPerSlice').astype('uint32')
+        nNodes = inp['rag'].readKey('numberOfNodes')
         nFeats = 20
 
         # list of the region statistics, that we want to extract
@@ -131,8 +130,8 @@ class RegionFeatures(luigi.Task):
 
     def requires(self):
         # TODO have to rethink this once we include lifted multicut
-        return {"Rag" : StackedRegionAdjacencyGraph(self.pathToSeg),
-                "RegionNodeFeatures" : RegionNodeFeatures(self.pathToInput,self.pathToSeg)}
+        return {"rag" : StackedRegionAdjacencyGraph(self.pathToSeg),
+                "regionNodeFeatures" : RegionNodeFeatures(self.pathToInput,self.pathToSeg)}
 
     @run_decorator
     def run(self):
@@ -140,18 +139,18 @@ class RegionFeatures(luigi.Task):
         import gc
 
         inp = self.input()
-        rag = inp["Rag"].read()
-        nodeFeats = inp["RegionNodeFeatures"]
+        nodeFeats = inp["regionNodeFeatures"]
         nodeFeats.open()
 
-        uvIds = rag.uvIds()
+        uvIds = inp['rag'].readKey('uvIds')
 
         regionStatistics = nodeFeats.read([0,0],[nodeFeats.shape[0],16])
 
         fU = regionStatistics[uvIds[:,0],:]
         fV = regionStatistics[uvIds[:,1],:]
 
-        assert fU.shape[0] == rag.numberOfEdges
+        nEdges = inp['rag'].readKey('numberOfEdges')
+        assert fU.shape[0] == nEdges
 
         # we actively delete stuff we don't need to free memory
         # because this may become memory consuming for lifted edges
@@ -161,16 +160,13 @@ class RegionFeatures(luigi.Task):
 
         nFeats = 4*16 + 4
         out = self.output()
-        out_shape = [rag.numberOfEdges, nFeats]
+        out_shape = [nEdges, nFeats]
         chunk_shape = [2500, out_shape[1]]
         out.open(out_shape, chunk_shape)
 
-        combine = [
-                lambda x,y : np.minimum(x,y),
-                lambda x,y : np.maximum(x,y),
-                lambda x,y : np.abs(x - y),
-                lambda x,y : x + y
-                ]
+        def absdiff(x,y):
+            return np.abs(x - y)
+        combine = (np.minimum, np.maximum, absdiff, np.add)
 
         offset = 0
         for i, func in enumerate(combine):
@@ -190,7 +186,6 @@ class RegionFeatures(luigi.Task):
         sU = regionCenters[uvIds[:,0],:]
         sV = regionCenters[uvIds[:,1],:]
         start = [0,offset]
-        #feat = (sU - sV)**2
         out.write(start, (sU - sV)**2 )
 
         #sU = sV.resize((1,1))

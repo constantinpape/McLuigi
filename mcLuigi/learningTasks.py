@@ -41,7 +41,6 @@ class EdgeProbabilities(luigi.Task):
     def run(self):
         assert os.path.exists(self.pathToClassifier), self.pathToClassifier
         inp = self.input()
-        rag = inp["rag"].read()
         feature_tasks = inp["features"]
         for feat in feature_tasks:
             feat.open()
@@ -51,7 +50,7 @@ class EdgeProbabilities(luigi.Task):
             assert nEdges > 0, str(nEdges)
             workflow_logger.info("EdgeProbabilities: for defect corrected edges. Total number of edges: %i" % nEdges)
         else:
-            nEdges = rag.numberOfEdges
+            nEdges = inp['rag'].readKey('numberOfEdges')
             workflow_logger.info("EdgeProbabilities: Total number of edges: %i" % nEdges)
 
         out  = self.output()
@@ -59,28 +58,29 @@ class EdgeProbabilities(luigi.Task):
 
         if PipelineParameter().separateEdgeClassification:
             workflow_logger.info("EdgeProbabilities: predicting xy - and z - edges separately.")
-            self._predict_separate(rag, feature_tasks, out)
+            self._predict_separate(feature_tasks, out)
         else:
             if PipelineParameter().nFeatureChunks > 1:
                 workflow_logger.info("EdgeProbabilities: predicting xy - and z - edges jointly out of core.")
-                self._predict_joint_out_of_core(rag, feature_tasks, out)
+                self._predict_joint_out_of_core(feature_tasks, out)
             else:
                 workflow_logger.info("EdgeProbabilities: predicting xy - and z - edges jointly in core.")
-                self._predict_joint_in_core(rag, feature_tasks, out)
+                self._predict_joint_in_core(feature_tasks, out)
 
         for feat in feature_tasks:
             feat.close()
         out.close()
 
 
-    def _predict_joint_in_core(self, rag, feature_tasks, out):
+    def _predict_joint_in_core(self, feature_tasks, out):
+        inp = self.input()
         classifier = vigra.learning.RandomForest3(str(self.pathToClassifier), 'rf_joined')
         if PipelineParameter.defectPipeline():
             mod_adjacency = self.input()['modified_adjacency']
-            feat_end = rag.numberOfEdges - mod_adjacency.read('delete_edges').shape[0]
+            feat_end = inp['rag'].readKey('numberOfEdges') - mod_adjacency.read('delete_edges').shape[0]
             n_edges = mod_adjacency.read('n_edges_modified')
         else:
-            feat_end = rag.numberOfEdges
+            feat_end = inp['rag'].readKey('numberOfEdges')
 
         features = np.concatenate( [feat.read([0,0],[feat_end,feat.shape[1]]) for feat in feature_tasks], axis = 1 )
         probs = classifier.predictProbabilities(features.astype('float32'), n_threads = PipelineParameter().nThreads)[:,1]
@@ -98,9 +98,10 @@ class EdgeProbabilities(luigi.Task):
             out.write([feat_end],probs)
 
 
-    def _predict_joint_out_of_core(self, rag, feature_tasks, out):
+    def _predict_joint_out_of_core(self, feature_tasks, out):
+        inp = self.input()
         classifier = vigra.learning.RandomForest3(str(self.pathToClassifier), 'rf_joined')
-        nEdges = rag.numberOfEdges - mod_adjacency.read('delete_edges').shape[0] if PipelineParameter().defectPipeline else rag.numberOfEdges
+        nEdges = inp['rag'].readKey('numberOfEdges') - mod_adjacency.read('delete_edges').shape[0] if PipelineParameter().defectPipeline else inp['rag'].readKey('numberOfEdges')
 
         nSubFeats = PipelineParameter().nFeatureChunks
         assert nSubFeats > 1, nSubFeats
@@ -129,18 +130,18 @@ class EdgeProbabilities(luigi.Task):
             out.write([feat_end],probs)
 
 
-    def _predict_separate(self, rag, feature_tasks, out):
+    def _predict_separate(self, feature_tasks, out):
 
         inp = self.input()
         if PipelineParameter().defectPipeline:
             nEdges = inp["modified_adjacency"].read("n_edges_modified")
             assert nEdges > 0
-            nXYEdges = rag.totalNumberOfInSliceEdges
+            nXYEdges = inp['rag'].readKey('totalNumberOfInSliceEdges')
             nZEdgesTotal = nEdges - nXYEdges
             nSkipEdges = inp["modified_adjacency"].read("skip_edges").shape[0]
         else:
-            nEdges   = rag.numberOfEdges
-            nXYEdges = rag.totalNumberOfInSliceEdges
+            nEdges   = inp['rag'].readKey('numberOfEdges')
+            nXYEdges = inp['rag'].readKey('totalNumberOfInSliceEdges')
             nZEdgesTotal  = nEdges - nXYEdges
 
         nFeatsXY = 0
@@ -417,7 +418,6 @@ class LearnClassifierFromGt(luigi.Task):
                 feat.close()
 
     def _learn_classifier_from_single_input(self, rag, gt, feature_tasks):
-        rag = rag.read()
         gt  = gt.read()
         inp = self.input()
 
@@ -426,12 +426,12 @@ class LearnClassifierFromGt(luigi.Task):
             # total number of edges
             nEdges = inp["modified_adjacency"][0].read("n_edges_modified")
             # starting index for z edges
-            transitionEdge = rag.totalNumberOfInSliceEdges
+            transitionEdge = rag.readKey('totalNumberOfInSliceEdges')
             # starting index for skip edges
-            skipTransition = rag.numberOfEdges - inp["modified_adjacency"][0].read("delete_edges").shape[0]
+            skipTransition = rag.readKey('numberOfEdges') - inp["modified_adjacency"][0].read("delete_edges").shape[0]
         else:
-            nEdges = rag.numberOfEdges
-            transitionEdge = rag.totalNumberOfInSliceEdges
+            nEdges = rag.readKey('numberOfEdges')
+            transitionEdge = rag.readKey('totalNumberOfInSliceEdges')
             skipTransition = nEdges
 
         if PipelineParameter().separateEdgeClassification:
@@ -542,17 +542,17 @@ class LearnClassifierFromGt(luigi.Task):
         for i in xrange(len(gt)):
             feat_tasks_i = feature_tasks[i]
             gt_i = gt[i].read()
-            rag_i = rag[i].read()
+            rag_i = rag[i]
 
             # correct for defect pipeline here
             if PipelineParameter().defectPipeline:
                 if inp["modified_adjacency"][i].read("has_defects"):
                     nEdges = inp["modified_adjacency"][i].read("n_edges_modified")
                 else:
-                    nEdges = rag_i.numberOfEdges
+                    nEdges = rag_i.readKey('numberOfEdges')
             else:
-                nEdges = rag_i.numberOfEdges
-            transitionEdge = rag_i.totalNumberOfInSliceEdges
+                nEdges = rag_i.readKey('numberOfEdges')
+            transitionEdge = rag_i.readKey('totalNumberOfInSliceEdges')
 
             gt_i = gt_i[:transitionEdge]
 
@@ -584,20 +584,20 @@ class LearnClassifierFromGt(luigi.Task):
         for i in xrange(len(gt)):
             feat_tasks_i = feature_tasks[i]
             gt_i = gt[i].read()
-            rag_i = rag[i].read()
+            rag_i = rag[i]
 
             # if we learn with defects, we only keep the z edges that are not skip edges
             if PipelineParameter().defectPipeline:
                 mod_i = self.input()["modified_adjacency"][i]
                 if mod_i.read("has_defects"):
                     nEdges = mod_i.read("n_edges_modified")
-                    skipTransition = rag_i.numberOfEdges - mod_i.read("delete_edges").shape[0]
+                    skipTransition = rag_i.readKey('numberOfEdges') - mod_i.read("delete_edges").shape[0]
                 else:
-                    nEdges = rag_i.numberOfEdges
-                    skipTransition = rag_i.numberOfEdges
+                    nEdges = rag_i.readKey('numberOfEdges')
+                    skipTransition = rag_i.readKey('numberOfEdges')
             else:
-                nEdges = rag_i.numberOfEdges
-            transitionEdge = rag_i.totalNumberOfInSliceEdges
+                nEdges = rag_i.readKey('numberOfEdges')
+            transitionEdge = rag_i.readKey('totalNumberOfInSliceEdges')
 
             gt_i = gt_i[transitionEdge:skipTransition] if PipelineParameter().defectPipeline else gt_i[transitionEdge:]
 
@@ -631,14 +631,15 @@ class LearnClassifierFromGt(luigi.Task):
         gts = []
         for i in xrange(len(gt)):
 
+            rag_i = rag[i]
             if PipelineParameter().defectPipeline:
                 if self.input()["modified_adjacency"][i].read("has_defects"):
-                    skipTransition = rag[i].numberOfEdges - self.input()["modified_adjacency"][i].read("delete_edges").shape[0]
+                    skipTransition = rag_i.readKey('numberOfEdges') - self.input()["modified_adjacency"][i].read("delete_edges").shape[0]
                 else:
-                    skipTransition = rag_i.numberOfEdges
+                    skipTransition = rag_i.readKey('numberOfEdges')
 
             feat_tasks_i = feature_tasks[i]
-            feat_end = skipTransition if PipelineParameter().defectPipeline else rag.numberOfEdges
+            feat_end = skipTransition if PipelineParameter().defectPipeline else rag_i.readKey('numberOfEdges')
             features.append(np.concatenate( [feat.read([0,0], [feat_end,feat.shape[1]]) for feat in feat_tasks_i], axis = 1 ))
             gts.append(gt[i].read())
 
@@ -659,7 +660,7 @@ class LearnClassifierFromGt(luigi.Task):
         for i in xrange(len(gt)):
             feat_tasks_i = feature_tasks[i]
             gt_i = gt[i].read()
-            rag_i = rag[i].read()
+            rag_i = rag[i]
 
             # if we learn with defects, we only keep the z edges that are not skip edges
             mod_i = self.input()["modified_adjacency"][i]
@@ -667,8 +668,8 @@ class LearnClassifierFromGt(luigi.Task):
                 continue
 
             nEdges = mod_i.read("n_edges_modified")
-            skipTransition = rag_i.numberOfEdges - mod_i.read("delete_edges").shape[0]
-            transitionEdge = rag_i.totalNumberOfInSliceEdges
+            skipTransition = rag_i.readKey('numberOfEdges') - mod_i.read("delete_edges").shape[0]
+            transitionEdge = rag_i.readKey('totalNumberOfInSliceEdges')
 
             gt_i = gt_i[skipTransition:]
 

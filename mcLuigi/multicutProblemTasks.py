@@ -47,7 +47,6 @@ class MulticutProblem(luigi.Task):
     def run(self):
 
         inp = self.input()
-        rag = inp["rag"].read()
 
         edge_cost_file = inp["edge_probabilities"]
         edge_cost_file.open()
@@ -59,15 +58,17 @@ class MulticutProblem(luigi.Task):
 
         if PipelineParameter().defectPipeline:
             workflow_logger.info("MulticutProblem: computing MulticutProblem for defect correction pipeline.")
-            self._modified_multicut_proplem(rag, edge_costs)
+            self._modified_multicut_proplem(edge_costs)
         else:
             workflow_logger.info("MulticutProblem: computing MulticutProblem for standard pipeline.")
-            self._standard_multicut_problem(rag, edge_costs)
+            self._standard_multicut_problem(edge_costs)
 
         edge_cost_file.close()
 
 
-    def _probabilities_to_costs(self, rag, edge_costs):
+    def _probabilities_to_costs(self, edge_costs):
+
+        inp = self.input()
 
         # scale the probabilities
         # this is pretty arbitrary, it used to be 1. / n_tress, but this does not make that much sense for sklearn impl
@@ -88,7 +89,7 @@ class MulticutProblem(luigi.Task):
         weighting_scheme = PipelineParameter().multicutWeightingScheme
         weight           = PipelineParameter().multicutWeight
 
-        edgeLens = rag.edgeLengths()
+        edgeLens = inp['rag'].readKey('edgeLengths')
         if PipelineParameter().defectPipeline:
             skipLens = self.input()["skip_edge_lengths"].read()
             delete_edges = self.input()["modified_adjacency"].read("delete_edges")
@@ -100,7 +101,7 @@ class MulticutProblem(luigi.Task):
         if weighting_scheme == "z":
             workflow_logger.info("MulticutProblem: weighting edge costs with scheme z and weight " + str(weight) )
 
-            edgeTransition = rag.totalNumberOfInSliceEdges
+            edgeTransition = inp['rag'].readKey('totalNumberOfInSliceEdges')
 
             z_max = float( np.max( edgeLens[edgeTransition:] ) )
             # we only weight the z edges !
@@ -110,7 +111,7 @@ class MulticutProblem(luigi.Task):
         elif weighting_scheme == "xyz":
             workflow_logger.info("MulticutProblem: weighting edge costs with scheme xyz and weight " + str(weight) )
 
-            edgeTransition = rag.totalNumberOfInSliceEdges
+            edgeTransition = inp['rag'].readKey('totalNumberOfInSliceEdges')
 
             z_max = float( np.max( edgeLens[edgeTransition:] ) )
             xy_max = float( np.max( edgeLens[:edgeTransition] ) )
@@ -138,7 +139,9 @@ class MulticutProblem(luigi.Task):
         return edge_costs
 
 
-    def _modified_multicut_proplem(self, rag, edge_costs):
+    def _modified_multicut_proplem(self, edge_costs):
+
+        inp = self.input()
 
         # get the plain graph for the multicut problem, modified for
         inp = self.input()
@@ -147,7 +150,7 @@ class MulticutProblem(luigi.Task):
         g.deserialize(modified_adjacency.read('modified_adjacency'))
 
         # transform edge costs to probabilities
-        edge_costs = self._probabilities_to_costs(rag, edge_costs)
+        edge_costs = self._probabilities_to_costs(edge_costs)
 
         # modify the edges costs by setting the ignore edges to be maximally repulsive
         ignore_edges = modified_adjacency.read('ignore_edges')
@@ -171,17 +174,19 @@ class MulticutProblem(luigi.Task):
         out.write( g.serialize(), 'graph' )
 
 
-    def _standard_multicut_problem(self, rag, edge_costs):
+    def _standard_multicut_problem(self, edge_costs):
+
+        inp = self.input()
 
         # construct the plain graph for the multicut problem
         uv_ids = rag.uvIds()
         n_vars = uv_ids.max() + 1
-        assert n_vars == rag.numberOfNodes
+        assert n_vars == inp['rag'].readKey('numberOfNodes')
         g = nifty.graph.UndirectedGraph(int(n_vars))
         g.insertEdges(uv_ids)
 
         # transform edge costs to probabilities
-        edge_costs = self._probabilities_to_costs(rag, edge_costs)
+        edge_costs = self._probabilities_to_costs(edge_costs)
 
         assert edge_costs.shape[0] == uv_ids.shape[0]
         assert np.isfinite( edge_costs.min() ), str(edge_costs.min())

@@ -281,7 +281,8 @@ class ModifiedRegionFeatures(luigi.Task):
         region_feats = inp['region_feats']
         region_feats.open()
 
-        transition_edge = rag.totalNumberOfInSliceEdges
+        transition_edge = inp['rag'].readKey('totalNumberOfInSliceEdges')
+        nEdges = inp['rag'].readKey('numberOfEdges')
 
         # the modified edge connectivity
         modified_adjacency = inp['modified_adjacency']
@@ -290,8 +291,8 @@ class ModifiedRegionFeatures(luigi.Task):
             out_shape = [region_feats.shape[0], region_feats.shape[1] + 1]
             chunk_shape = [2500,out_shape[1]]
             out.open(out_shape,chunk_shape)
-            fake_ranges = np.concatenate( [np.zeros(transition_edge), np.ones(rag.numberOfEdges - transition_edge)]).astype('float32')
-            assert fake_ranges.shape[0] == rag.numberOfEdges
+            fake_ranges = np.concatenate( [np.zeros(transition_edge), np.ones(nEdges - transition_edge)]).astype('float32')
+            assert fake_ranges.shape[0] == nEdges
             out.write([0,0], np.c_[region_feats.read([0,0],region_feats.shape), fake_ranges] )
             return
 
