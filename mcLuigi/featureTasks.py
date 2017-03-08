@@ -128,51 +128,71 @@ class RegionFeatures(luigi.Task):
     pathToInput = luigi.Parameter()
     pathToSeg   = luigi.Parameter()
 
+    # TODO have to rethink this if we include lifted multicut
     def requires(self):
-        # TODO have to rethink this once we include lifted multicut
-        return {"rag" : StackedRegionAdjacencyGraph(self.pathToSeg),
-                "regionNodeFeatures" : RegionNodeFeatures(self.pathToInput,self.pathToSeg)}
+        required_tasks = {"rag" : StackedRegionAdjacencyGraph(self.pathToSeg),
+                "node_feats" : RegionNodeFeatures(self.pathToInput,self.pathToSeg)}
+        if PipelineParameter().defectPipeline:
+            required_tasks['modified_adjacency'] = ModifiedAdjacency(self.pathToSeg)
+        return required_tasks
 
     @run_decorator
     def run(self):
 
-        import gc
-
+        print "You better run better run run"
         inp = self.input()
-        nodeFeats = inp["regionNodeFeatures"]
-        nodeFeats.open()
-
-        uvIds = inp['rag'].readKey('uvIds')
-
-        regionStatistics = nodeFeats.read([0,0],[nodeFeats.shape[0],16])
-
-        fU = regionStatistics[uvIds[:,0],:]
-        fV = regionStatistics[uvIds[:,1],:]
-
-        nEdges = inp['rag'].readKey('numberOfEdges')
-        assert fU.shape[0] == nEdges
-
-        # we actively delete stuff we don't need to free memory
-        # because this may become memory consuming for lifted edges
-        regionStatistics.resize((1,1))
-        del regionStatistics
-        gc.collect()
-
-        nFeats = 4*16 + 4
         out = self.output()
+        nodeFeatsFile = inp["node_feats"]
+        nodeFeatsFile.open()
+        nodeFeats = nodeFeatsFile.read([0,0], nodeFeatsFile.shape())
+
+        if PipelineParameter().defectPipeline:
+            modified_adjacency = inp['modified_adjacency']
+            if modified_adjacency.read('has_defects'):
+                self._compute_modified_feats(nodeFeats, inp, out)
+            else:
+                self._compute_standard_feats(nodeFeats, inp, out)
+        else:
+            self._compute_standard_feats(nodeFeats, inp, out)
+
+        nodeFeatsFile.close()
+        out.close()
+
+
+    # TODO speed up
+    def _compute_feats_from_uvs(self,
+            nodeFeats,
+            uvIds,
+            key,
+            out,
+            skipRanges = None):
+        import gc
+        print key
+
+        nEdges = uvIds.shape[0]
+        # magic 16 = number of regionStatistics that are combined by min, max, sum and absdiff
+        nStatFeats = 16
+        stats = nodeFeats[:,:nStatFeats]
+
+        fU = stats[uvIds[:,0],:]
+        fV = stats[uvIds[:,1],:]
+
+        nFeats = 4*nStatFeats + 4
+        if skipRanges != None:
+            nFeats += 1
         out_shape = [nEdges, nFeats]
         chunk_shape = [2500, out_shape[1]]
-        out.open(out_shape, chunk_shape)
+        out.open(out_shape, chunk_shape, key)
 
         def absdiff(x,y):
-            return np.abs(x - y)
+            return np.abs( np.subtract(x,y) )
         combine = (np.minimum, np.maximum, absdiff, np.add)
 
         offset = 0
         for i, func in enumerate(combine):
             print "Combining", i
             start = [0,offset]
-            out.write( start, func(fU,fV) )
+            out.write( start, func(fU,fV), key)
             offset += 16
 
         fU = fU.resize((1,1))
@@ -181,26 +201,81 @@ class RegionFeatures(luigi.Task):
         del fV
         gc.collect()
 
-        regionCenters = nodeFeats.read([0,16],[nodeFeats.shape[0],nodeFeats.shape[1]])
+        # center features that are combined by quadratic euclidean distance
+        stats = nodeFeats[:,16:]
 
-        sU = regionCenters[uvIds[:,0],:]
-        sV = regionCenters[uvIds[:,1],:]
+        sU = stats[uvIds[:,0],:]
+        sV = stats[uvIds[:,1],:]
         start = [0,offset]
-        out.write(start, (sU - sV)**2 )
+        out.write(start, (sU - sV)**2, key)
 
-        #sU = sV.resize((1,1))
-        #sV = sV.resize((1,1))
-        #del sU
-        #del sV
-        #gc.collect()
+        if skipRanges != None:
+            assert skipRanges.shape == (nEdges,)
+            out.write([0,nFeats-1], skipRanges, key)
 
-        out.close()
+
+    def _compute_standard_feats(self, nodeFeats, inp, out):
+
+        rag = inp['rag']
+        uvIds = rag.readKey('uvIds')
+        transitionEdge = rag.readKey('totalNumberOfInSliceEdges')
+
+        # xy-feature
+        self._compute_feats_from_uvs(nodeFeats, uvIds[:transitionEdge], "features_xy", out)
+        # z-feature
+        self._compute_feats_from_uvs(nodeFeats, uvIds[transitionEdge:], "features_z", out)
+
+
+    # calculate and insert region features for the skip_edges
+    # and delete the delete_edges
+    def _compute_modified_feats(self, nodeFeats, inp, out):
+
+        rag = inp['rag']
+        uvIds = rag.readKey('uvIds')
+        transition_edge = rag.readKey('totalNumberOfInSliceEdges')
+
+        # compute the standard xy-features with additional ranges
+        self._compute_feats_from_uvs( nodeFeats,
+                uvIds[:transitionEdge],
+                'features_xy',
+                out,
+                np.zeros(transition_edge, dtype = 'float32') )
+
+        # compute the z-features with proper edges deleted from uv-ids
+        delete_edges = modified_adjacency.read('delete_edges')
+        uvsZ = uvIds[transition_edge:]
+        if delete_edges.size:
+            assert delete_edges.min() >= transition_edge
+            delete_edges -= transitionEdge
+            uvsZ = np.delete(uvsZ, delete_edges, axis = 0)
+        self._compute_feats_from_uvs( nodeFeats,
+                uvsZ,
+                'features_z',
+                out,
+                np.ones( uvsZ.shape[0], dtype = 'float32') )
+
+        skip_edges = modified_adjacency.read('skip_edges')
+        skip_ranges = modified_adjacency.read('skip_ranges')
+        assert skip_ranges.shape[0] == skip_edges.shape[0]
+
+        # if we have skip edges, compute features for them
+        if skip_edges.size:
+            self._compute_feats_from_uvs(nodeFeats,
+                    skip_edges,
+                    'features_skip',
+                    out,
+                    skip_ranges)
 
 
     def output(self):
         segFile = os.path.split(self.pathToSeg)[1][:-3]
-        save_path = os.path.join( PipelineParameter().cache, "RegionFeatures_%s.h5" % (segFile,) )
+        save_path = os.path.join( PipelineParameter().cache, "RegionFeatures_" )
+        if PipelineParameter().defectPipeline:
+            save_path += "modified_%s.h5" % segFile
+        else:
+            save_path += "standard_%s.h5" % segFile
         return HDF5VolumeTarget( save_path, 'float32' )
+
 
 
 class EdgeFeatures(luigi.Task):

@@ -2,7 +2,7 @@
 # Selecting appropriate feature tasks for several high-level pipeline options
 
 from featureTasks import EdgeFeatures, RegionFeatures
-from defectHandlingTasks import ModifiedEdgeFeatures, ModifiedRegionFeatures
+from defectHandlingTasks import ModifiedEdgeFeatures
 from pipelineParameter import PipelineParameter
 from tools import config_logger
 
@@ -27,11 +27,12 @@ def get_local_features():
         inputs = json.load(f)
 
     # choose the appropriate feature tasks (normal vs. defect handling) <- pipelineParams.defectPipeline
-    # TODO (anisotropic vs. isotropic) <- pipelineParams.anisotropicPipeline
+    # TODO (anisotropic vs. isotropic) <- pipelineParams.anisotropicPipeline -> also move to feature tasks!
+    # TODO TODO this becomes obsolete once modified features is encapsulated in the standard feature tasks
     if PipelineParameter().defectPipeline:
         workflow_logger.debug("get_local_features: using tasks modified for defect handling")
         EdgeTask   = ModifiedEdgeFeatures
-        RegionTask = ModifiedRegionFeatures
+        RegionTask = RegionFeatures
     else:
         workflow_logger.debug("get_local_features: using standard tasks")
         EdgeTask   = EdgeFeatures

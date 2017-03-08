@@ -30,104 +30,118 @@ class HDF5VolumeTarget(FileSystemTarget):
             except OSError:
                 pass
 
-    def __init__(self, path, dtype, key = "data", compression = -1):
+    def __init__(self, path, dtype, compression = -1):
         super(HDF5VolumeTarget, self).__init__(path)
-        self.key = key
-        self.dtype = dtype
-        self.shape = None
-        self.chunkShape = None
         self.h5_file = None
+        self.dtype = dtype
         self.compression = compression
+        self.arrays = {}
+        self.shapes = {}
+        self.chunk_shapes = {}
 
+    def open(self, shape = None, chunkShape = None, key = 'data'):
 
-    def open(self, shape = None, chunkShape = None):
+        # check if this file is already open
+        if self.h5_file == None:
+            print "Opening file"
+            # open an existing hdf5 file
+            if os.path.exists(self.path):
+                print "Existing File"
+                self.h5_file = nifty.hdf5.openFile(self.path)
+            # create a new file
+            else:
+                print "New File"
+                self.makedirs()
+                self.h5_file = nifty.hdf5.createFile(self.path)#, cacheSettings)
 
-        # FIXME hacked in dirty for sample D -> expose this somehow!
-        # TODO alternatively disable the chunk by setting it to zero as we don't really need it!
-        # cache slots: max performance: 100 x number of chunks in cache + prime number, settle to 10 for now
-        # chunks in cache: 4E9 / (512**2 * 4) = 3814 -> next_prime_of (38140)
-        #hashTableSize = 38149L
-        hashTableSize = 7
-        # cache size:  size of cache in bytes -> need aboout 16 gig for 40 threads... -> let's go for 4 gigs now
-        #nBytes  = 2000000000L
-        nBytes  = 4000
-        # cache setting: set to 1 because we always do read / write only
-        rddc = 1.
+        newDataset = True
+        with h5py.File(self.path) as f:
+            if key in f.keys():
+                newDataset = False
 
-        cacheSettings = nifty.hdf5.CacheSettings(hashTableSize,nBytes,rddc)
-
-        # open an existing hdf5 file
-        if os.path.exists(self.path):
-            self.h5_file = nifty.hdf5.openFile(self.path)#, cacheSettings)
+        # open an existing dataset
+        if not newDataset:
+            assert shape == None
+            assert chunkShape == None
             # set the dtype #TODO (could we do this in a more elegant way?)
             if np.dtype(self.dtype) == np.dtype("float32"):
-                self.array = nifty.hdf5.Hdf5ArrayFloat32(self.h5_file, self.key)#, cache_slots, cache_size, cache_setting)
+                self.arrays[key] = nifty.hdf5.Hdf5ArrayFloat32(self.h5_file, key)
             elif np.dtype(self.dtype) == np.dtype("float64"):
-                self.array = nifty.hdf5.Hdf5ArrayFloat64(self.h5_file, self.key)#, cache_slots, cache_size, cache_setting)
+                self.arrays[key] = nifty.hdf5.Hdf5ArrayFloat64(self.h5_file, key)
             elif np.dtype(self.dtype) == np.dtype("uint8"):
-                self.array = nifty.hdf5.Hdf5ArrayUInt8(self.h5_file,   self.key)#, cache_slots, cache_size, cache_setting)
+                self.arrays[key] = nifty.hdf5.Hdf5ArrayUInt8(self.h5_file,   key)
             elif np.dtype(self.dtype) == np.dtype("uint32"):
-                self.array = nifty.hdf5.Hdf5ArrayUInt32(self.h5_file,  self.key)#, cache_slots, cache_size, cache_setting)
+                self.arrays[key] = nifty.hdf5.Hdf5ArrayUInt32(self.h5_file,  key)
             elif np.dtype(self.dtype) == np.dtype("uint64"):
-                self.array = nifty.hdf5.Hdf5ArrayUInt64(self.h5_file,  self.key)#, cache_slots, cache_size, cache_setting)
+                self.arrays[key] = nifty.hdf5.Hdf5ArrayUInt64(self.h5_file,  key)
             else:
                 raise RuntimeError("Datatype %s not supported!" % (str(self.dtype),))
-            self.shape = self.array.shape
-            self.chunkShape = self.array.chunkShape
 
-        # create a new file
+        # create a new dataset
         else:
-            self.makedirs()
-            self.h5_file = nifty.hdf5.createFile(self.path)#, cacheSettings)
             # shape and chunk shape
             assert shape != None, "HDF5VolumeTarget needs to be initialised with a shape, when creating a new file"
-            self.shape = shape
             if chunkShape != None:
-                assert len(chunkShape) == len(self.shape), str(len(chunkShape)) + " , " + str(len(self.shape))
-                for dd in range(len(self.shape)):
-                    assert chunkShape[dd] <= self.shape[dd]
-                self.chunkShape = chunkShape
+                assert len(chunkShape) == len(shape), str(len(chunkShape)) + " , " + str(len(shape))
+                for dd in range(len(shape)):
+                    assert chunkShape[dd] <= shape[dd]
             else:
-                self.chunkShape = [1, min(self.shape[1], 512), min(self.shape[2], 512)]
+                chunkShape = [1, min(shape[1], 512), min(shape[2], 512)]
 
-            # set the accordingly #TODO (could we do this in a more elegant way?)
             if np.dtype(self.dtype) == np.dtype("float32"):
-                self.array = nifty.hdf5.Hdf5ArrayFloat32(self.h5_file, self.key, self.shape, self.chunkShape, compression = self.compression)#, cache_slots, cache_size, cache_setting)
+                self.arrays[key] = nifty.hdf5.Hdf5ArrayFloat32(self.h5_file, key, shape, chunkShape, compression = self.compression)
             elif np.dtype(self.dtype) == np.dtype("float64"):
-                self.array = nifty.hdf5.Hdf5ArrayFloat64(self.h5_file, self.key, self.shape, self.chunkShape, compression = self.compression)#, cache_slots, cache_size, cache_setting)
+                self.arrays[key] = nifty.hdf5.Hdf5ArrayFloat64(self.h5_file, key, shape, chunkShape, compression = self.compression)
             elif np.dtype(self.dtype) == np.dtype("uint8"):
-                self.array = nifty.hdf5.Hdf5ArrayUInt8(self.h5_file,   self.key, self.shape, self.chunkShape, compression = self.compression)#, cache_slots, cache_size, cache_setting)
+                self.arrays[key] = nifty.hdf5.Hdf5ArrayUInt8(self.h5_file,   key, shape, chunkShape, compression = self.compression)
             elif np.dtype(self.dtype) == np.dtype("uint32"):
-                self.array = nifty.hdf5.Hdf5ArrayUInt32(self.h5_file,  self.key, self.shape, self.chunkShape, compression = self.compression)#, cache_slots, cache_size, cache_setting)
+                self.arrays[key] = nifty.hdf5.Hdf5ArrayUInt32(self.h5_file,  key, shape, chunkShape, compression = self.compression)
             elif np.dtype(self.dtype) == np.dtype("uint64"):
-                self.array = nifty.hdf5.Hdf5ArrayUInt64(self.h5_file,  self.key, self.shape, self.chunkShape, compression = self.compression)#, cache_slots, cache_size, cache_setting)
+                self.arrays[key] = nifty.hdf5.Hdf5ArrayUInt64(self.h5_file,  key, shape, chunkShape, compression = self.compression)
             else:
                 raise RuntimeError("Datatype %s not supported!" % (str(self.dtype),))
+        self.shapes[key] = self.arrays[key].shape
+        self.chunk_shapes[key] = self.arrays[key].chunkShape
 
     def close(self):
         assert self.h5_file != None
         nifty.hdf5.closeFile(self.h5_file)
 
-
-    def write(self, start, data):
+    def write(self, start, data, key = 'data'):
+        if not key in self.arrays:
+            raise KeyError("Key does not name a valid dataset in H5 file.")
         # to avoid errors in python glue code
         start = list(map(long,start))
         try:
-            self.array.writeSubarray(start, data)
+            self.arrays[key].writeSubarray(start, data)
         except AttributeError:
             raise RuntimeError("You must call open once before calling read or write!")
 
-    def read(self, start, stop):
+    def read(self, start, stop, key = 'data'):
+        if not key in self.arrays:
+            raise KeyError("Key does not name a valid dataset in H5 file.")
         # to avoid errors in python glue code
         start = list(map(long,start))
         stop = list(map(long,stop))
         try:
-            return self.array.readSubarray(start, stop)
+            return self.arrays[key].readSubarray(start, stop)
         except AttributeError:
             raise RuntimeError("You must call open once before calling read or write!")
 
-    def get(self):
-        return self.array
+    def get(self, key = 'data'):
+        if not key in self.arrays:
+            raise KeyError("Key does not name a valid dataset in H5 file.")
+        return self.arrays[key]
+
+    def shape(self, key = 'data'):
+        if not key in self.arrays:
+            raise KeyError("Key does not name a valid dataset in H5 file.")
+        return self.shapes[key]
+
+    def chunk_shape(self, key = 'data'):
+        if not key in self.arrays:
+            raise KeyError("Key does not name a valid dataset in H5 file.")
+        return self.chunk_shapes[key]
 
 
 class HDF5DataTarget(FileSystemTarget):
