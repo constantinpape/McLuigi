@@ -72,7 +72,7 @@ class SegmentationWorkflow(luigi.Task):
         import h5py
 
         defect_slices_path = inp['defect_slices'].path
-        shape = out.shape
+        shape = out.shape()
         defected_slices = vigra.readHDF5(defect_slices_path, 'defect_slices')
 
         # find consecutive slices with defects

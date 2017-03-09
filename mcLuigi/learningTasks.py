@@ -368,7 +368,7 @@ class LearnClassifierFromGt(luigi.Task):
             workflow_logger.info("LearnClassifierFromGt: call learning classifier for %i inputs" % n_inputs)
             for feat_tasks_i in feature_tasks:
                 for feat in feat_tasks_i:
-                    feat.open()
+                    feat.openExisting()
             self._learn_classifier_from_multiple_inputs(rag, gt, feature_tasks)
             for feat_tasks_i in feature_tasks:
                 for feat in feat_tasks_i:
@@ -377,7 +377,7 @@ class LearnClassifierFromGt(luigi.Task):
         else:
             workflow_logger.info("LearnClassifierFromGt: call learning classifier for single inputs")
             for feat in feature_tasks:
-                feat.open()
+                feat.openExisting()
             self._learn_classifier_from_single_input(rag, gt, feature_tasks)
             for feat in feature_tasks:
                 feat.close()
@@ -401,13 +401,14 @@ class LearnClassifierFromGt(luigi.Task):
 
         if PipelineParameter().separateEdgeClassification:
             workflow_logger.info("LearnClassifierFromGt: learning classfier from single input for xy and z edges separately.")
-            self._learn_classifier_from_single_input_xy(gt, feature_tasks, nEdges, transitionEdge)
-            self._learn_classifier_from_single_input_z( gt, feature_tasks, nEdges, transitionEdge, skipTransition)
+            self._learn_classifier_from_single_input_xy(gt, feature_tasks, transitionEdge)
+            self._learn_classifier_from_single_input_z( gt, feature_tasks, transitionEdge, skipTransition)
 
         else:
             workflow_logger.info("LearnClassifierFromGt: learning classfier from single input for all edges.")
-            feat_end = skipTransition if PipelineParameter().defectPipeline else nEdges
-            features = np.concatenate( [feat.read([0,0],[feat_end,feat.shape[1]]) for feat in feature_tasks], axis = 1 )
+            features = np.concatenate(
+                    [feat.read([0,0], feat.shape(key), key) for key in ('features_xy', 'features_z') for feat in feature_tasks],
+                    axis = 1 )
             if PipelineParameter().defectPipeline:
                 gt = gt[:skipTransition]
             assert features.shape[0] == gt.shape[0], str(features.shape[0]) + " , " + str(gt.shape[0])
@@ -417,22 +418,15 @@ class LearnClassifierFromGt(luigi.Task):
 
         if PipelineParameter().defectPipeline:
             workflow_logger.info("LearnClassifierFromGt: learning classfier from single input for skip edges (defects).")
-            self._learn_classifier_from_single_input_defects(gt, feature_tasks, nEdges, transitionEdge, skipTransition)
+            self._learn_classifier_from_single_input_defects(gt, feature_tasks, skipTransition)
 
 
-    def _learn_classifier_from_single_input_xy(self, gt, feature_tasks, nEdges, transitionEdge):
+    def _learn_classifier_from_single_input_xy(self, gt, feature_tasks, transitionEdge):
         gt = gt[:transitionEdge]
         features = []
-        for feat_task in feature_tasks:
-            assert feat_task.shape[0] in (nEdges , transitionEdge, nEdges - transitionEdge)
-            if feat_task.shape[0] == nEdges:
-                feat = feat_task.read([0,0],[transitionEdge,feat_task.shape[1]])
-            elif feat_task.shape[0] == transitionEdge:
-                feat = feat_task.read([0,0],feat_task.shape)
-            else:
-                continue
-            features.append(feat)
-        features = np.concatenate(features, axis = 1)
+        features = np.concatenate(
+                [feat_task.read([0,0], feat_task.shape('features_xy'), 'features_xy') for feat_task in feature_tasks],
+                axis = 1)
         assert features.shape[0] == gt.shape[0], str(features.shape[0]) + " , " + str(gt.shape[0])
         classifier = vigra.learning.RandomForest3(features.astype('float32'), gt.astype('uint32'),
                 treeCount = PipelineParameter().nTrees, max_depth = PipelineParameter().maxDepth, n_threads = PipelineParameter().nThreads)
@@ -440,21 +434,11 @@ class LearnClassifierFromGt(luigi.Task):
 
 
     # if we learn with defects, we only consider the z edges that are not skip edges here
-    def _learn_classifier_from_single_input_z(self, gt, feature_tasks, nEdges, transitionEdge, skipTransition):
+    def _learn_classifier_from_single_input_z(self, gt, feature_tasks, transitionEdge, skipTransition):
         gt = gt[transitionEdge:skipTransition] if PipelineParameter().defectPipeline else gt[transitionEdge:]
-        features = []
-        for feat_task in feature_tasks:
-            assert feat_task.shape[0] in (nEdges, nEdges - transitionEdge, transitionEdge)
-            if feat_task.shape[0] == nEdges:
-                feat = feat_task.read([transitionEdge,0],
-                    [skipTransition if PipelineParameter().defectPipeline else nEdges, feat_task.shape[1]])
-            elif feat_task.shape[0] == nEdges - transitionEdge:
-                feat = feat_task.read([0,0],
-                    [skipTransition - transitionEdge  if PipelineParameter().defectPipeline else feat_task.shape[0],feat_task.shape[1]])
-            else:
-                continue
-            features.append(feat)
-        features = np.concatenate(features, axis = 1)
+        features = np.concatenate(
+                [feat_task.read([0,0], feat_task.shape('features_z'), 'features_z') for feat_task in feature_tasks],
+                axis = 1)
         assert features.shape[0] == gt.shape[0], str(features.shape[0]) + " , " + str(gt.shape[0])
         classifier = vigra.learning.RandomForest3(features.astype('float32'), gt.astype('uint32'),
                 treeCount = PipelineParameter().nTrees, max_depth = PipelineParameter().maxDepth, n_threads = PipelineParameter().nThreads)
@@ -462,20 +446,12 @@ class LearnClassifierFromGt(luigi.Task):
 
 
     # if we learn with defects, we only consider the skip edges here
-    def _learn_classifier_from_single_input_defects(self, gt, feature_tasks, nEdges, transitionEdge, skipTransition):
+    def _learn_classifier_from_single_input_defects(self, gt, feature_tasks, skipTransition):
         assert PipelineParameter().defectPipeline
         gt = gt[skipTransition:]
-        features = []
-        for feat_task in feature_tasks:
-            assert feat_task.shape[0] in (nEdges, nEdges - transitionEdge, transitionEdge)
-            if feat_task.shape[0] == nEdges:
-                feat = feat_task.read([skipTransition,0],[nEdges,feat_task.shape[1]])
-            elif feat_task.shape[0] == nEdges -transitionEdge:
-                feat = feat_task.read([0,0],[skipTransition - transitionEdge, feat_task.shape[1]])
-            else:
-                continue
-            features.append(feat)
-        features = np.concatenate(features, axis = 1)
+        features = np.concatenate(
+                [feat_task.read([0,0], feat_task.shape('features_skip'), 'features_skip') for feat_task in feature_tasks],
+                axis = 1)
         assert features.shape[0] == gt.shape[0], str(features.shape[0]) + " , " + str(gt.shape[0])
         classifier = vigra.learning.RandomForest3(features.astype('float32'), gt.astype('uint32'),
                 treeCount = PipelineParameter().nTrees, max_depth = PipelineParameter().maxDepth, n_threads = PipelineParameter().nThreads)
@@ -509,28 +485,12 @@ class LearnClassifierFromGt(luigi.Task):
             gt_i = gt[i].read()
             rag_i = rag[i]
 
-            # correct for defect pipeline here
-            if PipelineParameter().defectPipeline:
-                if inp["modified_adjacency"][i].read("has_defects"):
-                    nEdges = inp["modified_adjacency"][i].read("n_edges_modified")
-                else:
-                    nEdges = rag_i.readKey('numberOfEdges')
-            else:
-                nEdges = rag_i.readKey('numberOfEdges')
             transitionEdge = rag_i.readKey('totalNumberOfInSliceEdges')
-
             gt_i = gt_i[:transitionEdge]
-
-            features_i = []
-            for feat_task in feat_tasks_i:
-                assert feat_task.shape[0] in (nEdges, transitionEdge, nEdges - transitionEdge)
-                nFeats = feat_task.shape[1]
-                if feat_task.shape[0] in (nEdges, transitionEdge):
-                    feat = feat_task.read([0,0],[transitionEdge,nFeats])
-                else:
-                    continue
-                features_i.append(feat)
-            features.append(np.concatenate(features_i, axis = 1))
+            features_i = np.concatenate(
+                    [feat_task.read([0,0], feat_task.shape('features_xy'), 'features_xy') for feat_task in feat_tasks_i],
+                    axis = 1)
+            features.append(features_i)
             gts.append(gt_i)
 
         features = np.concatenate( features, axis = 0 )
@@ -555,32 +515,17 @@ class LearnClassifierFromGt(luigi.Task):
             if PipelineParameter().defectPipeline:
                 mod_i = self.input()["modified_adjacency"][i]
                 if mod_i.read("has_defects"):
-                    nEdges = mod_i.read("n_edges_modified")
                     skipTransition = rag_i.readKey('numberOfEdges') - mod_i.read("delete_edges").shape[0]
                 else:
-                    nEdges = rag_i.readKey('numberOfEdges')
                     skipTransition = rag_i.readKey('numberOfEdges')
-            else:
-                nEdges = rag_i.readKey('numberOfEdges')
             transitionEdge = rag_i.readKey('totalNumberOfInSliceEdges')
 
             gt_i = gt_i[transitionEdge:skipTransition] if PipelineParameter().defectPipeline else gt_i[transitionEdge:]
+            features_i = np.concatenate(
+                    [feat_task.read([0,0], feat_task.shape('features_z'), 'features_z') for feat_task in feat_tasks_i],
+                    axis = 1)
 
-            features_i = []
-            for feat_task in feat_tasks_i:
-                assert feat_task.shape[0] in (nEdges, transitionEdge, nEdges - transitionEdge)
-                nFeats = feat_task.shape[1]
-                if feat_task.shape[0] == nEdges:
-                    feat = feat_task.read([transitionEdge,0],
-                        [skipTransition if PipelineParameter().defectPipeline else nEdges, nFeats])
-                elif feat_task.shape[0] == nEdges - transitionEdge:
-                    feat = feat_task.read([0,0],
-                        [skipTransition - transitionEdge if PipelineParameter().defectPipeline else feat_task.shape[0], nFeats])
-                else:
-                    continue
-                features_i.append(feat)
-
-            features.append(np.concatenate(features_i, axis = 1))
+            features.append(features_i)
             gts.append(gt_i)
 
         features = np.concatenate( features, axis = 0 )
@@ -602,11 +547,14 @@ class LearnClassifierFromGt(luigi.Task):
                     skipTransition = rag_i.readKey('numberOfEdges') - self.input()["modified_adjacency"][i].read("delete_edges").shape[0]
                 else:
                     skipTransition = rag_i.readKey('numberOfEdges')
+            else:
+                skipTransition = rag_i.readKey('numberOfEdges')
 
-            feat_tasks_i = feature_tasks[i]
-            feat_end = skipTransition if PipelineParameter().defectPipeline else rag_i.readKey('numberOfEdges')
-            features.append(np.concatenate( [feat.read([0,0], [feat_end,feat.shape[1]]) for feat in feat_tasks_i], axis = 1 ))
-            gts.append(gt[i].read())
+            features.append(
+                    np.concatenate(
+                        [feat.read([0,0], feat.shape(key), key) for key in ('features_xy', 'features_z') for feat in feature_tasks[i]],
+                        axis = 1 ))
+            gts.append(gt[i].read()[:skipTransition])
 
         features = np.concatenate( features, axis = 0 )
         gts      = np.concatenate( gts )
@@ -637,20 +585,11 @@ class LearnClassifierFromGt(luigi.Task):
             transitionEdge = rag_i.readKey('totalNumberOfInSliceEdges')
 
             gt_i = gt_i[skipTransition:]
+            features_i = np.concatenate(
+                    [feat_task.read([0,0], feat_task.shape('features_skip'), 'features_skip') for feat_task in feat_tasks_i],
+                    axis = 1)
 
-            features_i = []
-            for feat_task in feat_tasks_i:
-                assert feat_task.shape[0] in (nEdges, transitionEdge, nEdges - transitionEdge)
-                nFeats = feat_task.shape[1]
-                if feat_task.shape[0] == nEdges:
-                    feat = feat_task.read([skipTransition,0], [nEdges,nFeats])
-                elif feat_task.shape[0] == nEdges - transitionEdge:
-                    feat = feat_task.read([0,0], [skipTransition - transitionEdge, nFeats])
-                else:
-                    continue
-                features_i.append(feat)
-
-            features.append(np.concatenate(features_i, axis = 1))
+            features.append(features_i)
             gts.append(gt_i)
 
         features = np.concatenate( features, axis = 0 )
