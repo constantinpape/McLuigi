@@ -166,13 +166,16 @@ class RegionFeatures(luigi.Task):
             out,
             skipRanges = None):
 
+        if not isinstance(skipRanges, np.ndarray):
+            assert skipRanges == None
+
         workflow_logger.info("RegionFeatures: _compute_feats_from_uvs called with key: %s" % key)
         nEdges = uvIds.shape[0]
         # magic 16 = number of regionStatistics that are combined by min, max, sum and absdiff
         nStatFeats = 16
 
         nFeats = 4*nStatFeats + 4
-        if skipRanges != None:
+        if isinstance(skipRanges, np.ndarray):
             nFeats += 1
         out_shape = [nEdges, nFeats]
         chunk_shape = [2500, out_shape[1]]
@@ -198,7 +201,7 @@ class RegionFeatures(luigi.Task):
             feats_sub.append(quadratic_euclidean_dist(sU, sV))
             feats_sub = np.concatenate(feats_sub, axis = 1)
             out.write( [edge_offset, 0], feats_sub, key)
-            print "Start edge: ", edge_offset, "/", nEdges, "done"
+            #print "Start edge: ", edge_offset, "/", nEdges, "done"
             return True
 
         # TODO maybe some tweeking can speed this up further
@@ -220,9 +223,9 @@ class RegionFeatures(luigi.Task):
 
         workflow_logger.info("RegionFeatures: _compute_feats_from_uvs done.")
 
-        if skipRanges != None:
+        if isinstance(skipRanges, np.ndarray):
             assert skipRanges.shape == (nEdges,)
-            out.write([0,nFeats-1], skipRanges, key)
+            out.write([0,nFeats-1], skipRanges[:,None], key)
 
 
     def _compute_standard_feats(self, nodeFeats, inp, out):
@@ -242,6 +245,7 @@ class RegionFeatures(luigi.Task):
     def _compute_modified_feats(self, nodeFeats, inp, out):
 
         rag = inp['rag']
+        modified_adjacency = inp['modified_adjacency']
         uvIds = rag.readKey('uvIds')
         transition_edge = rag.readKey('totalNumberOfInSliceEdges')
 
