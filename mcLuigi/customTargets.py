@@ -30,7 +30,7 @@ class HDF5VolumeTarget(FileSystemTarget):
             except OSError:
                 pass
 
-    def __init__(self, path, dtype, compression = -1):
+    def __init__(self, path, dtype, defaultKey = 'data', compression = -1):
         super(HDF5VolumeTarget, self).__init__(path)
         self.h5_file = None
         self.dtype = dtype
@@ -38,21 +38,20 @@ class HDF5VolumeTarget(FileSystemTarget):
         self.arrays = {}
         self.shapes = {}
         self.chunk_shapes = {}
+        self.opened = False
 
     def open(self, shape = None, chunkShape = None, key = 'data'):
 
         # check if this file is already open
-        if self.h5_file == None:
-            print "Opening file"
+        if not self.opened:
             # open an existing hdf5 file
             if os.path.exists(self.path):
-                print "Existing File"
                 self.h5_file = nifty.hdf5.openFile(self.path)
             # create a new file
             else:
-                print "New File"
                 self.makedirs()
                 self.h5_file = nifty.hdf5.createFile(self.path)#, cacheSettings)
+            self.opened = True
 
         newDataset = True
         with h5py.File(self.path) as f:
@@ -63,6 +62,8 @@ class HDF5VolumeTarget(FileSystemTarget):
         if not newDataset:
             assert shape == None
             assert chunkShape == None
+            #print "Opening existing dset: ", self.path, key
+            #print self.h5_file
             # set the dtype #TODO (could we do this in a more elegant way?)
             if np.dtype(self.dtype) == np.dtype("float32"):
                 self.arrays[key] = nifty.hdf5.Hdf5ArrayFloat32(self.h5_file, key)
@@ -104,8 +105,10 @@ class HDF5VolumeTarget(FileSystemTarget):
         self.chunk_shapes[key] = self.arrays[key].chunkShape
 
     def close(self):
+        assert self.opened
         assert self.h5_file != None
         nifty.hdf5.closeFile(self.h5_file)
+        self.opened = False
 
     def write(self, start, data, key = 'data'):
         if not key in self.arrays:

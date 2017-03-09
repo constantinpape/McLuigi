@@ -224,7 +224,7 @@ class StackedRegionAdjacencyGraph(luigi.Task):
         seg = self.input()
 
         seg.open()
-        shape = seg.shape
+        shape = seg.shape()
 
         seg_last = seg.read( [shape[0]-1,0,0], shape )
         n_labels = seg_last.max() + 1

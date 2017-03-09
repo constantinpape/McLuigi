@@ -2,7 +2,6 @@
 # Selecting appropriate feature tasks for several high-level pipeline options
 
 from featureTasks import EdgeFeatures, RegionFeatures
-from defectHandlingTasks import ModifiedEdgeFeatures
 from pipelineParameter import PipelineParameter
 from tools import config_logger
 
@@ -28,15 +27,6 @@ def get_local_features():
 
     # choose the appropriate feature tasks (normal vs. defect handling) <- pipelineParams.defectPipeline
     # TODO (anisotropic vs. isotropic) <- pipelineParams.anisotropicPipeline -> also move to feature tasks!
-    # TODO TODO this becomes obsolete once modified features is encapsulated in the standard feature tasks
-    if PipelineParameter().defectPipeline:
-        workflow_logger.debug("get_local_features: using tasks modified for defect handling")
-        EdgeTask   = ModifiedEdgeFeatures
-        RegionTask = RegionFeatures
-    else:
-        workflow_logger.debug("get_local_features: using standard tasks")
-        EdgeTask   = EdgeFeatures
-        RegionTask = RegionFeatures
 
     features = PipelineParameter().features
     if not isinstance(features, list):
@@ -54,27 +44,27 @@ def get_local_features():
 
     if "raw" in features:
         # by convention we assume that the raw data is given as 0th
-        feature_tasks.append( EdgeTask(input_data[0], seg) )
+        feature_tasks.append( EdgeFeatures(input_data[0], seg) )
         workflow_logger.debug("get_local_features: calculating Edge Features from raw input: " + input_data[0])
 
     if "prob" in features:
         # by convention we assume that the membrane probs are given as 1st
-        feature_tasks.append( EdgeTask(input_data[1], seg ) )
+        feature_tasks.append( EdgeFeatures(input_data[1], seg ) )
         workflow_logger.debug("get_local_features: calculating Edge Features from probability maps: " + input_data[1])
 
     if "affinitiesXY" in features: # specific XY - features -> we keep only these
         # by convention we assume that the xy - affinity channel is given as 1st input
-        feature_tasks.append( EdgeTask(input_data[1], seg, keepOnlyXY = True ) )
+        feature_tasks.append( EdgeFeatures(input_data[1], seg, keepOnlyXY = True ) )
         workflow_logger.debug("get_local_features: calculating Edge Features from xy affinity maps: " + input_data[1])
 
     if "affinitiesZ" in features: # specific Z - features -> we keep only these
         # by convention we assume that the z - affinity channel is given as 2nd input
-        feature_tasks.append( EdgeTask(input_data[2], seg, keepOnlyZ = True ) )
+        feature_tasks.append( EdgeFeatures(input_data[2], seg, keepOnlyZ = True ) )
         workflow_logger.debug("get_local_features: calculating Edge Features from z affinity maps: " + input_data[2])
 
     if "reg" in features:
         # by convention we calculate region features only on the raw data (0th input)
-        feature_tasks.append( RegionTask(input_data[0], seg) )
+        feature_tasks.append( RegionFeatures(input_data[0], seg) )
         workflow_logger.debug("get_local_features: calculating Region Features")
 
     # check for invalid keys

@@ -105,8 +105,8 @@ class OversegmentationSliceStatistics(luigi.Task):
         seg = self.input()
         seg.open()
 
-        ny = long(seg.shape[1])
-        nx = long(seg.shape[2])
+        ny = long(seg.shape()[1])
+        nx = long(seg.shape()[2])
 
         def extract_segs_in_slice(z):
             # 2d blocking representing the patches
@@ -122,7 +122,7 @@ class OversegmentationSliceStatistics(luigi.Task):
         # parallel
         with futures.ThreadPoolExecutor(max_workers=PipelineParameter().nThreads) as executor:
             tasks = []
-            for z in xrange(seg.shape[0]):
+            for z in xrange(seg.shape()[0]):
                 tasks.append(executor.submit(extract_segs_in_slice, z))
             segs_per_slice = [fut.result() for fut in tasks]
 
@@ -247,10 +247,10 @@ class DefectSliceDetection(luigi.Task):
         seg.open()
         out = self.output()
         # TODO compression for nifty hdf5
-        out.open(seg.shape)
+        out.open(seg.shape())
 
-        ny = long(seg.shape[1])
-        nx = long(seg.shape[2])
+        ny = long(seg.shape()[1])
+        nx = long(seg.shape()[2])
 
         slice_shape = (1L,ny,nx)
         defect_mask = np.ones(slice_shape, dtype = np.uint8)
@@ -277,14 +277,14 @@ class DefectSliceDetection(luigi.Task):
 
         with futures.ThreadPoolExecutor(max_workers = PipelineParameter().nThreads) as executor:
             tasks = []
-            for z in xrange(seg.shape[0]):
+            for z in xrange(seg.shape()[0]):
                 tasks.append(executor.submit(detect_defected_slice,z))
             defect_indications = [fut.result() for fut in tasks]
 
         # log the defects
         workflow_logger.info("DefectSliceDetection: total number of defected slices: %i" % np.sum(defect_indications))
         defect_slices = []
-        for z in xrange(seg.shape[0]):
+        for z in xrange(seg.shape()[0]):
             if defect_indications[z]:
                 defect_slices.append(z)
                 workflow_logger.info("DefectSliceDetection: slice %i is defected." % (z,))
