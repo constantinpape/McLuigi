@@ -298,7 +298,7 @@ class NodesToInitialBlocks(luigi.Task):
         else:
             defectSlices = []
 
-        blocking = nifty.tools.blocking( roiBegin = [0L,0L,0L], roiEnd = seg.shape, blockShape = self.blockShape )
+        blocking = nifty.tools.blocking( roiBegin = [0L,0L,0L], roiEnd = seg.shape(), blockShape = self.blockShape )
         numberOfBlocks = blocking.numberOfBlocks
         blockOverlap = list(self.blockOverlap)
 
@@ -366,7 +366,7 @@ class BlockwiseSubSolver(luigi.Task):
         # block size in first hierarchy level
         initialBlockShape =  PipelineParameter().multicutBlockShape
         initialOverlap = list(PipelineParameter().multicutBlockOverlap)
-        initialBlocking = nifty.tools.blocking( roiBegin = [0L,0L,0L], roiEnd = seg.shape, blockShape = initialBlockShape )
+        initialBlocking = nifty.tools.blocking( roiBegin = [0L,0L,0L], roiEnd = seg.shape(), blockShape = initialBlockShape )
 
         # function for subproblem extraction
         # extraction only for level 0
@@ -379,7 +379,7 @@ class BlockwiseSubSolver(luigi.Task):
             return np.array(inner_edges), np.array(outer_edges), subgraph
 
         blockOverlap = list(self.blockOverlap)
-        blocking = nifty.tools.blocking( roiBegin = [0L,0L,0L], roiEnd = seg.shape, blockShape = self.blockShape )
+        blocking = nifty.tools.blocking( roiBegin = [0L,0L,0L], roiEnd = seg.shape(), blockShape = self.blockShape )
         numberOfBlocks = blocking.numberOfBlocks
 
         # sequential for debugging

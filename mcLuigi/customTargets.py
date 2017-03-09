@@ -40,6 +40,12 @@ class HDF5VolumeTarget(FileSystemTarget):
         self.chunk_shapes = {}
         self.opened = False
 
+    def openExisting(self):
+        with h5py.File(self.path) as f:
+            keys = f.keys()
+        for key in keys:
+            self.open(key = key)
+
     def open(self, shape = None, chunkShape = None, key = 'data'):
 
         # check if this file is already open

@@ -50,8 +50,8 @@ class MulticutProblem(luigi.Task):
 
         edge_cost_file = inp["edge_probabilities"]
         edge_cost_file.open()
-        assert len(edge_cost_file.shape) == 1
-        len_costs = edge_cost_file.shape[0]
+        assert len(edge_cost_file.shape()) == 1
+        len_costs = edge_cost_file.shape()[0]
         workflow_logger.info("MulticutProblem: loaded edge costs of len %i" % len_costs)
 
         edge_costs = edge_cost_file.read([0L],[long(len_costs)])

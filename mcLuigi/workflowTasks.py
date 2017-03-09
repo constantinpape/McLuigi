@@ -44,9 +44,9 @@ class SegmentationWorkflow(luigi.Task):
         seg = inp["seg"]
 
         seg.open()
-        shape = seg.shape
+        shape = seg.shape()
         out = self.output()
-        out.open(seg.shape)
+        out.open(shape)
 
         workflow_logger.info("SegmentationWorkflow: Projecting node result to segmentation.")
         self._project_result_to_segmentation(rag, mc_nodes, out)
