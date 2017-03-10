@@ -13,6 +13,8 @@ from tools import config_logger, run_decorator
 
 import logging
 
+from concurrent import futures
+
 import numpy as np
 import vigra
 import nifty
@@ -94,6 +96,7 @@ class EdgeProbabilities(luigi.Task):
             out.write([feat_end],probs)
 
 
+    # TODO change parallelisation to same logic as _predict_seperate_out_of_core
     def _predict_joint_out_of_core(self, feature_tasks, out):
         inp = self.input()
         classifier = vigra.learning.RandomForest3(str(self.pathToClassifier), 'rf_joined')
@@ -247,33 +250,36 @@ class EdgeProbabilities(luigi.Task):
 
         nSubFeats = PipelineParameter().nFeatureChunks
         assert nSubFeats > 1, str(nSubFeats)
-        for subFeats in xrange(nSubFeats):
-            print subFeats, '/', nSubFeats
-            featIndexStart = int(float(subFeats)/nSubFeats * nEdgesType)
-            featIndexEnd   = int(float(subFeats+1)/nSubFeats * nEdgesType)
-            if subFeats == nSubFeats:
+
+        def predict_subfeats(subFeatId):
+            print subFeatId, '/', nSubFeats
+            featIndexStart = int(float(subFeatId) / nSubFeats * nEdgesType)
+            featIndexEnd   = int(float(subFeatId+1) / nSubFeats * nEdgesType)
+            if subFeatId == nSubFeats:
                 featIndexEnd = nEdgesType
-            nEdgesSub = featIndexEnd - featIndexStart
-
-            featuresType = np.zeros( (nEdgesSub, nFeatsType), dtype = 'float32' )
-            featOffset = 0
-
-            for ii, feat in enumerate(feature_tasks):
-                nFeats = feat.shape(featureType)[1]
-                featuresType[:,featOffset:featOffset+nFeats] = feat.read(
+            subFeats = np.concatenate(
+                    [feat.read(
                         [featIndexStart,0],
-                        [featIndexEnd,feat.shape(featureType)[1]],
-                        featureType
-                    )
-                featOffset += nFeats
+                        [featIndexEnd, feat.shape(featureType)[1]],
+                        featureType) for feat in feature_tasks ],
+                    axis = 1)
 
-            print "Features loaded, starting prediction"
             readStart = long(featIndexStart + startType)
-            assert classifier.featureCount() == featuresType.shape[1], "%i , %i" % (classifier.featureCount(), featuresType.shape[1])
-            probsSub = classifier.predictProbabilities(featuresType.astype('float32'), n_threads = PipelineParameter().nThreads)[:,1]
+            assert classifier.featureCount() == subFeats.shape[1], "%i , %i" % (classifier.featureCount(), subFeats.shape[1])
+            probsSub = classifier.predictProbabilities(subFeats.astype('float32'), n_threads = 1)[:,1]
             probsSub /= classifier.treeCount()
             probsSub[np.isnan(probsSub)] = 0.5
             out.write([readStart], probsSub)
+            return True
+
+        nWorkers = PipelineParameter().nThreads
+        #nWorkers = 1
+        with futures.ThreadPoolExecutor(max_workers = nWorkers) as executor:
+            tasks = []
+            for subFeatId in xrange(nSubFeats):
+                tasks.append( executor.submit( predict_subfeats, subFeatId ) )
+            res = [t.result() for t in tasks]
+
 
     def output(self):
         save_path = os.path.join(PipelineParameter().cache, "EdgeProbabilities%s_%s.h5" % ("Separate" if PipelineParameter().separateEdgeClassification else "Joint",
