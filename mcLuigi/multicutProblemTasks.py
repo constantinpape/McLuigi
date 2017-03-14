@@ -66,6 +66,7 @@ class MulticutProblem(luigi.Task):
         edge_cost_file.close()
 
 
+    # TODO parallelise ?!
     def _probabilities_to_costs(self, edge_costs):
 
         inp = self.input()
@@ -131,7 +132,7 @@ class MulticutProblem(luigi.Task):
             workflow_logger.info("MulticutProblem: using non-weighted edge costs" )
 
         if weighting_scheme in ("z","xyz","all"):
-            workflow_logger.info("MulticutProblem: cost statistics before weighting: mean: %f, std: %f, min: %f, max: %f" % (np.mean(edge_costs),
+            workflow_logger.info("MulticutProblem: cost statistics after weighting: mean: %f, std: %f, min: %f, max: %f" % (np.mean(edge_costs),
                 np.std(edge_costs),
                 edge_costs.min(),
                 edge_costs.max()))

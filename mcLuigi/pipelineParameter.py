@@ -69,6 +69,8 @@ class PipelineParameter(object):
         self.multicutBlockShape = [50,512,512]
         self.multicutBlockOverlap = [5,20,20]
         self.multicutGlobalTimeLimit = 60*60*10 # time limit in seconds / 10 hours
+        self.multicutNThreadsGlobal = multiprocessing.cpu_count()
+        self.multicutNumItStopGlobal = 12
 
     # TODO range and type cheks via @property and setproperty
 

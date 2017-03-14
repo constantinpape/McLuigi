@@ -26,7 +26,7 @@ workflow_logger = logging.getLogger(__name__)
 config_logger(workflow_logger)
 
 
-def fusion_moves(g, costs, blockId, nThreads = 1, isGlobal = False):
+def fusion_moves(g, costs, blockId, nThreads = 0, isGlobal = False):
 
     assert g.numberOfEdges == costs.shape[0]
     obj = nifty.graph.multicut.multicutObjective(g, costs)
@@ -39,10 +39,15 @@ def fusion_moves(g, costs, blockId, nThreads = 1, isGlobal = False):
         addThreeCyclesConstraints=True,
         addOnlyViolatedThreeCyclesConstraints=True)
 
-    if nThreads == 1:
+    if nThreads == 0:
         nParallel = 1
     else:
         nParallel = 2 * nThreads
+
+    if isGlobal:
+        numItStop = PipelineParameter().multicutNumItStopGlobal
+    else:
+        numItStop = PipelineParameter().multicutNumItStop
 
     solver = obj.fusionMoveBasedFactory(
         verbose=PipelineParameter().multicutVerbose,
@@ -52,7 +57,7 @@ def fusion_moves(g, costs, blockId, nThreads = 1, isGlobal = False):
         numberOfIterations=PipelineParameter().multicutNumIt,
         numberOfThreads=nThreads,
         numberOfParallelProposals=nParallel,
-        stopIfNoImprovement=PipelineParameter().multicutNumItStop,
+        stopIfNoImprovement=numItStop,
         fuseN=PipelineParameter().multicutNumFuse,
     ).create(obj)
 
@@ -134,9 +139,14 @@ class BlockwiseMulticutSolver(luigi.Task):
         reducedNew2Old = reducedProblem.read("new2old")
         assert len(reducedNew2Old) == reducedGraph.numberOfNodes, str(len(reducedNew2Old)) + " , " + str(reducedGraph.numberOfNodes)
 
-        # FIXME parallelism makes it slower here -> investigate this further and discuss with thorsten!
+        # run global inference
         t_inf = time.time()
-        reducedNodeResult = fusion_moves( reducedGraph, reducedCosts, 0, 1, isGlobal = True )
+        reducedNodeResult = fusion_moves(
+                reducedGraph,
+                reducedCosts,
+                0,
+                PipelineParameter().multicutNThreadsGlobal,
+                isGlobal = True)
         workflow_logger.info("BlockwiseMulticutSolver: inference of reduced problem for the whole volume took: %f s" % (time.time() - t_inf,))
 
         assert reducedNodeResult.shape[0] == reducedNew2Old.shape[0]
@@ -158,6 +168,7 @@ class BlockwiseMulticutSolver(luigi.Task):
         return HDF5DataTarget( save_path )
 
 
+# TODO benchmark and speed up
 class ReducedProblem(luigi.Task):
 
     pathToSeg = luigi.Parameter()
@@ -191,6 +202,7 @@ class ReducedProblem(luigi.Task):
         t_merge = time.time()
         ufd = nifty.ufd.ufd( numberOfNodes )
 
+        # TODO maybe we could spped this up if we pass a list instead of an np.array!
         mergeNodes = uvIds[cutEdges == 0]
         ufd.merge(mergeNodes)
 
