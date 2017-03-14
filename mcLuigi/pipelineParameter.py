@@ -72,6 +72,14 @@ class PipelineParameter(object):
         self.multicutNThreadsGlobal = multiprocessing.cpu_count()
         self.multicutNumItStopGlobal = 12
 
+        ### parameters for segmentation tasks / wsdt
+        self.wsdtThreshold = .2
+        self.wsdtMinMem    = 0
+        self.wsdtMinSeg    = 75
+        self.wsdtSigSeeds  = 2.6
+        self.wsdtSigWeights = 0.
+        self.wsdtInvert    = False
+
     # TODO range and type cheks via @property and setproperty
 
     # TODO don't allow setting a field that does not already exist to avoid setting incorrect parameter
