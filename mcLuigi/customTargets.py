@@ -7,9 +7,19 @@ import os
 import numpy as np
 import cPickle as pickle
 
-import nifty
 import vigra
 import h5py
+
+# load the proper nifty
+nifty_flag = PipelineParameter().niftyType
+if nifty_flag == 'standard':
+    import nifty
+elif nifty_flag == 'condaCplex':
+    import nifty_with_cplex as nifty
+elif nifty_flag == 'condaGurobi':
+    import nifty_with_gurobi as nifty
+else:
+    raise RuntimeError("Invalid nifty flag: " + nifty_flag)
 
 
 class HDF5VolumeTarget(FileSystemTarget):

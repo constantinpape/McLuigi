@@ -17,11 +17,15 @@ requirements:
     run:
         - python 2.7*
         - h5py 2.7 # I guess the version does not really matter
-        - futures # need futures https://anaconda.org/josh/futures <- I guess the above is ok
+        - futures # need futures https://anaconda.org/josh/futures <- I guess this here is ok
         - luigi 2.6 # need to make sure that this version is ok
-        # TODO need new vigra package
-        # TODO need nifty/stacked_rag with gurobi
-        # TODO need newer wsdt
+        - wsdt wsdt >=0.2.post9
+        - vigra >=1.11.0.post222
+        - nifty_with_gurobi =v0.4.post7
+
+Tests:
+    imports:
+        mcLuigi
 
 about:
     license: BSD

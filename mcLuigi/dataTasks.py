@@ -11,12 +11,22 @@ import logging
 
 import numpy as np
 import vigra
-import nifty
 import os
 import h5py
 import time
 
 from concurrent import futures
+
+# load the proper nifty
+nifty_flag = PipelineParameter().niftyType
+if nifty_flag == 'standard':
+    import nifty
+elif nifty_flag == 'condaCplex':
+    import nifty_with_cplex as nifty
+elif nifty_flag == 'condaGurobi':
+    import nifty_with_gurobi as nifty
+else:
+    raise RuntimeError("Invalid nifty flag: " + nifty_flag)
 
 # init the workflow logger
 workflow_logger = logging.getLogger(__name__)

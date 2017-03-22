@@ -17,7 +17,17 @@ import time
 
 import numpy as np
 import vigra
-import nifty
+
+# load the proper nifty
+nifty_flag = PipelineParameter().niftyType
+if nifty_flag == 'standard':
+    import nifty
+elif nifty_flag == 'condaCplex':
+    import nifty_with_cplex as nifty
+elif nifty_flag == 'condaGurobi':
+    import nifty_with_gurobi as nifty
+else:
+    raise RuntimeError("Invalid nifty flag: " + nifty_flag)
 
 from concurrent import futures
 
@@ -35,9 +45,14 @@ def fusion_moves(g, costs, blockId, nThreads = 0, isGlobal = False):
 
     greedy = obj.greedyAdditiveFactory().create(obj)
 
-    ilpFac = obj.multicutIlpFactory(ilpSolver='cplex',verbose=0,
-        addThreeCyclesConstraints=True,
-        addOnlyViolatedThreeCyclesConstraints=True)
+    if nifty_flag in ('standard', 'condaCplex'):
+        ilpFac = obj.multicutIlpFactory(ilpSolver='cplex',verbose=0,
+            addThreeCyclesConstraints=True,
+            addOnlyViolatedThreeCyclesConstraints=True)
+    else:
+        ilpFac = obj.multicutIlpFactory(ilpSolver='gurobi',verbose=0,
+            addThreeCyclesConstraints=True,
+            addOnlyViolatedThreeCyclesConstraints=True)
 
     if nThreads == 0:
         nParallel = 1
