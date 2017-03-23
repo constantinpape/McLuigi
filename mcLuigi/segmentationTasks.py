@@ -95,18 +95,18 @@ class WsdtSegmentation(luigi.Task):
 
         t_ws = time.time()
         # sequential for debugging
-        offsets = []
-        for z in xrange(shape[0]):
-            offsets.append( segment_slice(z) )
+        #offsets = []
+        #for z in xrange(shape[0]):
+        #    offsets.append( segment_slice(z) )
 
         # parallel
-        #nWorkers = pipelineParameter().nThreads
+        nWorkers = PipelineParameter().nThreads
         ##nWorkers = 20
-        #with futures.ThreadPoolExecutor(max_workers=nWorkers) as executor:
-        #    tasks = []
-        #    for z in xrange(shape[0]):
-        #       tasks.append(executor.submit(segment_slice,z))
-        #    offsets = [future.result() for future in tasks]
+        with futures.ThreadPoolExecutor(max_workers=nWorkers) as executor:
+            tasks = []
+            for z in xrange(shape[0]):
+               tasks.append(executor.submit(segment_slice,z))
+            offsets = [future.result() for future in tasks]
         workflow_logger.info("WsdtSegmentation: Running watershed took: %f s" % (time.time() - t_ws) )
 
         # accumulate the offsets for each slice
@@ -129,16 +129,16 @@ class WsdtSegmentation(luigi.Task):
             return True
 
         # sequential
-        for z in xrange(shape[0]):
-            add_offset(z, offsets[z])
+        #for z in xrange(shape[0]):
+        #    add_offset(z, offsets[z])
 
         t_off = time.time()
         # parallel
-        #with futures.ThreadPoolExecutor(max_workers=nWorkers) as executor:
-        #    tasks = []
-        #    for z in xrange(shape[0]):
-        #        tasks.append( executor.submit(add_offset, z, offsets[z]) )
-        #    res = [t.result() for t in tasks]
+        with futures.ThreadPoolExecutor(max_workers=nWorkers) as executor:
+            tasks = []
+            for z in xrange(shape[0]):
+                tasks.append( executor.submit(add_offset, z, offsets[z]) )
+            res = [t.result() for t in tasks]
         workflow_logger.info("WsdtSegmentation: Adding offsets took %f s" % (time.time() - t_off) )
 
 
