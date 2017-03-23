@@ -39,6 +39,10 @@ class WsdtSegmentation(luigi.Task):
 
     # TODO enable 3d wsdt for isotropic ppl
     # TODO we could integrate the (statistics based) defect detection directly in here
+    # TODO parallelisation is really weird / slow, investigate !
+    # -> check if same strange behaviour on sirherny
+    # if not, probably nifty-package is responsible -> hdf5 parallel read/write ?! (libhdf5-serial ?)
+    # -> if this is true, also other applications should be horribly slow
     @run_decorator
     def run(self):
         pmap = self.input()
@@ -47,13 +51,13 @@ class WsdtSegmentation(luigi.Task):
         out  = self.output()
         out.open(shape, pmap.chunk_shape() )
 
-        self.run_wsdt2d_standard(pmap, out, shape)
+        self._run_wsdt2d_standard(pmap, out, shape)
 
         out.close()
         pmap.close()
 
 
-    def run_wsdt2d_standard(self, pmap, out, shape):
+    def _run_wsdt2d_standard(self, pmap, out, shape):
 
         # read the wsdt settings from ppl params
         ppl_params = PipelineParameter()
@@ -91,18 +95,18 @@ class WsdtSegmentation(luigi.Task):
 
         t_ws = time.time()
         # sequential for debugging
-        #offsets = []
-        #for z in xrange(shape[0]):
-        #    offsets.append( segment_slice(z) )
+        offsets = []
+        for z in xrange(shape[0]):
+            offsets.append( segment_slice(z) )
 
         # parallel
         #nWorkers = pipelineParameter().nThreads
-        nWorkers = 20
-        with futures.ThreadPoolExecutor(max_workers=nWorkers) as executor:
-            tasks = []
-            for z in xrange(shape[0]):
-               tasks.append(executor.submit(segment_slice,z))
-            offsets = [future.result() for future in tasks]
+        ##nWorkers = 20
+        #with futures.ThreadPoolExecutor(max_workers=nWorkers) as executor:
+        #    tasks = []
+        #    for z in xrange(shape[0]):
+        #       tasks.append(executor.submit(segment_slice,z))
+        #    offsets = [future.result() for future in tasks]
         workflow_logger.info("WsdtSegmentation: Running watershed took: %f s" % (time.time() - t_ws) )
 
         # accumulate the offsets for each slice
@@ -125,16 +129,16 @@ class WsdtSegmentation(luigi.Task):
             return True
 
         # sequential
-        #for z in xrange(shape[0]):
-        #    add_offset(z, offsets[z])
+        for z in xrange(shape[0]):
+            add_offset(z, offsets[z])
 
         t_off = time.time()
         # parallel
-        with futures.ThreadPoolExecutor(max_workers=nWorkers) as executor:
-            tasks = []
-            for z in xrange(shape[0]):
-                tasks.append( executor.submit(add_offset, z, offsets[z]) )
-            res = [t.result() for t in tasks]
+        #with futures.ThreadPoolExecutor(max_workers=nWorkers) as executor:
+        #    tasks = []
+        #    for z in xrange(shape[0]):
+        #        tasks.append( executor.submit(add_offset, z, offsets[z]) )
+        #    res = [t.result() for t in tasks]
         workflow_logger.info("WsdtSegmentation: Adding offsets took %f s" % (time.time() - t_off) )
 
 

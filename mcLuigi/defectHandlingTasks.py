@@ -19,16 +19,14 @@ import vigra
 
 from concurrent import futures
 
-# load the proper nifty
-nifty_flag = PipelineParameter().niftyType
-if nifty_flag == 'standard':
+# import the proper nifty version
+try:
     import nifty
-elif nifty_flag == 'condaCplex':
-    import nifty_with_cplex as nifty
-elif nifty_flag == 'condaGurobi':
-    import nifty_with_gurobi as nifty
-else:
-    raise RuntimeError("Invalid nifty flag: " + nifty_flag)
+except ImportError:
+    try:
+        import nifty_with_cplex as nifty
+    except ImportError:
+        import nifty_with_gurobi as nifty
 
 
 # init the workflow logger

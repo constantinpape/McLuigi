@@ -54,11 +54,6 @@ class PipelineParameter(object):
         self.nTrees = 500
         self.maxDepth = 12
 
-        # nifty type to load the correct nifty version (conda packages)
-        self.niftyType = 'standard' # alternatives: standard -> import nifty
-                                    #               condaCplex -> import nifty_with_cplex
-                                    #               condaGurobi -> import nifty_with_gurobi
-
         ### multicut and blockwise parameter
         self.multicutVerbose = 0
         self.multicutSigmaFusion = 10.

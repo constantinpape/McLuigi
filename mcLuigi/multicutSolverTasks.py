@@ -15,18 +15,18 @@ import logging
 import json
 
 import numpy as np
-import nifty
 
-# load the proper nifty
-nifty_flag = PipelineParameter().niftyType
-if nifty_flag == 'standard':
+try:
     import nifty
-elif nifty_flag == 'condaCplex':
-    import nifty_with_cplex as nifty
-elif nifty_flag == 'condaGurobi':
-    import nifty_with_gurobi as nifty
-else:
-    raise RuntimeError("Invalid nifty flag: " + nifty_flag)
+    ilp_backend = 'cplex'
+except ImportError:
+    try:
+        import nifty_with_cplex as nifty
+        ilp_backend = 'cplex'
+    except ImportError:
+        import nifty_with_gurobi as nifty
+        ilp_backend = 'gurobi'
+
 
 # init the workflow logger
 workflow_logger = logging.getLogger(__name__)
@@ -62,14 +62,9 @@ class McSolverFusionMoves(luigi.Task):
         ret    = greedy.optimize()
         workflow_logger.info("McSolverFusionMoves: energy of the greedy solution %f" % obj.evalNodeLabels(ret) )
 
-        if nifty_flag in ('standard', 'condaCplex'):
-            ilpFac = obj.multicutIlpFactory(ilpSolver='cplex',verbose=0,
-                addThreeCyclesConstraints=True,
-                addOnlyViolatedThreeCyclesConstraints=True)
-        else:
-            ilpFac = obj.multicutIlpFactory(ilpSolver='gurobi',verbose=0,
-                addThreeCyclesConstraints=True,
-                addOnlyViolatedThreeCyclesConstraints=True)
+        ilpFac = obj.multicutIlpFactory(ilpSolver=ilp_backend,verbose=0,
+            addThreeCyclesConstraints=True,
+            addOnlyViolatedThreeCyclesConstraints=True)
 
         solver = obj.fusionMoveBasedFactory(
             verbose=PipelineParameter().multicutVerbose,
@@ -133,16 +128,10 @@ class McSolverExact(luigi.Task):
         workflow_logger.info("McSolverExact: solving multicut problem with %i number of variables" % (g.numberOfNodes,))
         workflow_logger.info("McSolverExact: using the exact solver from nifty")
 
-        if nifty_flag in ('standard', 'condaCplex'):
-            solver = obj.multicutIlpFactory(ilpSolver='cplex',verbose=0,
-                addThreeCyclesConstraints=True,
-                addOnlyViolatedThreeCyclesConstraints=True
-            ).create(obj)
-        else:
-            solver = obj.multicutIlpFactory(ilpSolver='gurobi',verbose=0,
-                addThreeCyclesConstraints=True,
-                addOnlyViolatedThreeCyclesConstraints=True
-            ).create(obj)
+        solver = obj.multicutIlpFactory(ilpSolver=ilp_backend,verbose=0,
+            addThreeCyclesConstraints=True,
+            addOnlyViolatedThreeCyclesConstraints=True
+        ).create(obj)
 
 
         t_inf = time.time()
