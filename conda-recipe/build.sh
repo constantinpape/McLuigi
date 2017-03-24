@@ -2,5 +2,5 @@
 # copy all the python sources
 mkdir -p ${PREFIX}/mcLuigi
 cp -r mcLuigi/* ${PREFIX}/mcLuigi
-# TODO is this compiling necessary?
+echo "${PREFIX}/mcLuigi" > ${PREFIX}/lib/python2.7/site-packages/mcLuigi.pth
 python -m compileall ${PREFIX}/mcLuigi

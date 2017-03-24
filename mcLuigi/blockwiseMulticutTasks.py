@@ -36,6 +36,35 @@ workflow_logger = logging.getLogger(__name__)
 config_logger(workflow_logger)
 
 
+def greedy(g, costs, blockId, nThreads = 0, isGlobal = False):
+
+    assert g.numberOfEdges == costs.shape[0]
+    obj = nifty.graph.multicut.multicutObjective(g, costs)
+
+    workflow_logger.debug("Solving MC Problem greedily with %i number of variables" % (g.numberOfNodes,))
+
+    greedy = obj.greedyAdditiveFactory().create(obj)
+
+    solver = obj.fusionMoveBasedFactory(
+        verbose=PipelineParameter().multicutVerbose,
+        fusionMove=obj.fusionMoveSettings(mcFactory=ilpFac),
+        proposalGen=obj.watershedProposals(sigma=PipelineParameter().multicutSigmaFusion,
+            seedFraction=PipelineParameter().multicutSeedFraction),
+        numberOfIterations=PipelineParameter().multicutNumIt,
+        numberOfThreads=nThreads,
+        numberOfParallelProposals=nParallel,
+        stopIfNoImprovement=numItStop,
+        fuseN=PipelineParameter().multicutNumFuse,
+    ).create(obj)
+
+    t_inf = time.time()
+
+    # first optimize greedy
+    ret = greedy.optimize()
+
+    return ret
+
+
 def fusion_moves(g, costs, blockId, nThreads = 0, isGlobal = False):
 
     assert g.numberOfEdges == costs.shape[0]
@@ -50,7 +79,7 @@ def fusion_moves(g, costs, blockId, nThreads = 0, isGlobal = False):
         addOnlyViolatedThreeCyclesConstraints=True)
 
     if nThreads == 0:
-        nParallel = 1
+        nParallel = 0
     else:
         nParallel = 2 * nThreads
 
@@ -445,8 +474,9 @@ class BlockwiseSubSolver(luigi.Task):
         with futures.ThreadPoolExecutor(max_workers=nWorkers) as executor:
             tasks = []
             for blockId, subProblem in enumerate(subProblems):
-                tasks.append( executor.submit( fusion_moves, subProblem[2],
-                    costs[subProblem[0]], blockId, 1 ) )
+                tasks.append( executor.submit( fusion_moves,
+                    subProblem[2], costs[subProblem[0]],
+                    blockId, 0 ) )
         subResults = [task.result() for task in tasks]
 
         cutEdges = np.zeros( numberOfEdges, dtype = np.uint8 )
