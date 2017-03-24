@@ -21,7 +21,7 @@ requirements:
         - luigi 2.1.1 # TODO update to newest luigi version
         - wsdt wsdt >=0.2.post9
         - vigra >=1.11.0.post36
-        - nifty_with_gurobi =v0.4.post9
+        - nifty_with_gurobi =0.4.post9
 
 tests:
     imports:
