@@ -1,10 +1,10 @@
 # cf. https://github.com/ilastik/nature_methods_multicut_pipeline/blob/master/build/multicut_pipeline/build.sh
-mkdir -p ${PREFIX}/mcLuigi
+mkdir -p ${PREFIX}/mc_luigi
 
 # copy all the python sources
-cp mcLuigi/*Tasks.py ${PREFIX}/mcLuigi
-cp mcLuigi/__init__.py ${PREFIX}/mcLuigi
-cp -r mcLuigi/tools ${PREFIX}/mcLuigi
+cp mc_luigi/*Tasks.py ${PREFIX}/mc_luigi
+cp mc_luigi/__init__.py ${PREFIX}/mc_luigi
+cp -r mc_luigi/tools ${PREFIX}/mc_luigi
 
-echo "${PREFIX}/mcLuigi" > ${PREFIX}/lib/python2.7/site-packages/mcLuigi.pth
-python -m compileall ${PREFIX}/mcLuigi
+echo "${PREFIX}/mc_luigi" > ${PREFIX}/lib/python2.7/site-packages/mc_luigi.pth
+python -m compileall ${PREFIX}/mc_luigi

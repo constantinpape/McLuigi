@@ -4,7 +4,7 @@ package:
     version: "0.1"
 
 source:
-    git_url: https://github.com/constantinpape/McLuigi
+    git_url: https://github.com/constantinpape/mc_luigi
     git_tag: HEAD
     #path: ..
 
@@ -26,7 +26,7 @@ requirements:
 
 tests:
     imports:
-        - mcLuigi
+        - mc_luigi
 
 about:
     license: BSD
