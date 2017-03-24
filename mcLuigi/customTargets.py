@@ -145,6 +145,28 @@ class HDF5VolumeTarget(FileSystemTarget):
         except AttributeError:
             raise RuntimeError("You must call open once before calling read or write!")
 
+    # TODO not exposed in nifty right now
+    #def writeLocked(self, start, data, key = 'data'):
+    #    if not key in self.arrays:
+    #        raise KeyError("Key does not name a valid dataset in H5 file.")
+    #    # to avoid errors in python glue code
+    #    start = list(map(long,start))
+    #    try:
+    #        self.arrays[key].writeSubarrayLocked(start, data)
+    #    except AttributeError:
+    #        raise RuntimeError("You must call open once before calling read or write!")
+
+    #def readLocked(self, start, stop, key = 'data'):
+    #    if not key in self.arrays:
+    #        raise KeyError("Key does not name a valid dataset in H5 file.")
+    #    # to avoid errors in python glue code
+    #    start = list(map(long,start))
+    #    stop = list(map(long,stop))
+    #    try:
+    #        return self.arrays[key].readSubarrayLocked(start, stop)
+    #    except AttributeError:
+    #        raise RuntimeError("You must call open once before calling read or write!")
+
     def get(self, key = 'data'):
         if not key in self.arrays:
             raise KeyError("Key does not name a valid dataset in H5 file.")

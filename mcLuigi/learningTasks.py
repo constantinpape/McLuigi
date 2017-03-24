@@ -56,9 +56,14 @@ class EdgeProbabilities(luigi.Task):
             feat.openExisting()
 
         if PipelineParameter().defectPipeline:
-            nEdges = inp["modified_adjacency"].read("n_edges_modified")
-            assert nEdges > 0, str(nEdges)
-            workflow_logger.info("EdgeProbabilities: for defect corrected edges. Total number of edges: %i" % nEdges)
+            mod_adjacency = inp["modified_adjacency"]
+            if mod_adjacency.read("has_defects"):
+                nEdges = mod_adjacency.read("n_edges_modified")
+                assert nEdges > 0, str(nEdges)
+                workflow_logger.info("EdgeProbabilities: for defect corrected edges. Total number of edges: %i" % nEdges)
+            else:
+                nEdges = inp['rag'].readKey('numberOfEdges')
+                workflow_logger.info("EdgeProbabilities: Total number of edges: %i" % nEdges)
         else:
             nEdges = inp['rag'].readKey('numberOfEdges')
             workflow_logger.info("EdgeProbabilities: Total number of edges: %i" % nEdges)

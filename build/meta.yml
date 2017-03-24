@@ -4,7 +4,7 @@ package:
     version: 0.1
 
 source:
-    git_rev: v0.1
+    git_rev: 0.1
     git_url: https://github.com/constantinpape/McLuigi.git
 
 build:
@@ -16,12 +16,12 @@ requirements:
         - python 2.7*
     run:
         - python 2.7*
-        - h5py 2.7 # I guess the version does not really matter
-        - futures # need futures https://anaconda.org/josh/futures <- I guess this here is ok
-        - luigi 2.6 # need to make sure that this version is ok
+        - h5py 2.7
+        - futures
+        - luigi 2.1.1 # TODO update to newest luigi version
         - wsdt wsdt >=0.2.post9
-        - vigra >=1.11.0.post222
-        - nifty_with_gurobi =v0.4.post7
+        - vigra >=1.11.0.post36
+        - nifty_with_gurobi =v0.4.post9
 
 Tests:
     imports:

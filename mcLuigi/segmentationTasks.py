@@ -76,6 +76,7 @@ class WsdtSegmentation(luigi.Task):
             sliceStop  = [z+1,shape[1],shape[2]]
             # TODO proper params from ppl. params
             pmap_z = pmap.read(sliceStart, sliceStop)
+            #pmap_z = pmap[z]
             if invert:
                 pmap_z = 1. - pmap_z
             seg, max_z = compute_wsdt_segmentation(pmap_z.squeeze(),
@@ -91,6 +92,7 @@ class WsdtSegmentation(luigi.Task):
             #if not 0 in seg:
             #    seg,_,_ = vigra.analysis.relabelConsecutive(seg, start_label = 0, keep_zeros = False)
             out.write(sliceStart, seg[None,:,:])
+            #out[z] = seg
             return max_z
 
         t_ws = time.time()
@@ -101,7 +103,7 @@ class WsdtSegmentation(luigi.Task):
 
         # parallel
         nWorkers = PipelineParameter().nThreads
-        ##nWorkers = 20
+        #nWorkers = 1
         with futures.ThreadPoolExecutor(max_workers=nWorkers) as executor:
             tasks = []
             for z in xrange(shape[0]):
@@ -120,7 +122,6 @@ class WsdtSegmentation(luigi.Task):
             return True
 
         def add_offset(z, offset):
-            #print z, '/', shape[0]
             sliceStart = [z,0,0]
             sliceStop  = [z+1,shape[1],shape[2]]
             seg = out.read(sliceStart, sliceStop)

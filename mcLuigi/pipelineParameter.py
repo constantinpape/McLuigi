@@ -33,7 +33,7 @@ class PipelineParameter(object):
         # Number of bins for the histogram of number of segments per slice
         self.nBinsSliceStatistics = 16
         # histogram threshold for the defect slicce detection
-        self.binThreshold = 0 # -> 0 means we don't detect any defects ! This needs to be tuned for every ds !
+        self.binThreshold = 2 # -> 0 means we don't detect any defects ! This needs to be tuned for every ds !
 
         # feature string
         # FIXME in the current form z-affnity are toxic for defects!
