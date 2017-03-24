@@ -4,8 +4,8 @@ package:
     version: 0.1
 
 source:
-    git_rev: 0.1
     git_url: https://github.com/constantinpape/McLuigi.git
+    git_tag: HEAD
 
 build:
     number: 1
