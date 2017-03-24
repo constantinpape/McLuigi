@@ -1,12 +1,12 @@
 # cf. https://github.com/ilastik/nature_methods_multicut_pipeline/blob/master/build/multicut_pipeline/meta.yaml 
 package:
     name: mc_luigi
-    version: 0.1
+    version: "0.1"
 
 source:
-    #git_url: https://github.com/constantinpape/McLuigi.git
-    #git_tag: HEAD
-    path: ..
+    git_url: https://github.com/constantinpape/McLuigi.git
+    git_tag: HEAD
+    #path: ..
 
 build:
     number: 1
@@ -20,13 +20,13 @@ requirements:
         - h5py 2.7
         - futures
         - luigi 2.1.1 # TODO update to newest luigi version
-        - wsdt wsdt >=0.2.post9
+        - wsdt >=0.2.post9
         - vigra >=1.11.0.post36
         - nifty_with_gurobi =0.4.post9
 
 tests:
     imports:
-        mcLuigi
+        - mcLuigi
 
 about:
     license: BSD
