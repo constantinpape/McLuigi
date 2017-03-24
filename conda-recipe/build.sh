@@ -2,7 +2,7 @@
 mkdir -p ${PREFIX}/mcLuigi
 
 # copy all the python sources
-cp  mcLuigi/*Tasks.py ${PREFIX}/mcLuigi
+cp mcLuigi/*Tasks.py ${PREFIX}/mcLuigi
 cp mcLuigi/__init__.py ${PREFIX}/mcLuigi
 cp -r mcLuigi/tools ${PREFIX}/mcLuigi
 
