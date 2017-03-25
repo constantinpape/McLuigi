@@ -59,7 +59,7 @@ class PipelineParameter(object):
         self.multicutSigmaFusion = 10.
         self.multicutNumParallelProposals = 1
         self.multicutNumThreadsFusion = 1
-        self.multicutNumFuse = 2
+        self.multicutNumFuse = 0 # we don't fuse by default, because this turns out to be slower for large data
         self.multicutBeta = 0.5
         self.multicutWeightingScheme = "z"
         self.multicutWeight = 16
