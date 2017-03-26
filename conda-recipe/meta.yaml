@@ -20,7 +20,7 @@ requirements:
         - luigi 2.1.1
         - wsdt >=0.2.post9
         - vigra ==1.11.0.post222
-        - nifty-with-gurobi ==0.4.post452
+        - nifty-with-gurobi ==0.4.post10
 
 test:
     imports:
