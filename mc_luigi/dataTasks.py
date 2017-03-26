@@ -201,12 +201,12 @@ class DenseGroundtruth(luigi.Task):
         gt = self.input()
         gt.open()
         # label volume causes problems for cremi...
-        #gt_labeled = vigra.analysis.labelVolumeWithBackground( gt.read([0,0,0], gt.shape) )
-        gt_labeled, _, _ = vigra.analysis.relabelConsecutive( gt.read([0,0,0], gt.shape) )
+        gt_labeled, _, _ = vigra.analysis.relabelConsecutive( gt.read([0,0,0], gt.shape()) )
 
         out = self.output()
-        out.open(gt.shape)
+        out.open(gt.shape())
         out.write( [0,0,0], gt_labeled)
+        out.close()
 
     def output(self):
         save_path = os.path.join( PipelineParameter().cache, os.path.split(self.path)[1][:-3] + "_labeled.h5" )
