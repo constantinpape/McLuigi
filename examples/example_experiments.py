@@ -1,20 +1,22 @@
-import luigi
 import os
+import luigi
 
 import logging
 import json
 
-from workflowTasks import MulticutSegmentation, BlockwiseMulticutSegmentation
-from featureTasks import EdgeFeatures, RegionFeatures
-from dataTasks import StackedRegionAdjacencyGraph, ExternalSegmentationLabeled
-from learningTasks import SingleRandomForestFromGt
+from mc_luigi import *
 
-from pipelineParameter import PipelineParameter
-from toolsLuigi import config_logger
-
-# the workflow logger
+# configure the logger
 workflow_logger = logging.getLogger(__name__)
 config_logger(workflow_logger)
+
+def learning():
+    pass
+
+
+def inference():
+    pass
+
 
 if __name__ == '__main__':
 
