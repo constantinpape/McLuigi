@@ -14,9 +14,9 @@ You can either build the following dependencies from source:
 
 or (recommended) install via conda.
 
-'''
+```
 $ conda install -c cpape mc_luigi=0.1 
-'''
+```
 
 To fulfill all dependencies, you also need to have the ilastik channel in your .condarc .
 
