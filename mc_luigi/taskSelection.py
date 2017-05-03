@@ -6,7 +6,6 @@ from pipelineParameter import PipelineParameter
 from tools import config_logger
 
 import logging
-import json
 
 # init the workflow logger
 workflow_logger = logging.getLogger(__name__)
@@ -22,8 +21,7 @@ config_logger(workflow_logger)
 def get_local_features():
 
     # load the paths to input files
-    with open(PipelineParameter().InputFile, 'r') as f:
-        inputs = json.load(f)
+    inputs = PipelineParameter().inputs
 
     # choose the appropriate feature tasks (normal vs. defect handling) <- pipelineParams.defectPipeline
     # TODO (anisotropic vs. isotropic) <- pipelineParams.anisotropicPipeline -> also move to feature tasks!
@@ -85,8 +83,7 @@ def get_local_features():
 def get_local_features_for_multiinp():
 
     # load the paths to input files
-    with open(PipelineParameter().InputFile, 'r') as f:
-        inputs = json.load(f)
+    inputs = PipelineParameter().inputs
 
     # choose the appropriate feature tasks (normal vs. defect handling) <- pipelineParams.defectPipeline
     # TODO (anisotropic vs. isotropic) <- pipelineParams.anisotropicPipeline

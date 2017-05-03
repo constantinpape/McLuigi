@@ -1,6 +1,0 @@
-{
-"data":["/home/constantin/Work/home_hdd/data/test_block/test-raw.h5","/home/constantin/Work/home_hdd/data/test_block/test-probs.h5"],
-"seg":"/home/constantin/Work/home_hdd/data/test_block/test-seg.h5",
-"rf":"/home/constantin/Work/home_hdd/data/test_block/test-rf_raw.pkl",
-"cache" : "/tmp/mc_cache"
-}

@@ -463,6 +463,7 @@ class BlockwiseSubSolver(luigi.Task):
 
 
     def _solve_subroplems(self, costs, subProblems, numberOfEdges):
+
         # sequential for debugging
         #subResults = []
         #for blockId, subProblem in enumerate(subProblems):

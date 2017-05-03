@@ -1,0 +1,7 @@
+{
+    "data"  : ["./test_data/anisotropic/raw.h5",
+               "./test_data/anisotropic/pmap.h5"],
+    "seg"   :  "./test_data/anisotropic/seg.h5",
+    "gt"    :  "./test_data/anisotropic/gt.h5",
+    "cache" :  "./cache_train"
+}

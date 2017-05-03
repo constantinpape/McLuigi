@@ -35,6 +35,7 @@ except ImportError:
 workflow_logger = logging.getLogger(__name__)
 config_logger(workflow_logger)
 
+# TODO random forest wrapper
 
 class EdgeProbabilities(luigi.Task):
 

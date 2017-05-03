@@ -6,6 +6,8 @@
 
 import multiprocessing
 import logging
+import os
+import json
 
 # singleton type
 class Singleton(type):
@@ -15,14 +17,15 @@ class Singleton(type):
             cls._instances[cls] = super(Singleton, cls).__call__(*args, **kwargs)
         return cls._instances[cls]
 
+
 class PipelineParameter(object):
     __metaclass__ = Singleton
 
     def __init__(self):
 
         # Input Files
-        self.cache = "/tmp/mc_cache"
-        self.InputFile = ""
+        self.inputs = {}
+        self.cache  = ""
 
         # flag to switch between pipeline for anisotropic and isotropic (not implemented yet) data
         self.anisotropicPipeline = True
@@ -89,3 +92,9 @@ class PipelineParameter(object):
     # TODO implement load / save via serialization to json
     # include meta fields to save experiment name and time of execution
     # hash everything and put into paramstr for being able to re-identify reliably
+
+    def read_input_file(self, input_file):
+        with open(input_file) as f:
+            inp_dict = json.load(f)
+        self.inputs = inp_dict
+        self.cache  = inp_dict['cache']

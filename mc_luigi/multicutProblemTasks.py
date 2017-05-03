@@ -188,7 +188,7 @@ class MulticutProblem(luigi.Task):
         inp = self.input()
 
         # construct the plain graph for the multicut problem
-        uv_ids = rag.uvIds()
+        uv_ids = inp['rag'].readKey('uvIds')
         n_vars = uv_ids.max() + 1
         assert n_vars == inp['rag'].readKey('numberOfNodes')
         g = nifty.graph.UndirectedGraph(int(n_vars))

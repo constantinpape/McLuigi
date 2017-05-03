@@ -29,12 +29,7 @@ config_logger(workflow_logger)
 def get_local_vigra_features(learnXYOnly = False, learnZOnly = False):
 
     # load the paths to input files
-    with open(PipelineParameter().InputFile, 'r') as f:
-        inputs = json.load(f)
-    # load the feature config
-    with open(PipelineParameter().FeatureConfigFile, 'r') as f:
-        feat_params = json.load(f)
-
+    inputs = PipelineParameter().inputs
     features = feat_params["features"]
 
     if not isinstance(features, list):
