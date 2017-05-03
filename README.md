@@ -10,7 +10,7 @@ You need a cplex or gurobi license to use the multicut pipeline.
 
 ### conda (recommended)
 
-To fulfill all dependencies, you also need to have the ilastik channel in your .condarc .
+To fulfill all dependencies, you also need to have the ilastik and conda-forge channel in your .condarc .
 Then install the package via
 ```
 $ GUROBI_ROOT_DIR=/path/to/gurobi conda install -c cpape mc_luigi=0.1 
