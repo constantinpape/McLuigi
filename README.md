@@ -6,25 +6,27 @@ Most of the computations are done out-of-core using hdf5 as backend and implemen
 
 ## Installation
 
-To run the pipeline, you need the following python libraries:
+You can either build the following dependencies from source:
 
-* h5py
-* Luigi: https://github.com/spotify/luigi (version ???)
+* Luigi: https://github.com/spotify/luigi (version 2.3)
 * Vigra: https://github.com/ukoethe/vigra (master, needs to be build with hdf5 and python-bindings) 
 * Nifty: https://github.com/constantinpape/nifty/tree/stacked_rag , needs to be build with python-bindings, hdf5, fastfilters (https://github.com/svenpeter42/fastfilters) and Gurobi or CPLEX.
 
-The c++ libraries (vigra, nifty) need a compiler with c++ 11 support.
+or (recommended) install via conda.
+
+'''
+$ conda install -c cpape mc_luigi=0.1 
+'''
+
+To fulfill all dependencies, you also need to have the ilastik channel in your .condarc .
 
 ## Missing Features
 
-* Generating oversemgentation (wsdt)
 * Lifted Multicut
 * Pipeline for isotropic data.
 
 ## TODOs
 
 * Get central scheduler running.
-* Doc + Examples
-* Proper installer via setup.py/ conda
 * Add docstrings
 * change to PEP8 style
