@@ -180,7 +180,8 @@ class MulticutProblem(luigi.Task):
 
         out = self.output()
         out.write(edge_costs,'costs')
-        out.write( g.serialize(), 'graph' )
+        out.write(g.serialize(), 'graph')
+        out.write(g.numberOfNodes, 'number_of_nodes')
 
 
     def _standard_multicut_problem(self, edge_costs):
@@ -205,8 +206,9 @@ class MulticutProblem(luigi.Task):
         out = self.output()
 
         assert g.numberOfEdges == edge_costs.shape[0]
-        out.write( g.serialize(), "graph" )
-        out.write( edge_costs, "costs")
+        out.write(g.serialize(), "graph")
+        out.write(edge_costs, "costs")
+        out.write(g.numberOfNodes, 'number_of_nodes')
 
 
     def output(self):

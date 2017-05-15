@@ -116,10 +116,10 @@ def fusion_moves(g, costs, blockId, nThreads = 0, isGlobal = False):
 
     if isGlobal:
         energy = obj.evalNodeLabels(ret)
-        workflow_logger.debug("Inference for global problem with fusion moves solver in " + str(t_inf) + " s")
-        workflow_logger.debug("Energy of the solution: %f" % energy)
+        workflow_logger.info("BlockwiseMulticutSolver: Inference for global problem with fusion moves solver in %f s" % t_inf)
+        workflow_logger.info("BlockwiseMulticutSolver: Global problem solved with energy %f" % obj.evalNodeLabels(ret) ) # Note that we don't need to project back to global problem to calculate the correct energy !
     else:
-        workflow_logger.debug("Inference for block " + str(blockId) + " with fusion moves solver in " + str(t_inf) + " s")
+        workflow_logger.debug("Inference for block %i with fusion moves solver in %f s" % (blockId, t_inf) )
 
     return ret
 
@@ -159,14 +159,7 @@ class BlockwiseMulticutSolver(luigi.Task):
 
         problems = self.input()
 
-        globalProblem = problems[0]
-
-        globalGraph = nifty.graph.UndirectedGraph()
-        globalGraph.deserialize(globalProblem.read("graph"))
-        globalCosts = globalProblem.read("costs")
-
-        globalObjective = nifty.graph.multicut.multicutObjective(globalGraph, globalCosts)
-        globalNumberOfNodes = globalGraph.numberOfNodes
+        globalNumberOfNodes = problems[0].read('number_of_nodes')
 
         # we solve the problem for the costs and the edges of the last level of hierarchy
         reducedProblem = problems[-1]
@@ -174,9 +167,6 @@ class BlockwiseMulticutSolver(luigi.Task):
         reducedGraph = nifty.graph.UndirectedGraph()
         reducedGraph.deserialize( reducedProblem.read("graph") )
         reducedCosts = reducedProblem.read("costs")
-
-        reducedNew2Old = reducedProblem.read("new2old")
-        assert len(reducedNew2Old) == reducedGraph.numberOfNodes, str(len(reducedNew2Old)) + " , " + str(reducedGraph.numberOfNodes)
 
         # run global inference
         t_inf = time.time()
@@ -188,17 +178,12 @@ class BlockwiseMulticutSolver(luigi.Task):
                 isGlobal = True)
         workflow_logger.info("BlockwiseMulticutSolver: inference of reduced problem for the whole volume took: %f s" % (time.time() - t_inf,))
 
-        assert reducedNodeResult.shape[0] == reducedNew2Old.shape[0]
         toGlobalNodes = reducedProblem.read("new2global")
 
         # TODO vectorize
         nodeResult = np.zeros(globalNumberOfNodes, dtype = 'uint32')
         for nodeId, nodeRes in enumerate(reducedNodeResult):
             nodeResult[toGlobalNodes[nodeId]] = nodeRes
-
-        # get the global energy
-        globalEnergy = globalObjective.evalNodeLabels(nodeResult)
-        workflow_logger.info("BlockwiseMulticutSolver: Global problem solved with energy %f" % (globalEnergy,) )
 
         self.output().write(nodeResult)
 
@@ -303,6 +288,7 @@ class ReducedProblem(luigi.Task):
 
         out = self.output()
         out.write(reducedGraph.serialize(), "graph")
+        out.write(reducedGraph.numberOfNodes, 'number_of_nodes')
         out.write(newCosts, "costs")
 
         out.write(global2new, "global2new")
