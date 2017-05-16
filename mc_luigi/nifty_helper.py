@@ -23,7 +23,7 @@ def available_factorys():
         available_base.append('ilp')
     available = ['fm-%s' % fctry for fctry in available_base]
     available.extend(available_base)
-    return available_base
+    return available
 
 
 def run_nifty_solver(
