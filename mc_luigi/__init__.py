@@ -9,4 +9,4 @@ from multicutProblemTasks import MulticutProblem
 from segmentationTasks import WsdtSegmentation
 from tools import config_logger, run_decorator
 
-from blockwiseMulticutTasks import NodesToInitialBlocks
+from blockwiseMulticutTasks import NodesToInitialBlocks, TestSubSolver

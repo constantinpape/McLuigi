@@ -66,7 +66,7 @@ class PipelineParameter(object):
         self.multicutBeta = 0.5
         self.multicutWeightingScheme = "z"
         self.multicutWeight = 16
-        self.multicutSeedFraction = 0.005
+        self.multicutSeedFraction = 0.05
         self.multicutNumIt = 2500
         self.multicutNumItStop = 20
         self.multicutBlockShape = [50,512,512]
@@ -74,6 +74,9 @@ class PipelineParameter(object):
         self.multicutGlobalTimeLimit = 60*60*10 # time limit in seconds / 10 hours
         self.multicutNThreadsGlobal = multiprocessing.cpu_count()
         self.multicutNumItStopGlobal = 12
+        self.multicutSeedFractionGlobal = 1e-5
+
+        self.subSolverType = 'fm-ilp'
 
         ### parameters for segmentation tasks / wsdt
         self.wsdtThreshold = .2

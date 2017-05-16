@@ -7,8 +7,10 @@ from pipelineParameter import PipelineParameter
 from dataTasks import ExternalSegmentation
 from customTargets import HDF5DataTarget
 from defectDetectionTasks import DefectSliceDetection
+from multicutProblemTasks import MulticutProblem
 
 from tools import config_logger, run_decorator
+from nifty_helper import run_nifty_solver, string_to_factory, available_factorys
 
 import os
 import logging
@@ -34,94 +36,6 @@ except ImportError:
 # init the workflow logger
 workflow_logger = logging.getLogger(__name__)
 config_logger(workflow_logger)
-
-
-def greedy(g, costs, blockId, nThreads = 0, isGlobal = False):
-
-    assert g.numberOfEdges == costs.shape[0]
-    obj = nifty.graph.multicut.multicutObjective(g, costs)
-
-    workflow_logger.debug("Solving MC Problem greedily with %i number of variables" % (g.numberOfNodes,))
-
-    greedy = obj.greedyAdditiveFactory().create(obj)
-
-    solver = obj.fusionMoveBasedFactory(
-        verbose=PipelineParameter().multicutVerbose,
-        fusionMove=obj.fusionMoveSettings(mcFactory=ilpFac),
-        proposalGen=obj.watershedProposals(sigma=PipelineParameter().multicutSigmaFusion,
-            seedFraction=PipelineParameter().multicutSeedFraction),
-        numberOfIterations=PipelineParameter().multicutNumIt,
-        numberOfThreads=nThreads,
-        numberOfParallelProposals=nParallel,
-        stopIfNoImprovement=numItStop,
-        fuseN=PipelineParameter().multicutNumFuse,
-    ).create(obj)
-
-    t_inf = time.time()
-
-    # first optimize greedy
-    ret = greedy.optimize()
-
-    return ret
-
-
-def fusion_moves(g, costs, blockId, nThreads = 0, isGlobal = False):
-
-    assert g.numberOfEdges == costs.shape[0]
-    obj = nifty.graph.multicut.multicutObjective(g, costs)
-
-    workflow_logger.debug("Solving MC Problem with %i number of variables" % (g.numberOfNodes,))
-
-    greedy = obj.greedyAdditiveFactory().create(obj)
-
-    ilpFac = obj.multicutIlpFactory(ilpSolver=ilp_backend,verbose=0,
-        addThreeCyclesConstraints=True,
-        addOnlyViolatedThreeCyclesConstraints=True)
-
-    if nThreads == 0:
-        nParallel = 0
-    else:
-        nParallel = 2 * nThreads
-
-    if isGlobal:
-        numItStop = PipelineParameter().multicutNumItStopGlobal
-    else:
-        numItStop = PipelineParameter().multicutNumItStop
-
-    solver = obj.fusionMoveBasedFactory(
-        verbose=PipelineParameter().multicutVerbose,
-        fusionMove=obj.fusionMoveSettings(mcFactory=ilpFac),
-        proposalGen=obj.watershedProposals(sigma=PipelineParameter().multicutSigmaFusion,
-            seedFraction=PipelineParameter().multicutSeedFraction),
-        numberOfIterations=PipelineParameter().multicutNumIt,
-        numberOfThreads=nThreads,
-        numberOfParallelProposals=nParallel,
-        stopIfNoImprovement=numItStop,
-        fuseN=PipelineParameter().multicutNumFuse,
-    ).create(obj)
-
-    t_inf = time.time()
-
-    # first optimize greedy
-    ret = greedy.optimize()
-
-    # then run the actual fusion moves solver warmstarted with greedy result
-
-    if isGlobal: # time limit and verbose for global problem:
-        visitor = obj.multicutVerboseVisitor(1,PipelineParameter().multicutGlobalTimeLimit)
-        ret = solver.optimize(nodeLabels=ret,visitor=visitor)
-    else:
-        ret = solver.optimize(nodeLabels=ret)
-    t_inf = time.time() - t_inf
-
-    if isGlobal:
-        energy = obj.evalNodeLabels(ret)
-        workflow_logger.info("BlockwiseMulticutSolver: Inference for global problem with fusion moves solver in %f s" % t_inf)
-        workflow_logger.info("BlockwiseMulticutSolver: Global problem solved with energy %f" % obj.evalNodeLabels(ret) ) # Note that we don't need to project back to global problem to calculate the correct energy !
-    else:
-        workflow_logger.debug("Inference for block %i with fusion moves solver in %f s" % (blockId, t_inf) )
-
-    return ret
 
 
 # produce reduced global graph from subproblems
@@ -159,33 +73,41 @@ class BlockwiseMulticutSolver(luigi.Task):
 
         problems = self.input()
 
-        globalNumberOfNodes = problems[0].read('number_of_nodes')
-
+        n_nodes_global = problems[0].read('number_of_nodes')
         # we solve the problem for the costs and the edges of the last level of hierarchy
-        reducedProblem = problems[-1]
+        reduced_problem = problems[-1]
 
-        reducedGraph = nifty.graph.UndirectedGraph()
-        reducedGraph.deserialize( reducedProblem.read("graph") )
-        reducedCosts = reducedProblem.read("costs")
+        reduced_graph = nifty.graph.UndirectedGraph()
+        reduced_graph.deserialize( reduced_problem.read("graph") )
+        reduced_costs = reduced_problem.read("costs")
+        reduced_objective = nifty.graph.optimization.multicut.multicutObjective(reduced_graph, reduced_costs)
 
-        # run global inference
-        t_inf = time.time()
-        reducedNodeResult = fusion_moves(
-                reducedGraph,
-                reducedCosts,
-                0,
-                PipelineParameter().multicutNThreadsGlobal,
-                isGlobal = True)
-        workflow_logger.info("BlockwiseMulticutSolver: inference of reduced problem for the whole volume took: %f s" % (time.time() - t_inf,))
+        # get solver and run global inference
+        solver_type = 'fm-kl'
+        inf_params  = dict(sigma = PipelineParameter().multicutSigmaFusion,
+                number_of_iterations = PipelineParameter().multicutNumIt,
+                n_stop = PipelineParameter().multicutNumItStopGlobal,
+                n_threads = PipelineParameter().multicutNThreadsGlobal,
+                n_fuse    = PipelineParameter().multicutNumFuse,
+                seed_fraction = PipelineParameter().multicutSeedFractionGlobal
+                )
+        factory = string_to_factory(reduced_objective, solver_type, inf_params)
+        reduced_node_result, energy, t_inf = run_nifty_solver(reduced_objective, factory,
+                verbose = True,
+                time_limit = PipelineParameter().multicutGlobalTimeLimit)
 
-        toGlobalNodes = reducedProblem.read("new2global")
+        workflow_logger.info("BlockwiseMulticutSolver: Inference of reduced problem for the whole volume took: %f s" % (time.time() - t_inf,))
+        # Note that we don't need to project back to global problem to calculate the correct energy !
+        workflow_logger.info("BlockwiseMulticutSolver: Problem solved with energy %f" % reduced_objective.evalNodeLabels(reduced_node_result) )
+
+        to_global_nodes = reduced_problem.read("new2global")
 
         # TODO vectorize
-        nodeResult = np.zeros(globalNumberOfNodes, dtype = 'uint32')
-        for nodeId, nodeRes in enumerate(reducedNodeResult):
-            nodeResult[toGlobalNodes[nodeId]] = nodeRes
+        node_result = np.zeros(n_nodes_global, dtype = 'uint32')
+        for node_id, node_res in enumerate(reduced_node_result):
+            node_result[to_global_nodes[node_id]] = node_res
 
-        self.output().write(nodeResult)
+        self.output().write(node_result)
 
     def output(self):
         save_path = os.path.join( PipelineParameter().cache, "BlockwiseMulticutSolver_%s.h5" % ("modifed" if PipelineParameter().defectPipeline else "standard",))
@@ -246,7 +168,7 @@ class ReducedProblem(luigi.Task):
         numberOfNewEdges = uvIdsNew.shape[0]
 
         costs = costs[cutEdges==1]
-        newCosts = np.zeros(numberOfNewEdges)
+        newCosts = np.zeros(numberOfNewEdges, dtype = 'float32')
         assert inverseIdx.shape[0] == costs.shape[0]
 
         # TODO vectorize this too
@@ -392,7 +314,7 @@ class BlockwiseSubSolver(luigi.Task):
 
         workflow_logger.info("BlockwiseSubSolver: Starting solvers for subproblems.")
         t_inf_total = time.time()
-        self._solve_subroplems(costs, subproblems, numberOfEdges)
+        self._solve_subproblems(costs, subproblems, numberOfEdges)
         workflow_logger.info( "BlockwiseSubSolver: Inference time total for subproblems %f s" % (time.time() - t_inf_total,))
 
         seg.close()
@@ -448,22 +370,44 @@ class BlockwiseSubSolver(luigi.Task):
         return subProblems
 
 
-    def _solve_subroplems(self, costs, subProblems, numberOfEdges):
+    def _solve_subproblems(self, costs, subProblems, numberOfEdges):
+
+        sub_solver_type = PipelineParameter().subSolverType
+        if sub_solver_type in ('fm-ilp', 'fm-kl'):
+            solver_params  = dict(sigma = PipelineParameter().multicutSigmaFusion,
+                    number_of_iterations = PipelineParameter().multicutNumIt,
+                    n_stop = PipelineParameter().multicutNumItStopGlobal,
+                    n_threads = 0,
+                    n_fuse    = PipelineParameter().multicutNumFuse,
+                    seed_fraction = PipelineParameter().multicutSeedFraction
+                    )
+        else:
+            solver_params = dict()
+
+        def _solve_mc(g, costs, block_id):
+            workflow_logger.debug("BlockwiseSubSolver: Solving MC Problem with %i / %i number of variables" % (g.numberOfNodes,g.numberOfEdges))
+            obj = nifty.graph.optimization.multicut.multicutObjective(g, costs)
+            factory = string_to_factory(obj, sub_solver_type, solver_params)
+            solver = factory.create(obj)
+            t_inf  = time.time()
+            res    = solver.optimize()
+            workflow_logger.debug("BlockwiseSubSolver: Inference for block %i with fusion moves solver in %f s" % (block_id, t_inf - time.time()) )
+            return res
 
         # sequential for debugging
         #subResults = []
         #for blockId, subProblem in enumerate(subProblems):
         #    print "Sequential prediction for block id:", blockId
-        #    subResults.append( fusion_moves( subProblem[2], costs[subProblem[0]], blockId, 1 ) )
+        #    subResults.append( _solve_mc( subProblem[2], costs[subProblem[0]], blockId) )
 
         nWorkers = min( len(subProblems), PipelineParameter().nThreads )
-        #nWorkers = 2
+        #nWorkers = 1
         with futures.ThreadPoolExecutor(max_workers=nWorkers) as executor:
-            tasks = []
-            for blockId, subProblem in enumerate(subProblems):
-                tasks.append( executor.submit( fusion_moves,
-                    subProblem[2], costs[subProblem[0]],
-                    blockId, 0 ) )
+            tasks = [executor.submit(
+                _solve_mc,
+                subProblem[2],
+                costs[subProblem[0]],
+                blockId) for blockId, subProblem in enumerate(subProblems)]
         subResults = [task.result() for task in tasks]
 
         cutEdges = np.zeros( numberOfEdges, dtype = np.uint8 )
@@ -489,5 +433,120 @@ class BlockwiseSubSolver(luigi.Task):
     def output(self):
         blcksize_str = "_".join( map( str, list(self.blockShape) ) )
         save_name = "BlockwiseSubSolver_%s_%s.h5" % (blcksize_str, "modifed" if PipelineParameter().defectPipeline else "standard")
+        save_path = os.path.join( PipelineParameter().cache, save_name)
+        return HDF5DataTarget( save_path )
+
+
+# only works for level 1 for now!
+class TestSubSolver(luigi.Task):
+
+    pathToSeg = luigi.Parameter()
+    pathToClassifier = luigi.Parameter()
+
+    blockShape   = luigi.ListParameter(default = PipelineParameter().multicutBlockShape)
+    blockOverlap = luigi.ListParameter(default = PipelineParameter().multicutBlockOverlap)
+
+    def requires(self):
+        nodes2blocks = NodesToInitialBlocks(self.pathToSeg, self.blockShape, self.blockOverlap)
+        return {"seg" : ExternalSegmentation(self.pathToSeg),
+                "problem" : MulticutProblem(self.pathToSeg, self.pathToClassifier),
+                "nodes2blocks" : nodes2blocks }
+
+    @run_decorator
+    def run(self):
+        # Input
+        inp = self.input()
+        seg = inp["seg"]
+        seg.open()
+        problem = inp["problem"]
+        costs = problem.read("costs")
+        nodes2blocks = inp["nodes2blocks"].read()
+
+        graph = nifty.graph.UndirectedGraph()
+        graph.deserialize( problem.read("graph") )
+
+        workflow_logger.info("TestSubSolver: Starting extraction of subproblems.")
+        subproblems = self._run_subproblems_extraction(seg, graph, nodes2blocks)
+
+        workflow_logger.info("TestSubSolver: Starting solvers for subproblems.")
+        self._solve_subproblems(costs, subproblems)
+
+        seg.close()
+
+
+    def _run_subproblems_extraction(self, seg, graph, nodes2blocks):
+
+        # function for subproblem extraction
+        # extraction only for level 0
+        def extract_subproblem(blockId):
+            node_list = nodes2blocks[blockId]
+            inner_edges, outer_edges, subgraph = graph.extractSubgraphFromNodes(node_list.tolist())
+            return np.array(inner_edges), np.array(outer_edges), subgraph
+
+        blocking = nifty.tools.blocking( roiBegin = [0L,0L,0L], roiEnd = seg.shape(), blockShape = self.blockShape )
+        number_of_blocks = blocking.numberOfBlocks
+        # sample block-ids corresponding to the number of threads
+        n_threads = PipelineParameter().nThreads
+        sampled_blocks = np.random.choice(number_of_blocks, min(n_threads, number_of_blocks), replace = False)
+
+        # parallel
+        with futures.ThreadPoolExecutor(max_workers=PipelineParameter().nThreads) as executor:
+            tasks = [executor.submit(extract_subproblem, block_id) for block_id in sampled_blocks]
+            sub_problems = [task.result() for task in tasks]
+
+        assert len(sub_problems) == len(sampled_blocks), "%i, %i" % (len(sub_problems), len(sampled_blocks))
+        return sub_problems
+
+
+    def _solve_subproblems(self, costs, sub_problems):
+
+        def _test_mc(g, costs, sub_solver_type):
+
+            if sub_solver_type in ('fm-ilp', 'fm-kl'):
+                solver_params  = dict(sigma = PipelineParameter().multicutSigmaFusion,
+                        number_of_iterations = PipelineParameter().multicutNumIt,
+                        n_stop = PipelineParameter().multicutNumItStopGlobal,
+                        n_threads = 0,
+                        n_fuse    = PipelineParameter().multicutNumFuse,
+                        seed_fraction = PipelineParameter().multicutSeedFraction
+                        )
+            else:
+                solver_params = dict()
+
+            obj = nifty.graph.optimization.multicut.multicutObjective(g, costs)
+            solver = string_to_factory(obj, sub_solver_type, solver_params).create(obj)
+            t_inf  = time.time()
+            res    = solver.optimize()
+            t_inf  = time.time() - t_inf
+            return obj.evalNodeLabels(res), t_inf
+
+        workflow_logger.info("TestSubSolver: Running sub-block tests for %i blocks" % len(sub_problems))
+        available = available_factorys()
+        results = {}
+
+        for sub_solver_type in available:
+            with futures.ThreadPoolExecutor(max_workers=PipelineParameter().nThreads) as executor:
+                tasks = [executor.submit(
+                    _test_mc,
+                    sub_problem[2],
+                    costs[sub_problem[0]],
+                    sub_solver_type) for sub_problem in sub_problems]
+                sub_results = [task.result() for task in tasks]
+                mean_energy = np.mean([rr[0] for rr in sub_results])
+                mean_time   = np.mean([rr[1] for rr in sub_results])
+                results[sub_solver_type] = (mean_energy, mean_time)
+
+        for_serialization = []
+        for sub_solver_type in available:
+            res = results[sub_solver_type]
+            workflow_logger.info( "TestSubSolver: Result of %s: mean-energy: %f, mean-inference-time: %f" % (sub_solver_type, res[0], res[1]) )
+            for_serialization.append([res[0],res[1]])
+
+        self.output().write(available, 'solvers')
+        self.output().write(np.array(for_serialization), 'results')
+
+    def output(self):
+        blcksize_str = "_".join( map( str, list(self.blockShape) ) )
+        save_name = "TestSubSolver_%s_%s.h5" % (blcksize_str, "modifed" if PipelineParameter().defectPipeline else "standard")
         save_path = os.path.join( PipelineParameter().cache, save_name)
         return HDF5DataTarget( save_path )
