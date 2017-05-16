@@ -205,7 +205,7 @@ def string_to_factory(obj, solver_type, solver_kwargs = {}, backend_kwargs = {})
         return nifty_ilp_factory(obj)
     elif solver_type == 'fm-greedy':
         return nifty_fusion_move_factory(obj,
-                backend_factory = nifty_greedy_factory(obj)
+                backend_factory = nifty_greedy_factory(obj),
                 **solver_kwargs)
     elif solver_type == 'fm-kl':
         return nifty_fusion_move_factory(obj,
