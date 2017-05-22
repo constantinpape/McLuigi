@@ -39,9 +39,9 @@ class InputData(luigi.Task):
     """
 
     path = luigi.Parameter()
-    key  = luigi.Parameter(default = "data")
+    key  = luigi.Parameter(default="data")
     # the dtype, should either be float32 or uint8
-    dtype = luigi.Parameter(default = "float32")
+    dtype = luigi.Parameter(default="float32")
 
     def run(self):
         pass
@@ -59,12 +59,11 @@ class InputData(luigi.Task):
             dset = f[self.key]
 
             if np.dtype(self.dtype) != np.dtype(dset.dtype):
-                workflow_logger.debug("InputData: task, loading data from %s" % (self.path,) )
-                workflow_logger.debug("InputData: changing dtype from %s to %s" % (self.dtype,dset.dtype) )
+                workflow_logger.debug("InputData: task, loading data from %s" % self.path)
+                workflow_logger.debug("InputData: changing dtype from %s to %s" % (self.dtype, dset.dtype))
                 self.dtype = dset.dtype
 
         return HDF5VolumeTarget(self.path, self.dtype, self.key)
-
 
 
 class ExternalSegmentation(luigi.Task):
@@ -74,9 +73,9 @@ class ExternalSegmentation(luigi.Task):
 
     # Path to the segmentation
     path = luigi.Parameter()
-    key  = luigi.Parameter(default = "data")
+    key  = luigi.Parameter(default="data")
     # the dtype, should either be uint32 or uint64
-    dtype = luigi.Parameter(default = "uint32")
+    dtype = luigi.Parameter(default="uint32")
 
     def run(self):
         pass
@@ -95,11 +94,11 @@ class ExternalSegmentation(luigi.Task):
             dset = f[self.key]
 
             if np.dtype(self.dtype) != np.dtype(dset.dtype):
-                workflow_logger.debug("ExternalSegmentation: loading data from %s" % (self.path,) )
-                workflow_logger.debug("ExternalSegmentation: changing dtype from %s to %s" % (self.dtype,dset.dtype) )
+                workflow_logger.debug("ExternalSegmentation: loading data from %s" % self.path)
+                workflow_logger.debug("ExternalSegmentation: changing dtype from %s to %s" % (self.dtype, dset.dtype))
                 self.dtype = dset.dtype
 
-        return HDF5VolumeTarget(self.path, self.dtype, self.key, compression = PipelineParameter().compressionLevel)
+        return HDF5VolumeTarget(self.path, self.dtype, self.key, compression=PipelineParameter().compressionLevel)
 
 
 class ExternalSegmentationLabeled(luigi.Task):
@@ -110,62 +109,56 @@ class ExternalSegmentationLabeled(luigi.Task):
 
     # Path to the segmentation
     pathToSeg = luigi.Parameter()
-    keyToSeg  = luigi.Parameter(default = "data")
+    keyToSeg  = luigi.Parameter(default="data")
     # the dtype, should either be uint32 or uint64
-    dtype = luigi.Parameter(default = "uint32")
+    dtype = luigi.Parameter(default="uint32")
 
     def requires(self):
-        return ExternalSegmentation(self.pathToSeg, self.keyToSeg, self.dtype )
+        return ExternalSegmentation(self.pathToSeg, self.keyToSeg, self.dtype)
 
     @run_decorator
     def run(self):
 
-        segIn = self.input()
-        segIn.open()
+        seg_in = self.input()
+        seg_in.open()
 
-        shape = segIn.shape
+        shape = seg_in.shape
 
-        def labelSlice(segIn, segOut, z):
-            begin = [z,0, 0]
-            end   = [z+1,shape[1],shape[2]]
-            segSlice = segIn.read(begin,end).squeeze()
-            segSlice = vigra.analysis.labelImage(segSlice) - 1
-            offset  = segSlice.max()
-            segOut.write(begin, segSlice[None,:,:])
+        seg_out = self.output()
+        seg_out.open(shape)
+
+        def label_slice(z):
+            begin = [z, 0, 0]
+            end   = [z + 1, shape[1], shape[2]]
+            seg_slice = seg_in.read(begin, end).squeeze()
+            seg_slice = vigra.analysis.labelImage(seg_slice) - 1
+            offset  = seg_slice.max()
+            seg_out.write(begin, seg_slice[None, :, :])
             return offset
 
-        segOut = self.output()
-        segOut.open(shape)
-
-        nWorkers = min( shape[0], PipelineParameter().nThreads )
-        #nWorkers = 1
-        with futures.ThreadPoolExecutor(max_workers=nWorkers) as executor:
-            tasks = []
-            for z in xrange(shape[0]):
-                tasks.append( executor.submit(labelSlice, segIn, segOut, z) )
+        n_workers = min(shape[0], PipelineParameter().nThreads)
+        # n_workers = 1
+        with futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
+            tasks = [executor.submit(label_slice, z) for z in xrange(shape[0])]
 
         # calculate the offsets for every slice
-        offsets = np.array( [task.result() for task in tasks], dtype = np.uint32 )
+        offsets = np.array([task.result() for task in tasks], dtype='uint32')
         offsets = np.cumsum(offsets)
         # need to shift by 1 to the left and insert a 0
-        offsets = np.roll(offsets,1)
+        offsets = np.roll(offsets, 1)
         offsets[0] = 0
 
-        def addOffset(seg, offset, z):
+        def addOffset(offset, z):
             begin = [z, 0, 0]
-            end   = [z+1,shape[1],shape[2]]
-            segSlice = seg.read(begin,end)
-            segSlice += offset
-            seg.write(begin, segSlice)
+            end   = [z + 1, shape[1], shape[2]]
+            seg_slice = seg_out.read(begin, end)
+            seg_slice += offset
+            seg_out.write(begin, seg_slice)
             return True
 
-
-        with futures.ThreadPoolExecutor(max_workers=nWorkers) as executor:
-            tasks = []
-            for z in xrange(shape[0]):
-                tasks.append( executor.submit(addOffset, segOut, offsets[z], z) )
-
-        res = [task.result() for task in tasks]
+        with futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
+            tasks = [executor.submit(addOffset, offsets[z], z) for z in xrange(shape[0])]
+        [task.result() for task in tasks]
 
     def output(self):
         f = h5py.File(self.path, 'r')
@@ -173,14 +166,17 @@ class ExternalSegmentationLabeled(luigi.Task):
         dset = f[self.key]
 
         if np.dtype(self.dtype) != np.dtype(dset.dtype):
-            workflow_logger.debug("ExternalSegmentationLabeled: loading data from %s" % (self.path,) )
-            workflow_logger.debug("ExternalSegmentationLabeled: changing dtype from %s to %s" % (self.dtype,dset.dtype) )
+            workflow_logger.debug("ExternalSegmentationLabeled: loading data from %s" % self.path)
+            workflow_logger.debug(
+                "ExternalSegmentationLabeled: changing dtype from %s to %s" % (self.dtype, dset.dtype)
+            )
             self.dtype = dset.dtype
 
-        save_path = os.path.join( PipelineParameter().cache,
-                os.path.split(self.pathToSeg)[1][:-3] + "_labeled.h5" )
-        return HDF5VolumeTarget( save_path, self.dtype, compression = PipelineParameter().compressionLevel )
-
+        save_path = os.path.join(
+            PipelineParameter().cache,
+            os.path.split(self.pathToSeg)[1][:-3] + "_labeled.h5"
+        )
+        return HDF5VolumeTarget(save_path, self.dtype, compression=PipelineParameter().compressionLevel)
 
 
 class DenseGroundtruth(luigi.Task):
@@ -189,12 +185,12 @@ class DenseGroundtruth(luigi.Task):
     """
 
     path = luigi.Parameter()
-    key  = luigi.Parameter(default = "data")
+    key  = luigi.Parameter(default="data")
     # the dtype, should either be uint32 or uint64
-    dtype = luigi.Parameter(default = np.uint32)
+    dtype = luigi.Parameter(default="uint32")
 
     def requires(self):
-        return ExternalSegmentation(self.path, self.key, self.dtype )
+        return ExternalSegmentation(self.path, self.key, self.dtype)
 
     @run_decorator
     def run(self):
@@ -202,16 +198,23 @@ class DenseGroundtruth(luigi.Task):
         gt = self.input()
         gt.open()
         # label volume causes problems for cremi...
-        gt_labeled, _, _ = vigra.analysis.relabelConsecutive( gt.read([0,0,0], gt.shape()) )
+        gt_labeled, _, _ = vigra.analysis.relabelConsecutive(
+            gt.read([0, 0, 0], gt.shape()),
+            start_label=0,
+            keep_zeros=False
+        )
 
         out = self.output()
         out.open(gt.shape())
-        out.write( [0,0,0], gt_labeled)
+        out.write([0, 0, 0], gt_labeled)
         out.close()
 
     def output(self):
-        save_path = os.path.join( PipelineParameter().cache, os.path.split(self.path)[1][:-3] + "_labeled.h5" )
-        return HDF5VolumeTarget( save_path, self.dtype, compression = PipelineParameter().compressionLevel)
+        save_path = os.path.join(
+            PipelineParameter().cache,
+            os.path.split(self.path)[1][:-3] + "_labeled.h5"
+        )
+        return HDF5VolumeTarget(save_path, self.dtype, compression=PipelineParameter().compressionLevel)
 
 
 class StackedRegionAdjacencyGraph(luigi.Task):
@@ -220,7 +223,7 @@ class StackedRegionAdjacencyGraph(luigi.Task):
     """
 
     pathToSeg = luigi.Parameter()
-    keyToSeg = luigi.Parameter(default = "data")
+    keyToSeg = luigi.Parameter(default="data")
 
     # not really necessary right now, but maybe the rag syntax will change
     def requires(self):
@@ -235,16 +238,17 @@ class StackedRegionAdjacencyGraph(luigi.Task):
         seg.open()
         shape = seg.shape()
 
-        seg_last = seg.read( [shape[0]-1,0,0], shape )
+        seg_last = seg.read([shape[0] - 1, 0, 0], shape)
         n_labels = seg_last.max() + 1
 
         t_rag = time.time()
-        rag = nrag.gridRagStacked2DHdf5( seg.get(), n_labels, numberOfThreads = -1) # nThreads = -1, could also make this accessible
+        # nThreads = -1, could also make this accessible
+        rag = nrag.gridRagStacked2DHdf5(seg.get(), n_labels, numberOfThreads=-1)
         t_rag = time.time() - t_rag
 
-        self.output().write( rag, self.pathToSeg, self.keyToSeg)
+        self.output().write(rag, self.pathToSeg, self.keyToSeg)
 
     def output(self):
         segFile = os.path.split(self.pathToSeg)[1][:-3]
-        save_path = "StackedRegionAdjacencyGraph_%s.h5" % (segFile,)
-        return StackedRagTarget( os.path.join(PipelineParameter().cache, save_path) )
+        save_path = "StackedRegionAdjacencyGraph_%s.h5" % segFile
+        return StackedRagTarget(os.path.join(PipelineParameter().cache, save_path))

@@ -38,7 +38,7 @@ class HDF5VolumeTarget(FileSystemTarget):
             except OSError:
                 pass
 
-    def __init__(self, path, dtype, defaultKey = 'data', compression = -1):
+    def __init__(self, path, dtype, defaultKey='data', compression=-1):
         super(HDF5VolumeTarget, self).__init__(path)
         self.h5_file = None
         self.dtype = dtype
@@ -52,9 +52,9 @@ class HDF5VolumeTarget(FileSystemTarget):
         with h5py.File(self.path) as f:
             keys = f.keys()
         for key in keys:
-            self.open(key = key)
+            self.open(key=key)
 
-    def open(self, shape = None, chunkShape = None, key = 'data'):
+    def open(self, shape=None, chunkShape=None, key='data'):
 
         # check if this file is already open
         if not self.opened:
@@ -64,7 +64,7 @@ class HDF5VolumeTarget(FileSystemTarget):
             # create a new file
             else:
                 self.makedirs()
-                self.h5_file = nh5.createFile(self.path)#, cacheSettings)
+                self.h5_file = nh5.createFile(self.path)  # , cacheSettings)
             self.opened = True
 
         newDataset = True
@@ -74,29 +74,28 @@ class HDF5VolumeTarget(FileSystemTarget):
 
         # open an existing dataset
         if not newDataset:
-            assert shape == None
-            assert chunkShape == None
-            #print "Opening existing dset: ", self.path, key
-            #print self.h5_file
+            assert shape is None
+            assert chunkShape is None
+
             # set the dtype #TODO (could we do this in a more elegant way?)
             if np.dtype(self.dtype) == np.dtype("float32"):
                 self.arrays[key] = nh5.Hdf5ArrayFloat32(self.h5_file, key)
             elif np.dtype(self.dtype) == np.dtype("float64"):
                 self.arrays[key] = nh5.Hdf5ArrayFloat64(self.h5_file, key)
             elif np.dtype(self.dtype) == np.dtype("uint8"):
-                self.arrays[key] = nh5.Hdf5ArrayUInt8(self.h5_file,   key)
+                self.arrays[key] = nh5.Hdf5ArrayUInt8(self.h5_file, key)
             elif np.dtype(self.dtype) == np.dtype("uint32"):
-                self.arrays[key] = nh5.Hdf5ArrayUInt32(self.h5_file,  key)
+                self.arrays[key] = nh5.Hdf5ArrayUInt32(self.h5_file, key)
             elif np.dtype(self.dtype) == np.dtype("uint64"):
-                self.arrays[key] = nh5.Hdf5ArrayUInt64(self.h5_file,  key)
+                self.arrays[key] = nh5.Hdf5ArrayUInt64(self.h5_file, key)
             else:
                 raise RuntimeError("Datatype %s not supported!" % (str(self.dtype),))
 
         # create a new dataset
         else:
             # shape and chunk shape
-            assert shape != None, "HDF5VolumeTarget needs to be initialised with a shape, when creating a new file"
-            if chunkShape != None:
+            assert shape is not None, "HDF5VolumeTarget needs to be initialised with a shape, when creating a new file"
+            if chunkShape is not None:
                 assert len(chunkShape) == len(shape), str(len(chunkShape)) + " , " + str(len(shape))
                 for dd in range(len(shape)):
                     assert chunkShape[dd] <= shape[dd]
@@ -104,15 +103,25 @@ class HDF5VolumeTarget(FileSystemTarget):
                 chunkShape = [1, min(shape[1], 512), min(shape[2], 512)]
 
             if np.dtype(self.dtype) == np.dtype("float32"):
-                self.arrays[key] = nh5.Hdf5ArrayFloat32(self.h5_file, key, shape, chunkShape, compression = self.compression)
+                self.arrays[key] = nh5.Hdf5ArrayFloat32(
+                    self.h5_file, key, shape, chunkShape, compression=self.compression
+                )
             elif np.dtype(self.dtype) == np.dtype("float64"):
-                self.arrays[key] = nh5.Hdf5ArrayFloat64(self.h5_file, key, shape, chunkShape, compression = self.compression)
+                self.arrays[key] = nh5.Hdf5ArrayFloat64(
+                    self.h5_file, key, shape, chunkShape, compression=self.compression
+                )
             elif np.dtype(self.dtype) == np.dtype("uint8"):
-                self.arrays[key] = nh5.Hdf5ArrayUInt8(self.h5_file,   key, shape, chunkShape, compression = self.compression)
+                self.arrays[key] = nh5.Hdf5ArrayUInt8(
+                    self.h5_file, key, shape, chunkShape, compression=self.compression
+                )
             elif np.dtype(self.dtype) == np.dtype("uint32"):
-                self.arrays[key] = nh5.Hdf5ArrayUInt32(self.h5_file,  key, shape, chunkShape, compression = self.compression)
+                self.arrays[key] = nh5.Hdf5ArrayUInt32(
+                    self.h5_file, key, shape, chunkShape, compression=self.compression
+                )
             elif np.dtype(self.dtype) == np.dtype("uint64"):
-                self.arrays[key] = nh5.Hdf5ArrayUInt64(self.h5_file,  key, shape, chunkShape, compression = self.compression)
+                self.arrays[key] = nh5.Hdf5ArrayUInt64(
+                    self.h5_file, key, shape, chunkShape, compression=self.compression
+                )
             else:
                 raise RuntimeError("Datatype %s not supported!" % (str(self.dtype),))
         self.shapes[key] = self.arrays[key].shape
@@ -120,33 +129,33 @@ class HDF5VolumeTarget(FileSystemTarget):
 
     def close(self):
         assert self.opened
-        assert self.h5_file != None
+        assert self.h5_file is not None
         nh5.closeFile(self.h5_file)
         self.opened = False
 
-    def write(self, start, data, key = 'data'):
-        if not key in self.arrays:
+    def write(self, start, data, key='data'):
+        if key not in self.arrays:
             raise KeyError("Key does not name a valid dataset in H5 file.")
         # to avoid errors in python glue code
-        start = list(map(long,start))
+        start = list(map(long, start))
         try:
             self.arrays[key].writeSubarray(start, data)
         except AttributeError:
             raise RuntimeError("You must call open once before calling read or write!")
 
-    def read(self, start, stop, key = 'data'):
-        if not key in self.arrays:
+    def read(self, start, stop, key='data'):
+        if key not in self.arrays:
             raise KeyError("Key does not name a valid dataset in H5 file.")
         # to avoid errors in python glue code
-        start = list(map(long,start))
-        stop = list(map(long,stop))
+        start = list(map(long, start))
+        stop = list(map(long, stop))
         try:
             return self.arrays[key].readSubarray(start, stop)
         except AttributeError:
             raise RuntimeError("You must call open once before calling read or write!")
 
     # TODO not exposed in nifty right now
-    #def writeLocked(self, start, data, key = 'data'):
+    # def writeLocked(self, start, data, key = 'data'):
     #    if not key in self.arrays:
     #        raise KeyError("Key does not name a valid dataset in H5 file.")
     #    # to avoid errors in python glue code
@@ -156,7 +165,7 @@ class HDF5VolumeTarget(FileSystemTarget):
     #    except AttributeError:
     #        raise RuntimeError("You must call open once before calling read or write!")
 
-    #def readLocked(self, start, stop, key = 'data'):
+    # def readLocked(self, start, stop, key = 'data'):
     #    if not key in self.arrays:
     #        raise KeyError("Key does not name a valid dataset in H5 file.")
     #    # to avoid errors in python glue code
@@ -167,18 +176,18 @@ class HDF5VolumeTarget(FileSystemTarget):
     #    except AttributeError:
     #        raise RuntimeError("You must call open once before calling read or write!")
 
-    def get(self, key = 'data'):
-        if not key in self.arrays:
+    def get(self, key='data'):
+        if key not in self.arrays:
             raise KeyError("Key does not name a valid dataset in H5 file.")
         return self.arrays[key]
 
-    def shape(self, key = 'data'):
-        if not key in self.arrays:
+    def shape(self, key='data'):
+        if key not in self.arrays:
             raise KeyError("Key does not name a valid dataset in H5 file.")
         return self.shapes[key]
 
-    def chunk_shape(self, key = 'data'):
-        if not key in self.arrays:
+    def chunk_shape(self, key='data'):
+        if key not in self.arrays:
             raise KeyError("Key does not name a valid dataset in H5 file.")
         return self.chunk_shapes[key]
 
@@ -207,23 +216,23 @@ class HDF5DataTarget(FileSystemTarget):
     def open(self):
         raise AttributeError("Not implemented")
 
-    def write(self, data, key = "data", compression = None):
+    def write(self, data, key="data", compression=None):
         self.makedirs()
-        if compression != None:
-            vigra.writeHDF5(data, self.path, key, compression = compression)
+        if compression is not None:
+            vigra.writeHDF5(data, self.path, key, compression=compression)
         else:
             vigra.writeHDF5(data, self.path, key)
 
-    def writeVlen(self, data, key = 'data'):
+    def writeVlen(self, data, key='data'):
         self.makedirs()
         with h5py.File(self.path) as f:
             dt = h5py.special_dtype(vlen=np.dtype(data[0].dtype))
-            ds = f.create_dataset(key, data = data, dtype = dt)
+            f.create_dataset(key, data=data, dtype=dt)
 
-    def read(self, key = "data" ):
+    def read(self, key="data"):
         return vigra.readHDF5(self.path, key)
 
-    def shape(self, key = "data"):
+    def shape(self, key="data"):
         with h5py.File(self.path) as f:
             shape = f[key].shape
         return shape
@@ -282,7 +291,7 @@ class StackedRagTarget(FileSystemTarget):
     def open(self, mode='r'):
         raise AttributeError("Not implemented")
 
-    def write(self, rag, labelsPath, labelsKey = "data"):
+    def write(self, rag, labelsPath, labelsKey="data"):
         self.makedirs()
         nrag.writeStackedRagToHdf5(rag, self.path)
         vigra.writeHDF5(labelsPath, self.path, "labelsPath")
@@ -301,11 +310,8 @@ class StackedRagTarget(FileSystemTarget):
 
     # only read sub-parts
     def readKey(self, key):
-        with h5py.File(self.path,'r') as f:
-            if not key in f.keys():
+        with h5py.File(self.path, 'r') as f:
+            if key not in f.keys():
                 print "The key", key, "is not in", f.keys()
                 raise KeyError("Key not found!")
         return vigra.readHDF5(self.path, key)
-
-    def shape(self):
-        return rag.shape

@@ -12,9 +12,6 @@ from pipelineParameter import PipelineParameter
 from tools import config_logger, run_decorator
 
 import logging
-import json
-
-import numpy as np
 
 try:
     import nifty
@@ -31,6 +28,11 @@ except ImportError:
 # init the workflow logger
 workflow_logger = logging.getLogger(__name__)
 config_logger(workflow_logger)
+
+#
+# TODO use nifty-helper
+#
+
 
 class McSolverFusionMoves(luigi.Task):
 
@@ -53,14 +55,16 @@ class McSolverFusionMoves(luigi.Task):
 
         obj = nifty.graph.multicut.multicutObjective(g, edgeCosts)
 
-        workflow_logger.info("McSolverFusionMoves: solving multicut problem with %i number of variables" % (g.numberOfNodes,))
+        workflow_logger.info(
+            "McSolverFusionMoves: solving multicut problem with %i number of variables" % g.numberOfNodes
+        )
         workflow_logger.info("McSolverFusionMoves: using the fusion moves solver from nifty")
 
         greedy = obj.greedyAdditiveFactory().create(obj)
 
         t_inf = time.time()
         ret    = greedy.optimize()
-        workflow_logger.info("McSolverFusionMoves: energy of the greedy solution %f" % obj.evalNodeLabels(ret) )
+        workflow_logger.info("McSolverFusionMoves: energy of the greedy solution %f" % obj.evalNodeLabels(ret))
 
         ilpFac = obj.multicutIlpFactory(ilpSolver=ilp_backend,verbose=0,
             addThreeCyclesConstraints=True,

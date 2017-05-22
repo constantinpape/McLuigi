@@ -1,6 +1,4 @@
-import os
 import time
-import numpy as np
 
 # import the proper nifty version
 try:
@@ -29,9 +27,9 @@ def available_factorys():
 def run_nifty_solver(
         obj,
         factory,
-        verbose    = False,
-        time_limit = None
-        ):
+        verbose=False,
+        time_limit=None
+):
 
     solver = factory.create(obj)
     with_visitor = False
@@ -52,29 +50,28 @@ def run_nifty_solver(
 
 def nifty_greedy_factory(
         obj,
-        use_andres = False
-        ):
+        use_andres=False
+):
     if use_andres:
         return obj.greedyAdditiveFactory()
     else:
         return obj.multicutAndresGreedyAdditiveFactory()
-    return factory
 
 
 def nifty_fusion_move_factory(
         obj,
         backend_factory,
-        n_threads = 20,
-        seed_fraction = 0.001,
-        greedy_chain  = True,
-        kl_chain      = True,
-        number_of_iterations = 2000,
-        n_stop = 20,
-        pgen_type = 'ws',
-        parallel_per_thread = 2,
-        n_fuse = 2,
-        sigma = 10
-        ):
+        n_threads=20,
+        seed_fraction=0.001,
+        greedy_chain=True,
+        kl_chain=True,
+        number_of_iterations=2000,
+        n_stop=20,
+        pgen_type='ws',
+        parallel_per_thread=2,
+        n_fuse=2,
+        sigma=10
+):
 
     assert pgen_type in ('ws', 'greedy')
     if pgen_type == 'ws':
@@ -86,32 +83,27 @@ def nifty_fusion_move_factory(
         verbose=0,
         fusionMove=obj.fusionMoveSettings(mcFactory=backend_factory),
         proposalGen=pgen,
-        numberOfIterations = number_of_iterations,
-        numberOfParallelProposals = parallel_per_thread*n_threads,
-        numberOfThreads = n_threads,
-        stopIfNoImprovement = n_stop,
+        numberOfIterations=number_of_iterations,
+        numberOfParallelProposals=parallel_per_thread * n_threads,
+        numberOfThreads=n_threads,
+        stopIfNoImprovement=n_stop,
         fuseN=n_fuse
     )
 
     if kl_chain and greedy_chain:
-        #print "Kl + Greedy Chain"
         kl_factory = nifty_kl_factory(obj, True)
         return obj.chainedSolversFactory([kl_factory, fm_factory])
     elif kl_chain and not greedy_chain:
-        #print "Kl Chain"
         kl_factory = nifty_kl_factory(obj, False)
         return obj.chainedSolversFactory([kl_factory, fm_factory])
     elif greedy_chain and not kl_chain:
-        #print "Greedy Chain"
-        greedy = nifty_greedy_factory(obj)#andres = True
+        greedy = nifty_greedy_factory(obj)  # andres = True
         return obj.chainedSolversFactory([greedy, fm_factory])
     else:
         return fm_factory
 
 
-def nifty_ilp_factory(
-        obj
-        ):
+def nifty_ilp_factory(obj):
     factory = obj.multicutIlpFactory(
         ilpSolver=ilp_backend,
         verbose=0,
@@ -125,29 +117,26 @@ def nifty_ilp_factory(
 def nifty_decomposer_factory(
         obj,
         backend_factory
-        ):
+):
     pass
 
 
 # TODO params
 def nifty_cgc_factory(
         obj,
-        greedy_chain = True,
-        kl_chain  = False,
-        cut_phase = False
-        ):
-    factory = obj.cgcFactory(doCutPhase = cut_phase)
+        greedy_chain=True,
+        kl_chain=False,
+        cut_phase=False
+):
+    factory = obj.cgcFactory(doCutPhase=cut_phase)
     if kl_chain and greedy_chain:
-        #print "Kl + Greedy Chain"
         kl_factory = nifty_kl_factory(obj, True)
         return obj.chainedSolversFactory([kl_factory, factory])
     elif kl_chain and not greedy_chain:
-        #print "Kl Chain"
         kl_factory = nifty_kl_factory(obj, False)
         return obj.chainedSolversFactory([kl_factory, factory])
     elif greedy_chain and not kl_chain:
-        #print "Greedy Chain"
-        greedy = nifty_greedy_factory(obj)#andres = True
+        greedy = nifty_greedy_factory(obj)  # andres = True
         return obj.chainedSolversFactory([greedy, factory])
     else:
         return factory
@@ -155,48 +144,48 @@ def nifty_cgc_factory(
 
 def nifty_kl_factory(
         obj,
-        greedy_chain = True
-    ):
-    return obj.multicutAndresKernighanLinFactory(greedyWarmstart = greedy_chain)
+        greedy_chain=True
+):
+    return obj.multicutAndresKernighanLinFactory(greedyWarmstart=greedy_chain)
 
 
 # TODO more mp settings
 def nifty_mp_factory(
         obj,
-        backend_factory = None, # default is none which uses KL
-        number_of_iterations = 1000,
-        timeout  = 0,
-        n_threads = 1,
-        tighten   = True,
-        standardReparametrization = 'anisotropic',
-        tightenReparametrization  = 'damped_uniform',
-        roundingReparametrization = 'damped_uniform',
-        tightenIteration          = 2,
-        tightenInterval           = 49,
-        tightenSlope              = 0.1,
-        tightenConstraintsPercentage = 0.05,
-        primalComputationInterval = 13,
-        ):
+        backend_factory=None,  # default is none which uses KL
+        number_of_iterations=1000,
+        timeout=0,
+        n_threads=1,
+        tighten=True,
+        standardReparametrization='anisotropic',
+        tightenReparametrization='damped_uniform',
+        roundingReparametrization='damped_uniform',
+        tightenIteration=2,
+        tightenInterval=49,
+        tightenSlope=0.1,
+        tightenConstraintsPercentage=0.05,
+        primalComputationInterval=13,
+):
 
     factory = obj.multicutMpFactory(
-            mcFactory = backend_factory,
-            timeout = timeout,
-            numberOfIterations         = number_of_iterations,
-            numberOfThreads            = n_threads,
-            tighten                    = tighten,
-            standardReparametrization  = standardReparametrization,
-            tightenReparametrization   = tightenReparametrization,
-            roundingReparametrization  = roundingReparametrization,
-            tightenIteration           = tightenIteration,
-            tightenInterval            = tightenInterval,
-            tightenSlope               = tightenSlope,
-            tightenConstraintsPercentage= tightenConstraintsPercentage,
-            primalComputationInterval   = primalComputationInterval
+        mcFactory=backend_factory,
+        timeout=timeout,
+        numberOfIterations=number_of_iterations,
+        numberOfThreads=n_threads,
+        tighten=tighten,
+        standardReparametrization=standardReparametrization,
+        tightenReparametrization=tightenReparametrization,
+        roundingReparametrization=roundingReparametrization,
+        tightenIteration=tightenIteration,
+        tightenInterval=tightenInterval,
+        tightenSlope=tightenSlope,
+        tightenConstraintsPercentage=tightenConstraintsPercentage,
+        primalComputationInterval=primalComputationInterval
     )
     return factory
 
 
-def string_to_factory(obj, solver_type, solver_kwargs = {}, backend_kwargs = {}):
+def string_to_factory(obj, solver_type, solver_kwargs={}, backend_kwargs={}):
     if solver_type == 'greedy':
         return nifty_greedy_factory(obj)
     elif solver_type == 'kl':
@@ -204,18 +193,22 @@ def string_to_factory(obj, solver_type, solver_kwargs = {}, backend_kwargs = {})
     elif solver_type == 'ilp':
         return nifty_ilp_factory(obj)
     elif solver_type == 'fm-greedy':
-        return nifty_fusion_move_factory(obj,
-                backend_factory = nifty_greedy_factory(obj),
-                **solver_kwargs)
+        return nifty_fusion_move_factory(
+            obj,
+            backend_factory=nifty_greedy_factory(obj),
+            **solver_kwargs
+        )
     elif solver_type == 'fm-kl':
-        return nifty_fusion_move_factory(obj,
-                backend_factory = nifty_kl_factory(obj),
-                **solver_kwargs)
+        return nifty_fusion_move_factory(
+            obj,
+            backend_factory=nifty_kl_factory(obj),
+            **solver_kwargs
+        )
     elif solver_type == 'fm-ilp':
-        return nifty_fusion_move_factory(obj,
-                backend_factory = nifty_ilp_factory(obj),
-                **solver_kwargs)
+        return nifty_fusion_move_factory(
+            obj,
+            backend_factory=nifty_ilp_factory(obj),
+            **solver_kwargs
+        )
     else:
-        raise RuntimeError("Invalid solver_type: %s" % sovler_type)
-
-
+        raise RuntimeError("Invalid solver_type: %s" % solver_type)

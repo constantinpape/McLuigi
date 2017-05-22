@@ -164,9 +164,8 @@ class ReducedProblem(luigi.Task):
         # find new edges and edge weights (vectorized)
         ##############################################
         uv_ids_new = np.sort(old2new_nodes[uv_ids[cut_edges == 1]], axis=1)
-        uv_ids_unique, unique_idx, inverse_idx = get_unique_rows(uv_ids_new, return_index=True, return_inverse=True)
+        uv_ids_new, inverse_idx = get_unique_rows(uv_ids_new, return_inverse=True)
 
-        uv_ids_new = uv_ids_new[unique_idx]
         number_of_new_edges = uv_ids_new.shape[0]
 
         costs = costs[cut_edges == 1]

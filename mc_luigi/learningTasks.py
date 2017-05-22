@@ -3,9 +3,9 @@
 
 import luigi
 
-from taskSelection import get_local_features,get_local_features_for_multiinp
-from customTargets import PickleTarget, HDF5DataTarget, HDF5VolumeTarget
-from dataTasks import DenseGroundtruth, ExternalSegmentation, StackedRegionAdjacencyGraph
+from taskSelection import get_local_features, get_local_features_for_multiinp
+from customTargets import HDF5DataTarget, HDF5VolumeTarget
+from dataTasks import DenseGroundtruth, StackedRegionAdjacencyGraph
 from defectHandlingTasks import ModifiedAdjacency
 
 from pipelineParameter import PipelineParameter
@@ -33,7 +33,10 @@ import nifty.graph.rag as nrag
 workflow_logger = logging.getLogger(__name__)
 config_logger(workflow_logger)
 
-# TODO random forest wrapper
+# TODO
+# TODO random forest wrapper from mc-ppl
+# TODO
+
 
 class EdgeProbabilities(luigi.Task):
 
@@ -41,7 +44,10 @@ class EdgeProbabilities(luigi.Task):
     pathToClassifier = luigi.Parameter()
 
     def requires(self):
-        return_tasks ={"features" : get_local_features(), "rag" : StackedRegionAdjacencyGraph(self.pathToSeg)}
+        return_tasks = {
+            "features": get_local_features(),
+            "rag": StackedRegionAdjacencyGraph(self.pathToSeg)
+        }
         if PipelineParameter().defectPipeline:
             return_tasks['modified_adjacency'] = ModifiedAdjacency(self.pathToSeg)
         return return_tasks
@@ -59,7 +65,9 @@ class EdgeProbabilities(luigi.Task):
             if mod_adjacency.read("has_defects"):
                 nEdges = mod_adjacency.read("n_edges_modified")
                 assert nEdges > 0, str(nEdges)
-                workflow_logger.info("EdgeProbabilities: for defect corrected edges. Total number of edges: %i" % nEdges)
+                workflow_logger.info(
+                    "EdgeProbabilities: for defect corrected edges. Total number of edges: %i" % nEdges
+                )
             else:
                 nEdges = inp['rag'].readKey('numberOfEdges')
                 workflow_logger.info("EdgeProbabilities: Total number of edges: %i" % nEdges)
@@ -68,7 +76,7 @@ class EdgeProbabilities(luigi.Task):
             workflow_logger.info("EdgeProbabilities: Total number of edges: %i" % nEdges)
 
         out  = self.output()
-        out.open([nEdges],[min(262144,nEdges)]) # 262144 = chunk size
+        out.open([nEdges], [min(262144, nEdges)])  # 262144 = chunk size
 
         if PipelineParameter().separateEdgeClassification:
             workflow_logger.info("EdgeProbabilities: predicting xy - and z - edges separately.")
@@ -84,7 +92,6 @@ class EdgeProbabilities(luigi.Task):
         for feat in feature_tasks:
             feat.close()
         out.close()
-
 
     def _predict_joint_in_core(self, feature_tasks, out):
         inp = self.input()

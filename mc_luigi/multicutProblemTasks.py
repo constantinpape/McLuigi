@@ -4,7 +4,6 @@
 import luigi
 
 import os
-import time
 
 from dataTasks import StackedRegionAdjacencyGraph
 from learningTasks import EdgeProbabilities
@@ -15,7 +14,6 @@ from pipelineParameter import PipelineParameter
 from tools import config_logger, run_decorator
 
 import logging
-import json
 
 import numpy as np
 
@@ -33,8 +31,6 @@ workflow_logger = logging.getLogger(__name__)
 config_logger(workflow_logger)
 
 
-
-
 # get weights and uvids of the MC problem
 class MulticutProblem(luigi.Task):
 
@@ -44,8 +40,10 @@ class MulticutProblem(luigi.Task):
     pathsToClassifier  = luigi.ListParameter()
 
     def requires(self):
-        return_tasks = { "edge_probabilities" : EdgeProbabilities(self.pathToSeg, self.pathsToClassifier),
-                    "rag" : StackedRegionAdjacencyGraph(self.pathToSeg) }
+        return_tasks = {
+            "edge_probabilities": EdgeProbabilities(self.pathToSeg, self.pathsToClassifier),
+            "rag": StackedRegionAdjacencyGraph(self.pathToSeg)
+        }
         if PipelineParameter().defectPipeline:
             return_tasks['modified_adjacency'] = ModifiedAdjacency(self.pathToSeg)
             return_tasks['skip_edge_lengths']  = SkipEdgeLengths(self.pathToSeg)
@@ -62,7 +60,7 @@ class MulticutProblem(luigi.Task):
         len_costs = edge_cost_file.shape()[0]
         workflow_logger.info("MulticutProblem: loaded edge costs of len %i" % len_costs)
 
-        edge_costs = edge_cost_file.read([0L],[long(len_costs)])
+        edge_costs = edge_cost_file.read([0L], [long(len_costs)])
 
         if PipelineParameter().defectPipeline:
             workflow_logger.info("MulticutProblem: computing MulticutProblem for defect correction pipeline.")
@@ -72,7 +70,6 @@ class MulticutProblem(luigi.Task):
             self._standard_multicut_problem(edge_costs)
 
         edge_cost_file.close()
-
 
     # TODO parallelise ?!
     def _probabilities_to_costs(self, edge_costs):
@@ -88,11 +85,15 @@ class MulticutProblem(luigi.Task):
         beta = PipelineParameter().multicutBeta
 
         # probabilities to energies, second term is boundary bias
-        edge_costs = np.log( (1. - edge_costs) / edge_costs ) + np.log( (1. - beta) / beta )
-        workflow_logger.info("MulticutProblem: cost statistics before weighting: mean: %f, std: %f, min: %f, max: %f" % (np.mean(edge_costs),
-            np.std(edge_costs),
-            edge_costs.min(),
-            edge_costs.max()))
+        edge_costs = np.log((1. - edge_costs) / edge_costs) + np.log((1. - beta) / beta)
+        workflow_logger.info(
+            "MulticutProblem: cost statistics before weighting: mean: %f, std: %f, min: %f, max: %f" % (
+                np.mean(edge_costs),
+                np.std(edge_costs),
+                edge_costs.min(),
+                edge_costs.max()
+            )
+        )
 
         # weight edge costs
         weighting_scheme = PipelineParameter().multicutWeightingScheme
@@ -108,45 +109,48 @@ class MulticutProblem(luigi.Task):
         assert edgeLens.shape[0] == edge_costs.shape[0], str(edgeLens.shape[0]) + " , " + str(edge_costs.shape[0])
 
         if weighting_scheme == "z":
-            workflow_logger.info("MulticutProblem: weighting edge costs with scheme z and weight " + str(weight) )
+            workflow_logger.info("MulticutProblem: weighting edge costs with scheme z and weight " + str(weight))
 
             edgeTransition = inp['rag'].readKey('totalNumberOfInSliceEdges')
 
-            z_max = float( np.max( edgeLens[edgeTransition:] ) )
+            z_max = float(np.max(edgeLens[edgeTransition:]))
             # we only weight the z edges !
             w = weight * edgeLens[edgeTransition:] / z_max
             edge_costs[edgeTransition:] = np.multiply(w, edge_costs[edgeTransition:])
 
         elif weighting_scheme == "xyz":
-            workflow_logger.info("MulticutProblem: weighting edge costs with scheme xyz and weight " + str(weight) )
+            workflow_logger.info("MulticutProblem: weighting edge costs with scheme xyz and weight " + str(weight))
 
             edgeTransition = inp['rag'].readKey('totalNumberOfInSliceEdges')
 
-            z_max = float( np.max( edgeLens[edgeTransition:] ) )
-            xy_max = float( np.max( edgeLens[:edgeTransition] ) )
+            z_max = float(np.max(edgeLens[edgeTransition:]))
+            xy_max = float(np.max(edgeLens[:edgeTransition]))
             w_z = weight * edgeLens[edgeTransition:] / z_max
             w_xy = weight * edgeLens[:edgeTransition] / xy_max
-            edge_costs[edgeTransition:] = np.multiply(w_z,  edge_costs[edgeTransition:])
+            edge_costs[edgeTransition:] = np.multiply(w_z, edge_costs[edgeTransition:])
             edge_costs[:edgeTransition] = np.multiply(w_xy, edge_costs[:edgeTransition])
 
         elif weighting_scheme == "all":
-            workflow_logger.info("MulticutProblem: weighting edge costs with scheme all and weight " + str(weight) )
+            workflow_logger.info("MulticutProblem: weighting edge costs with scheme all and weight " + str(weight))
 
-            edge_max  = float( np.max( edgesLens) )
+            edge_max  = float(np.max(edgeLens))
             w  = weight * edgeLens / edge_max
             edge_costs = np.multiply(w, edge_costs)
 
         else:
-            workflow_logger.info("MulticutProblem: using non-weighted edge costs" )
+            workflow_logger.info("MulticutProblem: using non-weighted edge costs")
 
-        if weighting_scheme in ("z","xyz","all"):
-            workflow_logger.info("MulticutProblem: cost statistics after weighting: mean: %f, std: %f, min: %f, max: %f" % (np.mean(edge_costs),
-                np.std(edge_costs),
-                edge_costs.min(),
-                edge_costs.max()))
+        if weighting_scheme in ("z", "xyz", "all"):
+            workflow_logger.info(
+                "MulticutProblem: cost statistics after weighting: mean: %f, std: %f, min: %f, max: %f" % (
+                    np.mean(edge_costs),
+                    np.std(edge_costs),
+                    edge_costs.min(),
+                    edge_costs.max()
+                )
+            )
 
         return edge_costs
-
 
     def _modified_multicut_proplem(self, edge_costs):
 
@@ -165,24 +169,26 @@ class MulticutProblem(luigi.Task):
         ignore_edges = modified_adjacency.read('ignore_edges')
 
         if ignore_edges.size:
-            max_repulsive = 2 * edge_costs.min() # TODO min correct here !?!
+            max_repulsive = 2 * edge_costs.min()  # TODO min correct here !?!
             edge_costs[ignore_edges] = max_repulsive
 
         # TODO we might also want to weight down the skip-edges according to their range
-        #skip_ranges = modified_adjacency.read('skip_ranges')
-        #skip_edges_begin = rag.numberOfEdges
-        #assert edge_costs.shape[0] - skip_edges_begin == len(skip_ranges), '%i, %i' % (edge_costs.shape[0] - skip_edges_begin, len(skip_ranges))
-        #edge_costs[skip_edges_begin:] /= skip_ranges
+        # skip_ranges = modified_adjacency.read('skip_ranges')
+        # skip_edges_begin = rag.numberOfEdges
+        # assert edge_costs.shape[0] - skip_edges_begin == len(skip_ranges), '%i, %i' % (
+        #     edge_costs.shape[0] - skip_edges_begin,
+        #     len(skip_ranges)
+        # )
+        # edge_costs[skip_edges_begin:] /= skip_ranges
 
-        assert edge_costs.shape[0] == g.numberOfEdges, "%i, %i" % (edge_costs.shape[0],g.numberOfEdges)
-        assert np.isfinite( edge_costs.min() ), str(edge_costs.min())
-        assert np.isfinite( edge_costs.max() ), str(edge_costs.max())
+        assert edge_costs.shape[0] == g.numberOfEdges, "%i, %i" % (edge_costs.shape[0], g.numberOfEdges)
+        assert np.isfinite(edge_costs.min()), str(edge_costs.min())
+        assert np.isfinite(edge_costs.max()), str(edge_costs.max())
 
         out = self.output()
-        out.write(edge_costs,'costs')
+        out.write(edge_costs, 'costs')
         out.write(g.serialize(), 'graph')
         out.write(g.numberOfNodes, 'number_of_nodes')
-
 
     def _standard_multicut_problem(self, edge_costs):
 
@@ -199,8 +205,8 @@ class MulticutProblem(luigi.Task):
         edge_costs = self._probabilities_to_costs(edge_costs)
 
         assert edge_costs.shape[0] == uv_ids.shape[0]
-        assert np.isfinite( edge_costs.min() ), str(edge_costs.min())
-        assert np.isfinite( edge_costs.max() ), str(edge_costs.max())
+        assert np.isfinite(edge_costs.min()), str(edge_costs.min())
+        assert np.isfinite(edge_costs.max()), str(edge_costs.max())
 
         # write concatenation of uvids and edge costs
         out = self.output()
@@ -210,7 +216,11 @@ class MulticutProblem(luigi.Task):
         out.write(edge_costs, "costs")
         out.write(g.numberOfNodes, 'number_of_nodes')
 
-
     def output(self):
-        save_path = os.path.join( PipelineParameter().cache, "MulticutProblem_%s.h5" % ("modifed" if PipelineParameter().defectPipeline else "standard",) )
-        return HDF5DataTarget( save_path )
+        save_path = os.path.join(
+            PipelineParameter().cache,
+            "MulticutProblem_%s.h5" % (
+                "modifed" if PipelineParameter().defectPipeline else "standard",
+            )
+        )
+        return HDF5DataTarget(save_path)
