@@ -18,9 +18,6 @@ from concurrent import futures
 import numpy as np
 import vigra
 import os
-import time
-import json
-import cPickle as pickle
 
 # import the proper nifty version
 try:
@@ -30,6 +27,7 @@ except ImportError:
         import nifty_with_cplex as nifty
     except ImportError:
         import nifty_with_gurobi as nifty
+import nifty.graph.rag as nrag
 
 # init the workflow logger
 workflow_logger = logging.getLogger(__name__)
@@ -321,7 +319,7 @@ class EdgeGroundtruth(luigi.Task):
         gt = inp["gt"]
         gt.open()
         rag = inp["rag"].read()
-        nodeGt = nifty.graph.rag.gridRagAccumulateLabels(rag, gt.get())
+        nodeGt = nrag.gridRagAccumulateLabels(rag, gt.get())
         if PipelineParameter().defectPipeline:
             mod_adjacency = nifty.graph.UndirectedGraph()
             if inp["modified_adjacency"].read("has_defects"):

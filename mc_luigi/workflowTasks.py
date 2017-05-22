@@ -29,6 +29,7 @@ except ImportError:
         import nifty_with_cplex as nifty
     except ImportError:
         import nifty_with_gurobi as nifty
+import nifty.graph.rag as nrag
 
 # init the workflow logger
 workflow_logger = logging.getLogger(__name__)
@@ -73,7 +74,7 @@ class SegmentationWorkflow(luigi.Task):
         mc_nodes, _, _ = vigra.analysis.relabelConsecutive(mc_nodes, start_label = 0, keep_zeros = False)
         if np.dtype(self.dtype) != np.dtype(mc_nodes.dtype):
                 self.dtype = mc_nodes.dtype
-        nifty.graph.rag.projectScalarNodeDataToPixels(rag, mc_nodes, out.get(), 5 )
+        nrag.projectScalarNodeDataToPixels(rag, mc_nodes, out.get(), 5)
 
 
     def _postprocess_defected_slices(self, inp, out):

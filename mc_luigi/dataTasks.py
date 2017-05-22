@@ -25,6 +25,7 @@ except ImportError:
         import nifty_with_cplex as nifty
     except ImportError:
         import nifty_with_gurobi as nifty
+import nifty.graph.rag as nrag
 
 # init the workflow logger
 workflow_logger = logging.getLogger(__name__)
@@ -238,7 +239,7 @@ class StackedRegionAdjacencyGraph(luigi.Task):
         n_labels = seg_last.max() + 1
 
         t_rag = time.time()
-        rag = nifty.graph.rag.gridRagStacked2DHdf5( seg.get(), n_labels, numberOfThreads = -1) # nThreads = -1, could also make this accessible
+        rag = nrag.gridRagStacked2DHdf5( seg.get(), n_labels, numberOfThreads = -1) # nThreads = -1, could also make this accessible
         t_rag = time.time() - t_rag
 
         self.output().write( rag, self.pathToSeg, self.keyToSeg)

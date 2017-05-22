@@ -28,6 +28,7 @@ except ImportError:
         import nifty_with_cplex as nifty
     except ImportError:
         import nifty_with_gurobi as nifty
+import nifty.graph.rag as nrag
 
 
 # init the workflow logger
@@ -364,7 +365,7 @@ class EdgeFeatures(luigi.Task):
         out.open(out_shape_xy, chunk_shape_xy, 'features_xy')
         out.open(out_shape_z, chunk_shape_z, 'features_z')
 
-        nifty.graph.rag.accumulateEdgeFeaturesFromFilters(rag,
+        nateEdgeFeaturesFromFilters(rag,
                 data,
                 out.get('features_xy'),
                 out.get('features_z'),
@@ -433,7 +434,7 @@ class EdgeFeatures(luigi.Task):
         if skip_edges.size:
 
             # TODO i/o in nifty to speed up calculation
-            skip_feats = nifty.graph.rag.accumulateSkipEdgeFeaturesFromFilters(rag,
+            skip_feats = nrag.accumulateSkipEdgeFeaturesFromFilters(rag,
                     data,
                     [(int(skip_e[0]), int(skip_e[1])) for skip_e in skip_edges], # skip_edges need to be passed as a list of pairs!
                     list(skip_ranges),

@@ -1,8 +1,6 @@
 from luigi.target import FileSystemTarget
 from luigi.file import LocalFileSystem
 
-import logging
-
 import os
 import numpy as np
 import cPickle as pickle
@@ -18,6 +16,8 @@ except ImportError:
         import nifty_with_cplex as nifty
     except ImportError:
         import nifty_with_gurobi as nifty
+import nifty.graph.rag as nrag
+import nifty.hdf5 as nh5
 
 
 class HDF5VolumeTarget(FileSystemTarget):
@@ -60,11 +60,11 @@ class HDF5VolumeTarget(FileSystemTarget):
         if not self.opened:
             # open an existing hdf5 file
             if os.path.exists(self.path):
-                self.h5_file = nifty.hdf5.openFile(self.path)
+                self.h5_file = nh5.openFile(self.path)
             # create a new file
             else:
                 self.makedirs()
-                self.h5_file = nifty.hdf5.createFile(self.path)#, cacheSettings)
+                self.h5_file = nh5.createFile(self.path)#, cacheSettings)
             self.opened = True
 
         newDataset = True
@@ -80,15 +80,15 @@ class HDF5VolumeTarget(FileSystemTarget):
             #print self.h5_file
             # set the dtype #TODO (could we do this in a more elegant way?)
             if np.dtype(self.dtype) == np.dtype("float32"):
-                self.arrays[key] = nifty.hdf5.Hdf5ArrayFloat32(self.h5_file, key)
+                self.arrays[key] = nh5.Hdf5ArrayFloat32(self.h5_file, key)
             elif np.dtype(self.dtype) == np.dtype("float64"):
-                self.arrays[key] = nifty.hdf5.Hdf5ArrayFloat64(self.h5_file, key)
+                self.arrays[key] = nh5.Hdf5ArrayFloat64(self.h5_file, key)
             elif np.dtype(self.dtype) == np.dtype("uint8"):
-                self.arrays[key] = nifty.hdf5.Hdf5ArrayUInt8(self.h5_file,   key)
+                self.arrays[key] = nh5.Hdf5ArrayUInt8(self.h5_file,   key)
             elif np.dtype(self.dtype) == np.dtype("uint32"):
-                self.arrays[key] = nifty.hdf5.Hdf5ArrayUInt32(self.h5_file,  key)
+                self.arrays[key] = nh5.Hdf5ArrayUInt32(self.h5_file,  key)
             elif np.dtype(self.dtype) == np.dtype("uint64"):
-                self.arrays[key] = nifty.hdf5.Hdf5ArrayUInt64(self.h5_file,  key)
+                self.arrays[key] = nh5.Hdf5ArrayUInt64(self.h5_file,  key)
             else:
                 raise RuntimeError("Datatype %s not supported!" % (str(self.dtype),))
 
@@ -104,15 +104,15 @@ class HDF5VolumeTarget(FileSystemTarget):
                 chunkShape = [1, min(shape[1], 512), min(shape[2], 512)]
 
             if np.dtype(self.dtype) == np.dtype("float32"):
-                self.arrays[key] = nifty.hdf5.Hdf5ArrayFloat32(self.h5_file, key, shape, chunkShape, compression = self.compression)
+                self.arrays[key] = nh5.Hdf5ArrayFloat32(self.h5_file, key, shape, chunkShape, compression = self.compression)
             elif np.dtype(self.dtype) == np.dtype("float64"):
-                self.arrays[key] = nifty.hdf5.Hdf5ArrayFloat64(self.h5_file, key, shape, chunkShape, compression = self.compression)
+                self.arrays[key] = nh5.Hdf5ArrayFloat64(self.h5_file, key, shape, chunkShape, compression = self.compression)
             elif np.dtype(self.dtype) == np.dtype("uint8"):
-                self.arrays[key] = nifty.hdf5.Hdf5ArrayUInt8(self.h5_file,   key, shape, chunkShape, compression = self.compression)
+                self.arrays[key] = nh5.Hdf5ArrayUInt8(self.h5_file,   key, shape, chunkShape, compression = self.compression)
             elif np.dtype(self.dtype) == np.dtype("uint32"):
-                self.arrays[key] = nifty.hdf5.Hdf5ArrayUInt32(self.h5_file,  key, shape, chunkShape, compression = self.compression)
+                self.arrays[key] = nh5.Hdf5ArrayUInt32(self.h5_file,  key, shape, chunkShape, compression = self.compression)
             elif np.dtype(self.dtype) == np.dtype("uint64"):
-                self.arrays[key] = nifty.hdf5.Hdf5ArrayUInt64(self.h5_file,  key, shape, chunkShape, compression = self.compression)
+                self.arrays[key] = nh5.Hdf5ArrayUInt64(self.h5_file,  key, shape, chunkShape, compression = self.compression)
             else:
                 raise RuntimeError("Datatype %s not supported!" % (str(self.dtype),))
         self.shapes[key] = self.arrays[key].shape
@@ -121,7 +121,7 @@ class HDF5VolumeTarget(FileSystemTarget):
     def close(self):
         assert self.opened
         assert self.h5_file != None
-        nifty.hdf5.closeFile(self.h5_file)
+        nh5.closeFile(self.h5_file)
         self.opened = False
 
     def write(self, start, data, key = 'data'):
@@ -284,7 +284,7 @@ class StackedRagTarget(FileSystemTarget):
 
     def write(self, rag, labelsPath, labelsKey = "data"):
         self.makedirs()
-        nifty.graph.rag.writeStackedRagToHdf5(rag, self.path)
+        nrag.writeStackedRagToHdf5(rag, self.path)
         vigra.writeHDF5(labelsPath, self.path, "labelsPath")
         vigra.writeHDF5(labelsKey, self.path, "labelsKey")
 
@@ -293,11 +293,11 @@ class StackedRagTarget(FileSystemTarget):
         labelsPath = vigra.readHDF5(self.path, "labelsPath")
         labelsKey = vigra.readHDF5(self.path, "labelsKey")
 
-        h5_file = nifty.hdf5.openFile(labelsPath)
-        labels = nifty.hdf5.Hdf5ArrayUInt32(h5_file, labelsKey)
+        h5_file = nh5.openFile(labelsPath)
+        labels = nh5.Hdf5ArrayUInt32(h5_file, labelsKey)
         nNodes = vigra.readHDF5(self.path, "numberOfNodes")
 
-        return nifty.graph.rag.readStackedRagFromHdf5(labels, nNodes, self.path)
+        return nrag.readStackedRagFromHdf5(labels, nNodes, self.path)
 
     # only read sub-parts
     def readKey(self, key):

@@ -2,20 +2,17 @@
 # Taksks for defect and handling
 import luigi
 
-from customTargets import HDF5DataTarget, HDF5VolumeTarget
-from dataTasks import InputData, ExternalSegmentation, StackedRegionAdjacencyGraph
+from customTargets import HDF5DataTarget
+from dataTasks import ExternalSegmentation, StackedRegionAdjacencyGraph
 from defectDetectionTasks import DefectSliceDetection
 
 from pipelineParameter import PipelineParameter
 from tools import config_logger, run_decorator
 
 import logging
-import json
 
 import os
-import time
 import numpy as np
-import vigra
 
 from concurrent import futures
 
@@ -27,6 +24,7 @@ except ImportError:
         import nifty_with_cplex as nifty
     except ImportError:
         import nifty_with_gurobi as nifty
+import nifty.graph.rag as nrag
 
 
 # init the workflow logger
@@ -161,7 +159,7 @@ class ModifiedAdjacency(luigi.Task):
 
         def get_skip_edges_from_nifty(z, i):
             has_lower_defect = z in has_lower_defect_list
-            delete_edges_z, ignore_edges_z, skip_edges_z, skip_ranges_z = nifty.graph.rag.getSkipEdgesForSlice(
+            delete_edges_z, ignore_edges_z, skip_edges_z, skip_ranges_z = nrag.getSkipEdgesForSlice(
                 rag,
                 int(z),
                 defect_node_dict,
@@ -286,7 +284,7 @@ class SkipEdgeLengths(luigi.Task):
         skip_ranges = mod_adjacency.read('skip_ranges')
         skip_starts = mod_adjacency.read('skip_starts')
 
-        skip_lens = nifty.graph.rag.getSkipEdgeLengths(rag,
+        skip_lens = nrag.getSkipEdgeLengths(rag,
                         [(int(skip_e[0]), int(skip_e[1])) for skip_e in skip_edges], # skip_edges need to be passed as a list of pairs!
                         list(skip_ranges),
                         list(skip_starts),

@@ -178,7 +178,6 @@ class DefectPatchDetection(luigi.Task):
 
         seg.open()
         out = self.output()
-        # TODO compression for nifty hdf5
         out.open(seg.shape)
 
         ny = long(seg.shape[1])
@@ -254,7 +253,6 @@ class DefectSliceDetection(luigi.Task):
 
         seg.open()
         out = self.output()
-        # TODO compression for nifty hdf5
         out.open(seg.shape())
 
         ny = long(seg.shape()[1])
