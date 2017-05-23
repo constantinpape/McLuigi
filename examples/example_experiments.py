@@ -5,7 +5,8 @@ import sys
 import logging
 import json
 
-from mc_luigi import *
+from mc_luigi import MulticutSegmentation, BlockwiseMulticutSegmentation, LearnClassifierFromGt
+from mc_luigi import config_logger, PipelineParameter
 
 # configure the logger
 workflow_logger = logging.getLogger(__name__)
@@ -21,7 +22,7 @@ def print_instructions():
     sys.exit()
 
 
-def check_inputs(inputs, check_rf = False):
+def check_inputs(inputs, check_rf=False):
     for key, paths in inputs.iteritems():
         if key == 'rf' and not check_rf:
             continue
@@ -49,19 +50,19 @@ def learning():
     check_inputs(inputs)
 
     # set relevant pipeline parameter for learning
-    ppl_parameter.separateEdgeClassification = True # use seperate random forests for xy / z - edges
-    ppl_parameter.nTrees = 100 # number of trees used in rf
+    ppl_parameter.separateEdgeClassification = True  # use seperate random forests for xy / z - edges
+    ppl_parameter.nTrees = 100  # number of trees used in rf
 
     # TODO get central scheduler running
     luigi.run([
         "--local-scheduler",
         "--pathsToSeg", json.dumps([inputs["seg"]]),
-        "--pathsToGt",  json.dumps([inputs["gt" ]])],
+        "--pathsToGt", json.dumps([inputs["gt"]])],
         LearnClassifierFromGt
     )
 
 
-def inference(blockwise_inference = True):
+def inference(blockwise_inference=True):
 
     # PipelineParameter is a singleton class that stores most of the
     # relevant parameters for learning and inference
@@ -70,15 +71,15 @@ def inference(blockwise_inference = True):
     # read the json with paths to input files
     ppl_parameter.read_input_file('./input_config_test.json')
     inputs = ppl_parameter.inputs
-    check_inputs(inputs, check_rf = True)
+    check_inputs(inputs, check_rf=True)
 
     # set relevant pipeline parameter for inference
-    ppl_parameter.separateEdgeClassification = True # use seperate random forests for xy / z - edges
+    ppl_parameter.separateEdgeClassification = True  # use seperate random forests for xy / z - edges
     # sub-block shapes for the block-wise multicut
     # -> chosen smaller than defaults due to small test data
     # use default values for larger data
-    ppl_parameter.multicutBlockShape   = [15,256,256]
-    ppl_parameter.multicutBlockOverlap = [2,10,10]
+    ppl_parameter.multicutBlockShape   = [15, 256, 256]
+    ppl_parameter.multicutBlockOverlap = [2, 10, 10]
 
     # number of mergign levels in block-wise multicut
     # -> increase if the final multicut for merging the global reduced
@@ -87,22 +88,24 @@ def inference(blockwise_inference = True):
 
     if blockwise_inference:
         # TODO get central scheduler running
-        luigi.run(["--local-scheduler",
-            "--pathToSeg", inputs["seg"],
-            "--pathToClassifier", inputs["rf"],
-            "--numberOfLevels", str(n_levels)],
+        luigi.run(
+            ["--local-scheduler",
+             "--pathToSeg", inputs["seg"],
+             "--pathToClassifier", inputs["rf"],
+             "--numberOfLevels", str(n_levels)],
             BlockwiseMulticutSegmentation
         )
     else:
         # TODO get central scheduler running
-        luigi.run(["--local-scheduler",
-            "--pathToSeg", inputs["seg"],
-            "--pathToClassifier", inputs["rf"]],
+        luigi.run(
+            ["--local-scheduler",
+             "--pathToSeg", inputs["seg"],
+             "--pathToClassifier", inputs["rf"]],
             MulticutSegmentation
         )
 
 
 if __name__ == '__main__':
     # first call learning, then inference (need to execute 'python example_experiments.py' two seperate times)
-    #learning()
+    # learning()
     inference()
