@@ -269,6 +269,38 @@ class PickleTarget(FileSystemTarget):
             return pickle.load(f)
 
 
+# Folder target that does basically nothing
+# wee need this for the sklearn random forest,
+# that is pickled to different files in a common folder
+class FolderTarget(FileSystemTarget):
+    fs = LocalFileSystem()
+
+    def makedirs(self):
+        """
+        Create all parent folders if they do not exist.
+        """
+        normpath = os.path.normpath(self.path)
+        parentfolder = os.path.dirname(normpath)
+        if parentfolder:
+            try:
+                os.makedirs(parentfolder)
+            except OSError:
+                pass
+
+    def __init__(self, path):
+        super(FolderTarget, self).__init__(path)
+        self.path = path
+
+    def open(self, mode='r'):
+        raise AttributeError("Not implemented")
+
+    def write(self, data):
+        raise AttributeError("Not implemented")
+
+    def read(self):
+        raise AttributeError("Not implemented")
+
+
 # serializing the nifty rag
 class StackedRagTarget(FileSystemTarget):
     fs = LocalFileSystem()

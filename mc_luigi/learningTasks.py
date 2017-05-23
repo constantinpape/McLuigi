@@ -4,7 +4,7 @@
 import luigi
 
 from taskSelection import get_local_features, get_local_features_for_multiinp
-from customTargets import HDF5DataTarget, HDF5VolumeTarget
+from customTargets import HDF5DataTarget, HDF5VolumeTarget, FolderTarget
 from dataTasks import DenseGroundtruth, StackedRegionAdjacencyGraph
 from defectHandlingTasks import ModifiedAdjacency
 
@@ -18,6 +18,7 @@ from concurrent import futures
 import numpy as np
 import vigra
 import os
+import h5py
 
 # import the proper nifty version
 try:
@@ -33,9 +34,121 @@ import nifty.graph.rag as nrag
 workflow_logger = logging.getLogger(__name__)
 config_logger(workflow_logger)
 
-# TODO
-# TODO random forest wrapper from mc-ppl
-# TODO
+try:
+    from sklearn.ensemble import RandomForestClassifier as RFType
+    use_sklearn = True
+    import cPickle as pickle
+    print "Using sklearn random forest"
+except ImportError:
+    RFType = vigra.learning.RandomForest3
+    use_sklearn = False
+    print "Using vigra random forest 3"
+
+
+# wrapper for sklearn / random forest
+class RandomForest(object):
+
+    def __init__(
+            self,
+            train_data,
+            train_labels,
+            n_trees,
+            n_threads,
+            max_depth=None
+    ):
+
+        if isinstance(train_data, str) and train_data == '__will_deserialize__':
+            return
+        else:
+            assert isinstance(train_data, np.ndarray)
+
+        assert train_data.shape[0] == train_labels.shape[0]
+        self.n_threads = n_threads
+        self.n_trees = n_trees
+        self.max_depth = max_depth
+
+        if use_sklearn:
+            self._learn_rf_sklearn(train_data, train_labels)
+        else:
+            self._learn_vigra_sklearn(train_data, train_labels)
+
+    @classmethod
+    def load_from_file(self, file_path, key, n_threads):
+        self = self('__will_deserialize__', None, None, n_threads)
+        if use_sklearn:
+            # remove '.h5' from the file path and add the key
+            save_path = os.path.join(file_path, "%s.pkl" % key)
+            with open(save_path) as f:
+                rf = pickle.load(f)
+            self.n_trees = rf.n_estimators
+        else:
+            save_path = file_path + ".h5"
+            rf = RFType(save_path, key)
+            self.n_trees = rf.treeCount()
+        self.rf = rf
+        return self
+
+    @staticmethod
+    def has_defect_rf(file_path):
+        if use_sklearn:
+            return os.path.exists(os.path.join(file_path, "rf_defects.pkl"))
+        else:
+            with h5py.File(file_path + '.h5') as f:
+                return 'rf_defects' in f.keys()
+
+    @classmethod
+    def is_cached(self, file_path):
+        save_path = file_path if use_sklearn else file_path + ".h5"
+        return os.path.exists(save_path)
+
+    def _learn_rf_sklearn(self, train_data, train_labels):
+        self.rf = RFType(
+            n_estimators=self.n_trees,
+            n_jobs=self.n_threads,
+            verbose=2,
+            max_depth=self.max_depth
+        )
+        self.rf.fit(train_data, train_labels)
+
+    def _learn_rf_vigra(self, train_data, train_labels):
+        self.rf = RFType(
+            train_data,
+            train_labels,
+            treeCount=self.n_trees,
+            n_threads=self.n_threads,
+            max_depth=self.max_depth if self.max_depth is not None else 0
+        )
+
+    def predict_probabilities(self, test_data):
+        if use_sklearn:
+            return self._predict_sklearn(test_data)
+        else:
+            return self._predict_vigra(test_data)
+
+    def _predict_sklearn(self, test_data):
+        return self.rf.predict_proba(test_data)
+
+    def _predict_vigra(self, test_data):
+        prediction = self.rf.predict_probabilities(test_data, n_threads=self.n_threads)
+        # normalize the prediction
+        prediction /= self.n_trees
+        # normalize by the number of trees and remove nans
+        prediction[np.isnan(prediction)] = .5
+        prediction[np.isinf(prediction)] = .5
+        assert prediction.max() <= 1.
+        return prediction
+
+    def write(self, file_path, key):
+        if use_sklearn:
+            # remove '.h5' from the file path and add the key
+            if not os.path.exists(file_path):
+                os.mkdir(file_path)
+            save_path = os.path.join(file_path, "%s.pkl" % (key))
+            with open(save_path, 'w') as f:
+                pickle.dump(self.rf, f)
+        else:
+            save_path = file_path + ".h5"
+            self.rf.writeHDF5(file_path, key)
 
 
 class EdgeProbabilities(luigi.Task):
@@ -61,6 +174,7 @@ class EdgeProbabilities(luigi.Task):
             feat.openExisting()
 
         if PipelineParameter().defectPipeline:
+
             mod_adjacency = inp["modified_adjacency"]
             if mod_adjacency.read("has_defects"):
                 nEdges = mod_adjacency.read("n_edges_modified")
@@ -68,9 +182,11 @@ class EdgeProbabilities(luigi.Task):
                 workflow_logger.info(
                     "EdgeProbabilities: for defect corrected edges. Total number of edges: %i" % nEdges
                 )
+
             else:
                 nEdges = inp['rag'].readKey('numberOfEdges')
                 workflow_logger.info("EdgeProbabilities: Total number of edges: %i" % nEdges)
+
         else:
             nEdges = inp['rag'].readKey('numberOfEdges')
             workflow_logger.info("EdgeProbabilities: Total number of edges: %i" % nEdges)
@@ -78,103 +194,13 @@ class EdgeProbabilities(luigi.Task):
         out  = self.output()
         out.open([nEdges], [min(262144, nEdges)])  # 262144 = chunk size
 
-        if PipelineParameter().separateEdgeClassification:
-            workflow_logger.info("EdgeProbabilities: predicting xy - and z - edges separately.")
-            self._predict_separate(feature_tasks, out)
-        else:
-            if PipelineParameter().nFeatureChunks > 1:
-                workflow_logger.info("EdgeProbabilities: predicting xy - and z - edges jointly out of core.")
-                self._predict_joint_out_of_core(feature_tasks, out)
-            else:
-                workflow_logger.info("EdgeProbabilities: predicting xy - and z - edges jointly in core.")
-                self._predict_joint_in_core(feature_tasks, out)
+        self._predict(feature_tasks, out)
 
         for feat in feature_tasks:
             feat.close()
         out.close()
 
-    def _predict_joint_in_core(self, feature_tasks, out):
-        inp = self.input()
-        classifier = vigra.learning.RandomForest3(str(self.pathToClassifier), 'rf_joined')
-
-        features = np.concatenate(
-                [feat.read([0,0], feat.shape(key), key) for key in ('features_xy', 'features_z') for feat in feature_tasks],
-                axis = 1 )
-        probs = classifier.predictProbabilities(features.astype('float32'), n_threads = PipelineParameter().nThreads)[:,1]
-        probsSub /= classifier.treeCount()
-        probs[np.isnan(probs)] = .5 # FIXME vigra rf3 produces nans some times
-        out.write([0L],probs)
-
-        # predict skip edges (for defects)
-        if PipelineParameter().defectPipeline:
-            features = np.concatenate( [feat.read([0,0], feat.shape('features_skip'), 'features_skip') for feat in feature_tasks], axis = 1 )
-            classifier = vigra.learning.RandomForest3(str(self.pathToClassifier), 'rf_features_skip')
-            probs = classifier.predictProbabilities(features.astype('float32'), n_threads = PipelineParameter().nThreads)[:,1]
-            probs /= classifier.treeCount()
-            probs[np.isnan(probs)] = .5 # FIXME vigra rf3 produces nans some times
-            out.write([feat_end],probs)
-
-
-    # TODO change parallelisation to same logic as _predict_seperate_out_of_core
-    def _predict_joint_out_of_core(self, feature_tasks, out):
-        inp = self.input()
-        classifier = vigra.learning.RandomForest3(str(self.pathToClassifier), 'rf_joined')
-        nEdges = inp['rag'].readKey('numberOfEdges') - mod_adjacency.read('delete_edges').shape[0] if PipelineParameter().defectPipeline else inp['rag'].readKey('numberOfEdges')
-
-        nEdgesXY = inp['rag'].readKey('totalNumberOfInSliceEdges')
-
-        nSubFeats = PipelineParameter().nFeatureChunks
-        assert nSubFeats > 1, nSubFeats
-        featType = 'features_xy'
-        changedType = False
-        for subFeats in xrange(nSubFeats):
-            print subFeats, '/', nSubFeats
-            featIndexStart = int(float(subFeats)/nSubFeats * nEdges)
-            featIndexEnd   = int(float(subFeats+1)/nSubFeats * nEdges)
-
-            writeIndex = featIndexStart
-
-            if featIndexEnd > nEdgesXY and featType == 'features_xy':
-                featIndexEnd = nEdgesXY
-
-            if featType == 'features_z':
-                featIndexStart -= nEdgesXY
-                featIndexEnd -= nEdgesXY
-
-            if changedType:
-                featIndexStart = 0
-                writeIndex = nEdgesXY
-                changedType = False
-
-            if subFeats == nSubFeats:
-                featIndexEnd = nEdges
-            nEdgesSub = featIndexEnd - featIndexStart
-
-            featuresSub = np.concatenate(
-                    [feat.read([featIndexStart, 0], [featIndexEnd, feat.shape(featType)[1]], featType) for feat in feature_tasks],
-                    axis = 1 )
-            assert featuresSub.shape[0] == nEdgesSub
-            probsSub = classifier.predictProbabilities(featuresSub.astype('float32'), n_threads = PipelineParameter().nThreads)[:,1]
-            probsSub /= classifier.treeCount()
-            probsSub[np.isnan(probsSub)] = .5 # FIXME vigra rf3 produces nans some times
-            out.write([writeIndex],probsSub)
-
-            if featIndexEnd == nEdgesXY:
-                featType = 'features_z'
-                changedType = True
-
-        # predict skip edges (for defects)
-        if PipelineParameter().defectPipeline:
-            features = np.concatenate( [feat.read([0,0], feat.shape('features_skip'), 'features_skip') for feat in feature_tasks], axis = 1 )
-            classifier = vigra.learning.RandomForest3(str(self.pathToClassifier), 'rf_defects')
-            probs = classifier.predictProbabilities(features.astype('float32'), n_threads = PipelineParameter().nThreads)[:,1]
-            probs /= classifier.treeCount()
-            probs[np.isnan(probs)] = .5 # FIXME vigra rf3 produces nans some times
-            out.write([feat_end],probs)
-
-
-    def _predict_separate(self, feature_tasks, out):
-
+    def _predict(self, feature_tasks, out):
         inp = self.input()
         if PipelineParameter().defectPipeline:
             nEdges = inp["modified_adjacency"].read("n_edges_modified")
@@ -193,10 +219,19 @@ class EdgeProbabilities(luigi.Task):
             nFeatsXY += feat.shape('features_xy')[1]
             nFeatsZ  += feat.shape('features_z')[1]
 
-        feat_types = ['features_xy', 'features_z', 'features_skip'] if PipelineParameter().defectPipeline else ['features_xy', 'features_z']
-        for feat_type in feat_types:
+        feat_types = ['features_xy', 'features_z']
+        classifier_types = feat_types if PipelineParameter().separateEdgeClassification else 2 * ['features_joined']
+        if PipelineParameter().defectPipeline:
+            feat_types += ['features_skip']
+            classifier_types += ['features_skip']
+
+        for ii, feat_type in enumerate(feat_types):
             print "Predicting", feat_type, "features"
-            classifier = vigra.learning.RandomForest3(str(self.pathToClassifier), 'rf_%s' % feat_type)
+            classifier = RandomForest(
+                str(self.pathToClassifier),
+                classifier_types[ii],
+                PipelineParameter().nThreads
+            )
 
             if feat_type == 'features_xy':
                 nEdgesType = nXYEdges
@@ -212,101 +247,113 @@ class EdgeProbabilities(luigi.Task):
                 startType  = nEdges - nSkipEdges
 
             if PipelineParameter().nFeatureChunks > 1:
-                workflow_logger.info("EdgeProbabilities: running separate prediction for %s edges out of core" % feat_type)
-                self._predict_separate_out_of_core(classifier,
-                        feature_tasks,
-                        out,
-                        feat_type,
-                        nEdgesType,
-                        nFeatsType,
-                        startType)
+                workflow_logger.info(
+                    "EdgeProbabilities: predicting %s edges with seperate claissifier out of core." % feat_type
+                    if PipelineParameter().separateEdgeClassification else
+                    "EdgeProbabilities: predicting %s edges with joint classifier out of core" % feat_type
+                )
+                self._predict_separate_out_of_core(
+                    classifier,
+                    feature_tasks,
+                    out,
+                    feat_type,
+                    nEdgesType,
+                    nFeatsType,
+                    startType
+                )
             else:
-                workflow_logger.info("EdgeProbabilities: running separate prediction for %s edges in core" % feat_type)
-                self._predict_separate_in_core(classifier,
-                        feature_tasks,
-                        out,
-                        feat_type,
-                        nEdgesType,
-                        nFeatsType,
-                        startType)
-
+                workflow_logger.info(
+                    "EdgeProbabilities: predicting %s edges with seperate claissifier in core." % feat_type
+                    if PipelineParameter().separateEdgeClassification else
+                    "EdgeProbabilities: predicting %s edges with joint classifier in core" % feat_type
+                )
+                self._predict_separate_in_core(
+                    classifier,
+                    feature_tasks,
+                    out,
+                    feat_type,
+                    nEdgesType,
+                    nFeatsType,
+                    startType
+                )
 
     # In core prediction for edge type
-    def _predict_separate_in_core(self,
+    def _predict_in_core(
+            self,
             classifier,
             feature_tasks,
             out,
             featureType,
             nEdgesType,
             nFeatsType,
-            startType):
+            startType
+    ):
+        # In core prediction
+        featuresType = np.zeros((nEdgesType, nFeatsType), dtype='float32')
+        featOffset = 0
 
-            # In core prediction
-            featuresType = np.zeros( (nEdgesType, nFeatsType), dtype = 'float32' )
-            featOffset = 0
+        for ii, feat in enumerate(feature_tasks):
+            featuresType[:, featOffset:featOffset + feat.shape(featureType)[1]] = feat.read(
+                [0, 0], feat.shape(featureType), featureType)
+            featOffset += feat.shape(featureType)[1]
 
-            for ii, feat in enumerate(feature_tasks):
-                featuresType[:,featOffset:featOffset+feat.shape(featureType)[1]] = feat.read(
-                    [0, 0], feat.shape(featureType), featureType)
-                featOffset += feat.shape(featureType)[1]
-
-            print "Features loaded, starting prediction"
-            probs = classifier.predictProbabilities(featuresType.astype('float32'), n_threads = PipelineParameter().nThreads)[:,1]
-            probs /= classifier.treeCount()
-            probs[np.isnan(probs)] = 0.5
-            out.write([long(startType)], probs)
-
+        print "Features loaded, starting prediction"
+        probs = classifier.predict_probabilities(featuresType)[:, 1]
+        out.write([long(startType)], probs)
 
     # Out of core prediction for edge type
-    def _predict_separate_out_of_core(self,
+    def _predict_out_of_core(
+            self,
             classifier,
             feature_tasks,
             out,
             featureType,
             nEdgesType,
             nFeatsType,
-            startType):
-
+            startType
+    ):
         nSubFeats = PipelineParameter().nFeatureChunks
         assert nSubFeats > 1, str(nSubFeats)
 
         def predict_subfeats(subFeatId):
             print subFeatId, '/', nSubFeats
             featIndexStart = int(float(subFeatId) / nSubFeats * nEdgesType)
-            featIndexEnd   = int(float(subFeatId+1) / nSubFeats * nEdgesType)
+            featIndexEnd   = int(float(subFeatId + 1) / nSubFeats * nEdgesType)
             if subFeatId == nSubFeats:
                 featIndexEnd = nEdgesType
             subFeats = np.concatenate(
-                    [feat.read(
-                        [featIndexStart,0],
-                        [featIndexEnd, feat.shape(featureType)[1]],
-                        featureType) for feat in feature_tasks ],
-                    axis = 1)
+                [feat.read(
+                    [featIndexStart, 0],
+                    [featIndexEnd, feat.shape(featureType)[1]],
+                    featureType) for feat in feature_tasks],
+                axis=1
+            )
 
             readStart = long(featIndexStart + startType)
-            assert classifier.featureCount() == subFeats.shape[1], "%i , %i" % (classifier.featureCount(), subFeats.shape[1])
-            probsSub = classifier.predictProbabilities(subFeats.astype('float32'), n_threads = 1)[:,1]
-            probsSub /= classifier.treeCount()
-            probsSub[np.isnan(probsSub)] = 0.5
+
+            probsSub = classifier.predict_probabilities(subFeats)[:, 1]
             out.write([readStart], probsSub)
             return True
 
         nWorkers = PipelineParameter().nThreads
-        #nWorkers = 1
-        with futures.ThreadPoolExecutor(max_workers = nWorkers) as executor:
-            tasks = []
-            for subFeatId in xrange(nSubFeats):
-                tasks.append( executor.submit( predict_subfeats, subFeatId ) )
-            res = [t.result() for t in tasks]
-
+        # nWorkers = 1
+        with futures.ThreadPoolExecutor(max_workers=nWorkers) as executor:
+            tasks = [executor.submit(predict_subfeats, subFeatId) for subFeatId in xrange(nSubFeats)]
+            [t.result() for t in tasks]
 
     def output(self):
-        save_path = os.path.join(PipelineParameter().cache, "EdgeProbabilities%s_%s.h5" % ("Separate" if PipelineParameter().separateEdgeClassification else "Joint",
-            "modified" if PipelineParameter().defectPipeline else "standard"))
+        save_path = os.path.join(
+            PipelineParameter().cache,
+            "EdgeProbabilities%s_%s.h5" % (
+                "Separate" if PipelineParameter().separateEdgeClassification else "Joint",
+                "modified" if PipelineParameter().defectPipeline else "standard"
+            )
+        )
         return HDF5VolumeTarget(save_path, 'float32')
 
 
 # TODO fuzzy mapping in nifty ?!
+# -> we can use nifty.ground_truth for fuzzy gt
 class EdgeGroundtruth(luigi.Task):
 
     pathToSeg = luigi.Parameter()
@@ -314,11 +361,13 @@ class EdgeGroundtruth(luigi.Task):
 
     def requires(self):
         if PipelineParameter().defectPipeline:
-            return {"gt" : DenseGroundtruth(self.pathToGt),
-                    "rag" : StackedRegionAdjacencyGraph(self.pathToSeg),
-                    "modified_adjacency" : ModifiedAdjacency(self.pathToSeg)}
+            return {
+                "gt": DenseGroundtruth(self.pathToGt),
+                "rag": StackedRegionAdjacencyGraph(self.pathToSeg),
+                "modified_adjacency": ModifiedAdjacency(self.pathToSeg)
+            }
         else:
-            return {"gt" : DenseGroundtruth(self.pathToGt), "rag" : StackedRegionAdjacencyGraph(self.pathToSeg) }
+            return {"gt": DenseGroundtruth(self.pathToGt), "rag": StackedRegionAdjacencyGraph(self.pathToSeg)}
 
     @run_decorator
     def run(self):
@@ -336,18 +385,18 @@ class EdgeGroundtruth(luigi.Task):
                 uvIds = rag.uvIds()
         else:
             uvIds = rag.uvIds()
-        uGt = nodeGt[ uvIds[:,0] ]
-        vGt = nodeGt[ uvIds[:,1] ]
-        edgeGt = (uGt != vGt).astype(np.uint8)
-        assert (np.unique(edgeGt) == np.array([0,1])).all(), str(np.unique(edgeGt))
+        uGt = nodeGt[uvIds[:, 0]]
+        vGt = nodeGt[uvIds[:, 1]]
+        edgeGt = (uGt != vGt).astype('uint8')
+        assert (np.unique(edgeGt) == np.array([0, 1])).all(), str(np.unique(edgeGt))
         assert edgeGt.shape[0] == uvIds.shape[0]
         self.output().write(edgeGt)
 
     def output(self):
         segFile = os.path.split(self.pathToSeg)[1][:-3]
         def_str = 'modified' if PipelineParameter().defectPipeline else 'standard'
-        save_path = os.path.join( PipelineParameter().cache, "EdgeGroundtruth_%s_%s.h5" % (segFile,def_str) )
-        return HDF5DataTarget( save_path  )
+        save_path = os.path.join(PipelineParameter().cache, "EdgeGroundtruth_%s_%s.h5" % (segFile, def_str))
+        return HDF5DataTarget(save_path)
 
 
 class LearnClassifierFromGt(luigi.Task):
@@ -362,16 +411,20 @@ class LearnClassifierFromGt(luigi.Task):
         if n_inputs == 1:
             workflow_logger.info("LearnClassifierFromGt: learning classifier from single input")
             feature_tasks = get_local_features()
-            return_tasks = {"gt" : EdgeGroundtruth(self.pathsToSeg[0], self.pathsToGt[0]),
-                            "features" : feature_tasks,
-                            "rag" : StackedRegionAdjacencyGraph(self.pathsToSeg[0])}
+            return_tasks = {
+                "gt": EdgeGroundtruth(self.pathsToSeg[0], self.pathsToGt[0]),
+                "features": feature_tasks,
+                "rag": StackedRegionAdjacencyGraph(self.pathsToSeg[0])
+            }
         else:
             workflow_logger.info("LearnClassifierFromGt: learning classifier from %i inputs" % n_inputs)
             feature_tasks = get_local_features_for_multiinp()
             assert len(feature_tasks) == n_inputs
-            return_tasks = {"gt" : [EdgeGroundtruth(self.pathsToSeg[i], self.pathsToGt[i]) for i in xrange(n_inputs)],
-                            "features" : feature_tasks,
-                            "rag" : [StackedRegionAdjacencyGraph(segp) for segp in self.pathsToSeg]}
+            return_tasks = {
+                "gt": [EdgeGroundtruth(self.pathsToSeg[i], self.pathsToGt[i]) for i in xrange(n_inputs)],
+                "features": feature_tasks,
+                "rag": [StackedRegionAdjacencyGraph(segp) for segp in self.pathsToSeg]
+            }
         if PipelineParameter().defectPipeline:
             return_tasks['modified_adjacency'] = [ModifiedAdjacency(self.pathsToSeg[i]) for i in xrange(n_inputs)]
         return return_tasks
@@ -425,86 +478,118 @@ class LearnClassifierFromGt(luigi.Task):
             skipTransition = nEdges
 
         if PipelineParameter().separateEdgeClassification:
-            workflow_logger.info("LearnClassifierFromGt: learning classfier from single input for xy and z edges separately.")
+            workflow_logger.info(
+                "LearnClassifierFromGt: learning classfier from single input for xy and z edges separately."
+            )
             self._learn_classifier_from_single_input_xy(gt, feature_tasks, transitionEdge)
-            self._learn_classifier_from_single_input_z( gt, feature_tasks, transitionEdge, skipTransition)
+            self._learn_classifier_from_single_input_z(gt, feature_tasks, transitionEdge, skipTransition)
 
         else:
             workflow_logger.info("LearnClassifierFromGt: learning classfier from single input for all edges.")
             features = np.concatenate(
-                    [feat.read([0,0], feat.shape(key), key) for key in ('features_xy', 'features_z') for feat in feature_tasks],
-                    axis = 1 )
+                [feat.read([0, 0], feat.shape(key), key)
+                 for key in ('features_xy', 'features_z') for feat in feature_tasks],
+                axis=1
+            )
+
             if PipelineParameter().defectPipeline:
                 gt = gt[:skipTransition]
+
             assert features.shape[0] == gt.shape[0], str(features.shape[0]) + " , " + str(gt.shape[0])
-            classifier = vigra.learning.RandomForest3(features.astype('float32'), gt.astype('uint32'),
-                    treeCount = PipelineParameter().nTrees, max_depth = PipelineParameter().maxDepth, n_threads = PipelineParameter().nThreads)
-            classifier.writeHDF5( str(self.output().path), 'rf_joined' )
+            classifier = RandomForest(
+                features,
+                gt,
+                n_trees=PipelineParameter().nTrees,
+                max_depth=PipelineParameter().maxDepth,
+                n_threads=PipelineParameter().nThreads
+            )
+            classifier.write(str(self.output().path), 'rf_joined')
 
         if PipelineParameter().defectPipeline:
-            workflow_logger.info("LearnClassifierFromGt: learning classfier from single input for skip edges (defects).")
+            workflow_logger.info(
+                "LearnClassifierFromGt: learning classfier from single input for skip edges (defects)."
+            )
             self._learn_classifier_from_single_input_defects(gt, feature_tasks, skipTransition)
-
 
     def _learn_classifier_from_single_input_xy(self, gt, feature_tasks, transitionEdge):
         gt = gt[:transitionEdge]
         features = []
         features = np.concatenate(
-                [feat_task.read([0,0], feat_task.shape('features_xy'), 'features_xy') for feat_task in feature_tasks],
-                axis = 1)
+            [feat_task.read([0, 0], feat_task.shape('features_xy'), 'features_xy') for feat_task in feature_tasks],
+            axis=1
+        )
         assert features.shape[0] == gt.shape[0], str(features.shape[0]) + " , " + str(gt.shape[0])
-        classifier = vigra.learning.RandomForest3(features.astype('float32'), gt.astype('uint32'),
-                treeCount = PipelineParameter().nTrees, max_depth = PipelineParameter().maxDepth, n_threads = PipelineParameter().nThreads)
-        classifier.writeHDF5( str(self.output().path), 'rf_features_xy' )
-
+        classifier = RandomForest(
+            features,
+            gt,
+            n_trees=PipelineParameter().nTrees,
+            max_depth=PipelineParameter().maxDepth,
+            n_threads=PipelineParameter().nThreads
+        )
+        classifier.write(str(self.output().path), 'rf_features_xy')
 
     # if we learn with defects, we only consider the z edges that are not skip edges here
     def _learn_classifier_from_single_input_z(self, gt, feature_tasks, transitionEdge, skipTransition):
+
         gt = gt[transitionEdge:skipTransition] if PipelineParameter().defectPipeline else gt[transitionEdge:]
         features = np.concatenate(
-                [feat_task.read([0,0], feat_task.shape('features_z'), 'features_z') for feat_task in feature_tasks],
-                axis = 1)
+            [feat_task.read([0, 0], feat_task.shape('features_z'), 'features_z') for feat_task in feature_tasks],
+            axis=1
+        )
         assert features.shape[0] == gt.shape[0], str(features.shape[0]) + " , " + str(gt.shape[0])
-        classifier = vigra.learning.RandomForest3(features.astype('float32'), gt.astype('uint32'),
-                treeCount = PipelineParameter().nTrees, max_depth = PipelineParameter().maxDepth, n_threads = PipelineParameter().nThreads)
-        classifier.writeHDF5( str(self.output().path), 'rf_features_z' )
-
+        classifier = RandomForest(
+            features,
+            gt,
+            n_trees=PipelineParameter().nTrees,
+            max_depth=PipelineParameter().maxDepth,
+            n_threads=PipelineParameter().nThreads
+        )
+        classifier.write(str(self.output().path), 'rf_features_z')
 
     # if we learn with defects, we only consider the skip edges here
     def _learn_classifier_from_single_input_defects(self, gt, feature_tasks, skipTransition):
         assert PipelineParameter().defectPipeline
         gt = gt[skipTransition:]
         features = np.concatenate(
-                [feat_task.read([0,0], feat_task.shape('features_skip'), 'features_skip') for feat_task in feature_tasks],
-                axis = 1)
+            [feat_task.read([0, 0], feat_task.shape('features_skip'), 'features_skip') for feat_task in feature_tasks],
+            axis=1
+        )
         assert features.shape[0] == gt.shape[0], str(features.shape[0]) + " , " + str(gt.shape[0])
-        classifier = vigra.learning.RandomForest3(features.astype('float32'), gt.astype('uint32'),
-                treeCount = PipelineParameter().nTrees, max_depth = PipelineParameter().maxDepth, n_threads = PipelineParameter().nThreads)
-        classifier.writeHDF5( str(self.output().path), 'rf_features_skip' )
-
+        classifier = RandomForest(
+            features,
+            gt,
+            n_trees=PipelineParameter().nTrees,
+            max_depth=PipelineParameter().maxDepth,
+            n_threads=PipelineParameter().nThreads
+        )
+        classifier.write(str(self.output().path), 'rf_features_skip')
 
     def _learn_classifier_from_multiple_inputs(self, rag, gt, feature_tasks):
 
         if PipelineParameter().separateEdgeClassification:
-            workflow_logger.info("LearnClassifierFromGt: learning classifier for multiple inputs for xy and z edges separately.")
+            workflow_logger.info(
+                "LearnClassifierFromGt: learning classifier for multiple inputs for xy and z edges separately."
+            )
             self._learn_classifier_from_multiple_inputs_xy(rag, gt, feature_tasks)
             self._learn_classifier_from_multiple_inputs_z(rag, gt, feature_tasks)
 
         else:
-            workflow_logger.info("LearnClassifierFromGt: learning classifier for multiple inputs for all edges jointly.")
+            workflow_logger.info(
+                "LearnClassifierFromGt: learning classifier for multiple inputs for all edges jointly."
+            )
             self._learn_classifier_from_multiple_inputs_all(rag, gt, feature_tasks)
 
         if PipelineParameter().defectPipeline:
-            workflow_logger.info("LearnClassifierFromGt: learning classfier from multiple inputs for skip edges (defects).")
+            workflow_logger.info(
+                "LearnClassifierFromGt: learning classfier from multiple inputs for skip edges (defects)."
+            )
             self._learn_classifier_from_multiple_inputs_defects(rag, gt, feature_tasks)
-
 
     def _learn_classifier_from_multiple_inputs_xy(self, rag, gt, feature_tasks):
         workflow_logger.info("LearnClassifierFromGt: learning classifier for multiple inputs for xy called.")
         features = []
         gts = []
 
-        inp = self.input()
         for i in xrange(len(gt)):
             feat_tasks_i = feature_tasks[i]
             gt_i = gt[i].read()
@@ -513,18 +598,23 @@ class LearnClassifierFromGt(luigi.Task):
             transitionEdge = rag_i.readKey('totalNumberOfInSliceEdges')
             gt_i = gt_i[:transitionEdge]
             features_i = np.concatenate(
-                    [feat_task.read([0,0], feat_task.shape('features_xy'), 'features_xy') for feat_task in feat_tasks_i],
-                    axis = 1)
+                [feat_task.read([0, 0], feat_task.shape('features_xy'), 'features_xy') for feat_task in feat_tasks_i],
+                axis=1
+            )
             features.append(features_i)
             gts.append(gt_i)
 
-        features = np.concatenate( features, axis = 0 )
-        gts      = np.concatenate( gts )
+        features = np.concatenate(features, axis=0)
+        gts      = np.concatenate(gts)
         assert features.shape[0] == gts.shape[0], str(features.shape[0]) + " , " + str(gts.shape[0])
-        classifier = vigra.learning.RandomForest3(features.astype('float32'), gts.astype('uint32'),
-                treeCount = PipelineParameter().nTrees, max_depth = PipelineParameter().maxDepth, n_threads = PipelineParameter().nThreads)
-        classifier.writeHDF5( str(self.output().path), 'rf_features_xy' )
-
+        classifier = RandomForest(
+            features,
+            gts,
+            n_trees=PipelineParameter().nTrees,
+            max_depth=PipelineParameter().maxDepth,
+            n_threads=PipelineParameter().nThreads
+        )
+        classifier.write(str(self.output().path), 'rf_features_xy')
 
     def _learn_classifier_from_multiple_inputs_z(self, rag, gt, feature_tasks):
         workflow_logger.info("LearnClassifierFromGt: learning classifier for multiple inputs for z called.")
@@ -547,19 +637,24 @@ class LearnClassifierFromGt(luigi.Task):
 
             gt_i = gt_i[transitionEdge:skipTransition] if PipelineParameter().defectPipeline else gt_i[transitionEdge:]
             features_i = np.concatenate(
-                    [feat_task.read([0,0], feat_task.shape('features_z'), 'features_z') for feat_task in feat_tasks_i],
-                    axis = 1)
+                [feat_task.read([0, 0], feat_task.shape('features_z'), 'features_z') for feat_task in feat_tasks_i],
+                axis=1
+            )
 
             features.append(features_i)
             gts.append(gt_i)
 
-        features = np.concatenate( features, axis = 0 )
-        gts      = np.concatenate( gts )
+        features = np.concatenate(features, axis=0)
+        gts      = np.concatenate(gts)
         assert features.shape[0] == gts.shape[0], str(features.shape[0]) + " , " + str(gts.shape[0])
-        classifier = vigra.learning.RandomForest3(features.astype('float32'), gts.astype('uint32'),
-                treeCount = PipelineParameter().nTrees, max_depth = PipelineParameter().maxDepth, n_threads = PipelineParameter().nThreads)
-        classifier.writeHDF5( str(self.output().path), 'rf_features_z' )
-
+        classifier = RandomForest(
+            features,
+            gts,
+            n_trees=PipelineParameter().nTrees,
+            max_depth=PipelineParameter().maxDepth,
+            n_threads=PipelineParameter().nThreads
+        )
+        classifier.write(str(self.output().path), 'rf_features_z')
 
     def _learn_classifier_from_multiple_inputs_all(self, rag, gt, feature_tasks):
         features = []
@@ -569,25 +664,31 @@ class LearnClassifierFromGt(luigi.Task):
             rag_i = rag[i]
             if PipelineParameter().defectPipeline:
                 if self.input()["modified_adjacency"][i].read("has_defects"):
-                    skipTransition = rag_i.readKey('numberOfEdges') - self.input()["modified_adjacency"][i].read("delete_edges").shape[0]
+                    skipTransition = rag_i.readKey('numberOfEdges') - \
+                        self.input()["modified_adjacency"][i].read("delete_edges").shape[0]
                 else:
                     skipTransition = rag_i.readKey('numberOfEdges')
             else:
                 skipTransition = rag_i.readKey('numberOfEdges')
 
-            features.append(
-                    np.concatenate(
-                        [feat.read([0,0], feat.shape(key), key) for key in ('features_xy', 'features_z') for feat in feature_tasks[i]],
-                        axis = 1 ))
+            features.append(np.concatenate(
+                [feat.read([0, 0], feat.shape(key), key)
+                 for key in ('features_xy', 'features_z') for feat in feature_tasks[i]],
+                axis=1)
+            )
             gts.append(gt[i].read()[:skipTransition])
 
-        features = np.concatenate( features, axis = 0 )
-        gts      = np.concatenate( gts )
+        features = np.concatenate(features, axis=0)
+        gts      = np.concatenate(gts)
         assert features.shape[0] == gts.shape[0], str(features.shape[0]) + " , " + str(gts.shape[0])
-        classifier = vigra.learning.RandomForest3(features.astype('float32'), gts.astype('uint32'),
-                treeCount = PipelineParameter().nTrees, max_depth = PipelineParameter().maxDepth, n_threads = PipelineParameter().nThreads)
-        classifier.writeHDF5( str(self.output().path), 'rf_joined' )
-
+        classifier = RandomForest(
+            features,
+            gts,
+            n_trees=PipelineParameter().nTrees,
+            max_depth=PipelineParameter().maxDepth,
+            n_threads=PipelineParameter().nThreads
+        )
+        classifier.write(str(self.output().path), 'rf_features_joined')
 
     def _learn_classifier_from_multiple_inputs_defects(self, rag, gt, feature_tasks):
         workflow_logger.info("LearnClassifierFromGt: learning classifier for multiple inputs for defects called.")
@@ -604,28 +705,31 @@ class LearnClassifierFromGt(luigi.Task):
             mod_i = self.input()["modified_adjacency"][i]
             if not mod_i.read("has_defects"):
                 continue
-
-            nEdges = mod_i.read("n_edges_modified")
             skipTransition = rag_i.readKey('numberOfEdges') - mod_i.read("delete_edges").shape[0]
-            transitionEdge = rag_i.readKey('totalNumberOfInSliceEdges')
 
             gt_i = gt_i[skipTransition:]
             features_i = np.concatenate(
-                    [feat_task.read([0,0], feat_task.shape('features_skip'), 'features_skip') for feat_task in feat_tasks_i],
-                    axis = 1)
+                [feat_task.read([0, 0], feat_task.shape('features_skip'), 'features_skip')
+                 for feat_task in feat_tasks_i],
+                axis=1
+            )
 
             features.append(features_i)
             gts.append(gt_i)
 
-        features = np.concatenate( features, axis = 0 )
-        gts      = np.concatenate( gts )
+        features = np.concatenate(features, axis=0)
+        gts      = np.concatenate(gts)
         assert features.shape[0] == gts.shape[0], str(features.shape[0]) + " , " + str(gts.shape[0])
-        classifier = vigra.learning.RandomForest3(features.astype('float32'), gts.astype('uint32'),
-                treeCount = PipelineParameter().nTrees, max_depth = PipelineParameter().maxDepth, n_threads = PipelineParameter().nThreads)
-        classifier.writeHDF5( str(self.output().path), 'rf_features_skip' )
-
+        classifier = RandomForest(
+            features,
+            gts,
+            n_trees=PipelineParameter().nTrees,
+            max_depth=PipelineParameter().maxDepth,
+            n_threads=PipelineParameter().nThreads
+        )
+        classifier.write(str(self.output().path), 'rf_features_skip')
 
     def output(self):
         ninp_str = "SingleInput" if (len(self.pathsToSeg) == 1) else "MultipleInput"
-        save_path = os.path.join( PipelineParameter().cache, "LearnClassifierFromGt_%s.h5" % ninp_str )
-        return HDF5DataTarget(save_path)
+        save_path = os.path.join(PipelineParameter().cache, "LearnClassifierFromGt_%s" % ninp_str)
+        return FolderTarget(save_path) if use_sklearn else HDF5DataTarget(save_path)
