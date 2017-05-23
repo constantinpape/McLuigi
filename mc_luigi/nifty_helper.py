@@ -36,7 +36,10 @@ def run_nifty_solver(
     if verbose or time_limit is not None:
         with_visitor = True
         visit_nth = 1 if verbose else int(1000000000)
-        visitor = obj.multicutVerboseVisitor(visit_nth, time_limit)
+        if time_limit is not None:
+            visitor = obj.verboseVisitor(visit_nth, time_limit)
+        else:
+            visitor = obj.verboseVisitor(visit_nth)
 
     t_inf = time.time()
     if with_visitor:

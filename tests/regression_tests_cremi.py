@@ -58,13 +58,12 @@ def regression_test_cremi(samples):
     for ds_test in samples:
 
         vi_split_ref, vi_merge_ref, adapted_ri_ref = reference_values_mc[ds_test]
-        gt = vigra.readHDF5(
-            json.load(test_inputs)['gt'], 'data'
-        )
-        mc_seg = vigra.readHDF5(
-            os.path.join(json.load(test_inputs)['cache'], 'MulticutSegmentation.h5'),
-            'data'
-        )
+        with open(test_inputs) as f:
+            in_files = json.load(f)
+            gt_p = in_files['gt']
+            mc_p = os.path.join(in_files['cache'], 'MulticutSegmentation.h5')
+        gt = vigra.readHDF5(gt_p, 'data')
+        mc_seg = vigra.readHDF5(mc_p, 'data')
 
         print "Regression Test MC for %s..." % ds_test
         regression_test(
