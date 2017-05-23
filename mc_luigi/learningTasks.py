@@ -38,11 +38,11 @@ try:
     from sklearn.ensemble import RandomForestClassifier as RFType
     use_sklearn = True
     import cPickle as pickle
-    print "Using sklearn random forest"
+    workflow_logger.info("Using sklearn random forest")
 except ImportError:
     RFType = vigra.learning.RandomForest3
     use_sklearn = False
-    print "Using vigra random forest 3"
+    workflow_logger.info("Using vigra random forest 3")
 
 
 # wrapper for sklearn / random forest
@@ -73,11 +73,12 @@ class RandomForest(object):
             self._learn_vigra_sklearn(train_data, train_labels)
 
     @classmethod
-    def load_from_file(self, file_path, key, n_threads):
-        self = self('__will_deserialize__', None, None, n_threads)
+    def load_from_file(self, file_path, key):
+        assert os.path.exists(file_path), file_path
+        self = self('__will_deserialize__', None, None, None)
         if use_sklearn:
-            # remove '.h5' from the file path and add the key
             save_path = os.path.join(file_path, "%s.pkl" % key)
+            assert os.path.exists(save_path)
             with open(save_path) as f:
                 rf = pickle.load(f)
             self.n_trees = rf.n_estimators
@@ -119,17 +120,19 @@ class RandomForest(object):
             max_depth=self.max_depth if self.max_depth is not None else 0
         )
 
-    def predict_probabilities(self, test_data):
+    def predict_probabilities(self, test_data, n_threads = 1):
         if use_sklearn:
-            return self._predict_sklearn(test_data)
+            return self._predict_sklearn(test_data, n_threads)
         else:
-            return self._predict_vigra(test_data)
+            return self._predict_vigra(test_data, n_threads)
 
-    def _predict_sklearn(self, test_data):
+    def _predict_sklearn(self, test_data, n_threads):
+        if self.rf.n_jobs != n_threads:
+            self.rf.n_jobs = n_threads
         return self.rf.predict_proba(test_data)
 
-    def _predict_vigra(self, test_data):
-        prediction = self.rf.predict_probabilities(test_data, n_threads=self.n_threads)
+    def _predict_vigra(self, test_data, n_threads):
+        prediction = self.rf.predict_probabilities(test_data, n_threads=n_threads)
         # normalize the prediction
         prediction /= self.n_trees
         # normalize by the number of trees and remove nans
@@ -140,7 +143,6 @@ class RandomForest(object):
 
     def write(self, file_path, key):
         if use_sklearn:
-            # remove '.h5' from the file path and add the key
             if not os.path.exists(file_path):
                 os.mkdir(file_path)
             save_path = os.path.join(file_path, "%s.pkl" % (key))
@@ -177,22 +179,22 @@ class EdgeProbabilities(luigi.Task):
 
             mod_adjacency = inp["modified_adjacency"]
             if mod_adjacency.read("has_defects"):
-                nEdges = mod_adjacency.read("n_edges_modified")
-                assert nEdges > 0, str(nEdges)
+                n_edges = mod_adjacency.read("n_edges_modified")
+                assert n_edges > 0, str(n_edges)
                 workflow_logger.info(
-                    "EdgeProbabilities: for defect corrected edges. Total number of edges: %i" % nEdges
+                    "EdgeProbabilities: for defect corrected edges. Total number of edges: %i" % n_edges
                 )
 
             else:
-                nEdges = inp['rag'].readKey('numberOfEdges')
-                workflow_logger.info("EdgeProbabilities: Total number of edges: %i" % nEdges)
+                n_edges = inp['rag'].readKey('numberOfEdges')
+                workflow_logger.info("EdgeProbabilities: Total number of edges: %i" % n_edges)
 
         else:
-            nEdges = inp['rag'].readKey('numberOfEdges')
-            workflow_logger.info("EdgeProbabilities: Total number of edges: %i" % nEdges)
+            n_edges = inp['rag'].readKey('numberOfEdges')
+            workflow_logger.info("EdgeProbabilities: Total number of edges: %i" % n_edges)
 
         out  = self.output()
-        out.open([nEdges], [min(262144, nEdges)])  # 262144 = chunk size
+        out.open([n_edges], [min(262144, n_edges)])  # 262144 = chunk size
 
         self._predict(feature_tasks, out)
 
@@ -203,21 +205,21 @@ class EdgeProbabilities(luigi.Task):
     def _predict(self, feature_tasks, out):
         inp = self.input()
         if PipelineParameter().defectPipeline:
-            nEdges = inp["modified_adjacency"].read("n_edges_modified")
-            assert nEdges > 0
-            nXYEdges = inp['rag'].readKey('totalNumberOfInSliceEdges')
-            nZEdgesTotal = nEdges - nXYEdges
-            nSkipEdges = inp["modified_adjacency"].read("skip_edges").shape[0]
+            n_edges = inp["modified_adjacency"].read("n_edges_modified")
+            assert n_edges > 0
+            n_edges_xy = inp['rag'].readKey('totalNumberOfInSliceEdges')
+            n_edges_total_z = n_edges - n_edges_xy
+            n_edges_skip = inp["modified_adjacency"].read("skip_edges").shape[0]
         else:
-            nEdges   = inp['rag'].readKey('numberOfEdges')
-            nXYEdges = inp['rag'].readKey('totalNumberOfInSliceEdges')
-            nZEdgesTotal  = nEdges - nXYEdges
+            n_edges   = inp['rag'].readKey('numberOfEdges')
+            n_edges_xy = inp['rag'].readKey('totalNumberOfInSliceEdges')
+            n_edges_total_z  = n_edges - n_edges_xy
 
-        nFeatsXY = 0
-        nFeatsZ  = 0
+        n_feats_xy = 0
+        n_feats_z  = 0
         for feat in feature_tasks:
-            nFeatsXY += feat.shape('features_xy')[1]
-            nFeatsZ  += feat.shape('features_z')[1]
+            n_feats_xy += feat.shape('features_xy')[1]
+            n_feats_z  += feat.shape('features_z')[1]
 
         feat_types = ['features_xy', 'features_z']
         classifier_types = feat_types if PipelineParameter().separateEdgeClassification else 2 * ['features_joined']
@@ -226,25 +228,24 @@ class EdgeProbabilities(luigi.Task):
             classifier_types += ['features_skip']
 
         for ii, feat_type in enumerate(feat_types):
-            print "Predicting", feat_type, "features"
-            classifier = RandomForest(
+            workflow_logger.info("Predicting features for %s" % feat_type)
+            classifier = RandomForest.load_from_file(
                 str(self.pathToClassifier),
-                classifier_types[ii],
-                PipelineParameter().nThreads
+                "rf_%s" % classifier_types[ii]
             )
 
             if feat_type == 'features_xy':
-                nEdgesType = nXYEdges
-                nFeatsType = nFeatsXY
-                startType  = 0
+                n_edgesType = n_edges_xy
+                n_feats_type = n_feats_xy
+                start_type  = 0
             elif feat_type == 'features_z':
-                nEdgesType = nZEdgesTotal - nSkipEdges if PipelineParameter().defectPipeline else nZEdgesTotal
-                nFeatsType = nFeatsZ
-                startType  = nXYEdges
+                n_edgesType = n_edges_total_z - n_edges_skip if PipelineParameter().defectPipeline else n_edges_total_z
+                n_feats_type = n_feats_z
+                start_type  = n_edges_xy
             elif feat_type == 'features_skip':
-                nEdgesType = nSkipEdges
-                nFeatsType = nFeatsZ
-                startType  = nEdges - nSkipEdges
+                n_edgesType = n_edges_skip
+                n_feats_type = n_feats_z
+                start_type  = n_edges - n_edges_skip
 
             if PipelineParameter().nFeatureChunks > 1:
                 workflow_logger.info(
@@ -252,14 +253,14 @@ class EdgeProbabilities(luigi.Task):
                     if PipelineParameter().separateEdgeClassification else
                     "EdgeProbabilities: predicting %s edges with joint classifier out of core" % feat_type
                 )
-                self._predict_separate_out_of_core(
+                self._predict_out_of_core(
                     classifier,
                     feature_tasks,
                     out,
                     feat_type,
-                    nEdgesType,
-                    nFeatsType,
-                    startType
+                    n_edgesType,
+                    n_feats_type,
+                    start_type
                 )
             else:
                 workflow_logger.info(
@@ -267,14 +268,14 @@ class EdgeProbabilities(luigi.Task):
                     if PipelineParameter().separateEdgeClassification else
                     "EdgeProbabilities: predicting %s edges with joint classifier in core" % feat_type
                 )
-                self._predict_separate_in_core(
+                self._predict_in_core(
                     classifier,
                     feature_tasks,
                     out,
                     feat_type,
-                    nEdgesType,
-                    nFeatsType,
-                    startType
+                    n_edgesType,
+                    n_feats_type,
+                    start_type
                 )
 
     # In core prediction for edge type
@@ -283,23 +284,22 @@ class EdgeProbabilities(luigi.Task):
             classifier,
             feature_tasks,
             out,
-            featureType,
-            nEdgesType,
-            nFeatsType,
-            startType
+            feat_type,
+            n_edges,
+            n_feats,
+            start
     ):
         # In core prediction
-        featuresType = np.zeros((nEdgesType, nFeatsType), dtype='float32')
-        featOffset = 0
+        features = np.zeros((n_edges, n_feats), dtype='float32')
+        offset = 0
 
         for ii, feat in enumerate(feature_tasks):
-            featuresType[:, featOffset:featOffset + feat.shape(featureType)[1]] = feat.read(
-                [0, 0], feat.shape(featureType), featureType)
-            featOffset += feat.shape(featureType)[1]
+            features[:, offset:offset + feat.shape(feat_type)[1]] = feat.read(
+                [0, 0], feat.shape(feat_type), feat_type)
+            offset += feat.shape(feat_type)[1]
 
-        print "Features loaded, starting prediction"
-        probs = classifier.predict_probabilities(featuresType)[:, 1]
-        out.write([long(startType)], probs)
+        probs = classifier.predict_probabilities(features, PipelineParameter().nThreads)[:, 1]
+        out.write([long(start)], probs)
 
     # Out of core prediction for edge type
     def _predict_out_of_core(
@@ -307,38 +307,38 @@ class EdgeProbabilities(luigi.Task):
             classifier,
             feature_tasks,
             out,
-            featureType,
-            nEdgesType,
-            nFeatsType,
-            startType
+            feat_type,
+            n_edges,
+            n_feats,
+            start
     ):
-        nSubFeats = PipelineParameter().nFeatureChunks
-        assert nSubFeats > 1, str(nSubFeats)
+        n_sub_feats = PipelineParameter().nFeatureChunks
+        assert n_sub_feats > 1, str(n_sub_feats)
 
-        def predict_subfeats(subFeatId):
-            print subFeatId, '/', nSubFeats
-            featIndexStart = int(float(subFeatId) / nSubFeats * nEdgesType)
-            featIndexEnd   = int(float(subFeatId + 1) / nSubFeats * nEdgesType)
-            if subFeatId == nSubFeats:
-                featIndexEnd = nEdgesType
-            subFeats = np.concatenate(
+        def predict_subfeats(sub_feat_id):
+            print sub_feat_id, '/', n_sub_feats
+            start_index = int(float(sub_feat_id) / n_sub_feats * n_edges)
+            end_index   = int(float(sub_feat_id + 1) / n_sub_feats * n_edges)
+            if sub_feat_id == n_sub_feats:
+                end_index = n_edges
+            sub_feats = np.concatenate(
                 [feat.read(
-                    [featIndexStart, 0],
-                    [featIndexEnd, feat.shape(featureType)[1]],
-                    featureType) for feat in feature_tasks],
+                    [start_index, 0],
+                    [end_index, feat.shape(feat_type)[1]],
+                    feat_type) for feat in feature_tasks],
                 axis=1
             )
 
-            readStart = long(featIndexStart + startType)
+            read_start = long(start_index + start)
 
-            probsSub = classifier.predict_probabilities(subFeats)[:, 1]
-            out.write([readStart], probsSub)
+            probs = classifier.predict_probabilities(sub_feats, 1)[:, 1]
+            out.write([read_start], probs)
             return True
 
-        nWorkers = PipelineParameter().nThreads
-        # nWorkers = 1
-        with futures.ThreadPoolExecutor(max_workers=nWorkers) as executor:
-            tasks = [executor.submit(predict_subfeats, subFeatId) for subFeatId in xrange(nSubFeats)]
+        n_workers = PipelineParameter().nThreads
+        # n_workers = 1
+        with futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
+            tasks = [executor.submit(predict_subfeats, sub_feat_id) for sub_feat_id in xrange(n_sub_feats)]
             [t.result() for t in tasks]
 
     def output(self):
