@@ -7,7 +7,7 @@ datasets = ['%s_%i' % (sample, i) for i in (0, 1)
 
 
 def make_inputs(ds_test):
-    top_folder = '/home/constantin/Work/neurodata_hdd/regression_test_data/cremi/cremi_transposed/'
+    top_folder = '/home/constantin/Work/neurodata_hdd/regression_test_data/cremi/'
     if not os.path.exists(ds_test):
         os.mkdir(ds_test)
 
@@ -20,7 +20,7 @@ def make_inputs(ds_test):
                 for ds in datasets if ds != ds_test],
         'gt': [os.path.join(os.path.join(top_folder, ds), '%s_gt_train.h5' % ds)
                for ds in datasets if ds != ds_test],
-        'cache': '/home/constantin/Work/home_hdd/cache/regression_tests_mcluigi/%s_train' % ds_test
+        'cache': '/home/constantin/Work/home_hdd/cache/regression_tests_mcluigi/%s_train2' % ds_test
     }
     for key, paths in train_dict.iteritems():
         if key == 'cache':
@@ -36,9 +36,9 @@ def make_inputs(ds_test):
         'data': [os.path.join(top_folder, ds_test) + '/%s_raw_train.h5' % ds_test,
                  os.path.join(top_folder, ds_test) + '/%s_pmap_train.h5' % ds_test],
         'seg': os.path.join(os.path.join(top_folder, ds_test), '%s_seg_train.h5' % ds_test),
-        'rf': '/home/constantin/Work/home_hdd/cache/regression_tests_mcluigi/%s_train/LearnClassifierFromGt_MultipleInput' % ds_test,
+        'rf': '/home/constantin/Work/home_hdd/cache/regression_tests_mcluigi/%s_train2/LearnClassifierFromGt_MultipleInput' % ds_test,
         'gt': os.path.join(os.path.join(top_folder, ds_test), '%s_gt_train.h5' % ds_test),
-        'cache': '/home/constantin/Work/home_hdd/cache/regression_tests_mcluigi/%s_test' % ds_test
+        'cache': '/home/constantin/Work/home_hdd/cache/regression_tests_mcluigi/%s_test2' % ds_test
     }
     for key, paths in test_dict.iteritems():
         if key in ('cache', 'rf'):

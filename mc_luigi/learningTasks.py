@@ -23,12 +23,14 @@ import h5py
 # import the proper nifty version
 try:
     import nifty
+    import nifty.graph.rag as nrag
 except ImportError:
     try:
         import nifty_with_cplex as nifty
+        import nifty_with_cplex.graph.rag as nrag
     except ImportError:
         import nifty_with_gurobi as nifty
-import nifty.graph.rag as nrag
+        import nifty_with_gurobi.graph.rag as nrag
 
 # init the workflow logger
 workflow_logger = logging.getLogger(__name__)
@@ -70,7 +72,7 @@ class RandomForest(object):
         if use_sklearn:
             self._learn_rf_sklearn(train_data, train_labels)
         else:
-            self._learn_vigra_sklearn(train_data, train_labels)
+            self._learn_rf_vigra(train_data, train_labels)
 
     @classmethod
     def load_from_file(self, file_path, key):
@@ -120,7 +122,7 @@ class RandomForest(object):
             max_depth=self.max_depth if self.max_depth is not None else 0
         )
 
-    def predict_probabilities(self, test_data, n_threads = 1):
+    def predict_probabilities(self, test_data, n_threads=1):
         if use_sklearn:
             return self._predict_sklearn(test_data, n_threads)
         else:
@@ -132,7 +134,7 @@ class RandomForest(object):
         return self.rf.predict_proba(test_data)
 
     def _predict_vigra(self, test_data, n_threads):
-        prediction = self.rf.predict_probabilities(test_data, n_threads=n_threads)
+        prediction = self.rf.predictProbabilities(test_data, n_threads=n_threads)
         # normalize the prediction
         prediction /= self.n_trees
         # normalize by the number of trees and remove nans

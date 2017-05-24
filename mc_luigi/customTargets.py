@@ -11,13 +11,17 @@ import h5py
 # import the proper nifty version
 try:
     import nifty
+    import nifty.graph.rag as nrag
+    import nifty.hdf5 as nh5
 except ImportError:
     try:
         import nifty_with_cplex as nifty
+        import nifty_with_cplex.graph.rag as nrag
+        import nifty_with_cplex.hdf5 as nh5
     except ImportError:
         import nifty_with_gurobi as nifty
-import nifty.graph.rag as nrag
-import nifty.hdf5 as nh5
+        import nifty_with_gurobi.graph.rag as nrag
+        import nifty_with_gurobi.hdf5 as nh5
 
 
 class HDF5VolumeTarget(FileSystemTarget):

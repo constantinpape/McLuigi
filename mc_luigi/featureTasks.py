@@ -20,12 +20,14 @@ from concurrent import futures
 # import the proper nifty version
 try:
     import nifty
+    import nifty.graph.rag as nrag
 except ImportError:
     try:
         import nifty_with_cplex as nifty
+        import nifty_with_cplex.graph.rag as nrag
     except ImportError:
         import nifty_with_gurobi as nifty
-import nifty.graph.rag as nrag
+        import nifty_with_gurobi.graph.rag as nrag
 
 
 # init the workflow logger

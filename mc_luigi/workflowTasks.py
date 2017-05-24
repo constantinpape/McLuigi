@@ -23,12 +23,14 @@ import vigra
 # import the proper nifty version
 try:
     import nifty
+    import nifty.graph.rag as nrag
 except ImportError:
     try:
         import nifty_with_cplex as nifty
+        import nifty_with_cplex.graph.rag as nrag
     except ImportError:
         import nifty_with_gurobi as nifty
-import nifty.graph.rag as nrag
+        import nifty_with_gurobi.graph.rag as nrag
 
 # init the workflow logger
 workflow_logger = logging.getLogger(__name__)
@@ -43,7 +45,8 @@ class SegmentationWorkflow(luigi.Task):
 
     def requires(self):
         raise AttributeError(
-            "Segmentation Workflow should never be called, call Multicut Segmentation or BlockwiseMulticutSegmentation instead!"
+            "SegmentationWorkflow should never be called, \
+            call MulticutSegmentation or BlockwiseMulticutSegmentation instead!"
         )
 
     @run_decorator
@@ -109,7 +112,7 @@ class SegmentationWorkflow(luigi.Task):
                 replace_slice[z3] = z3 + 2 if z3 < shape[0] - 1 else z3 - 4
             else:
                 raise RuntimeError(
-                    "Postprocessing is not implemented for more than 4 consecutively defected slices. Go and clean your data!"
+                    "Postprocessing is not implemented for more than 4 consecutively defected slices. Clean your data!"
                 )
 
         # FIXME strange nifty bugs, that's why we use h5py here
@@ -124,7 +127,8 @@ class SegmentationWorkflow(luigi.Task):
 
     def output(self):
         raise AttributeError(
-            "Segmentation Workflow should never be called, call Multicut Segmentation or BlockwiseMulticutSegmentation instead!"
+            "SegmentationWorkflow should never be called, \
+            call MulticutSegmentation or BlockwiseMulticutSegmentation instead!"
         )
 
 
