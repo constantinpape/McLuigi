@@ -513,7 +513,6 @@ class LearnClassifierFromGt(luigi.Task):
 
     def _learn_classifier_from_single_input_xy(self, gt, feature_tasks, transitionEdge):
         gt = gt[:transitionEdge]
-        features = []
         features = np.concatenate(
             [feat_task.read([0, 0], feat_task.shape('features_xy'), 'features_xy') for feat_task in feature_tasks],
             axis=1

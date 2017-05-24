@@ -37,10 +37,10 @@ def regression_test_cremi(samples):
     for ds_test in samples:
 
         train_inputs = './cremi_inputs/%s/train_files.json' % ds_test
-        assert os.path.exists(train_inputs)
+        assert os.path.exists(train_inputs), train_inputs
 
         test_inputs = './cremi_inputs/%s/test_files.json' % ds_test
-        assert os.path.exists(test_inputs)
+        assert os.path.exists(test_inputs), test_inputs
 
         subprocess.call([
             'python',
@@ -77,4 +77,4 @@ def regression_test_cremi(samples):
 
 if __name__ == '__main__':
     samples = ['sample%s_%i' % (sample, i) for sample in ('A', 'B', 'C') for i in (0, 1)]
-    regression_test_cremi([samples[0]])
+    regression_test_cremi(samples)

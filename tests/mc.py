@@ -26,7 +26,7 @@ def mc(inp, blockwise_inference=False):
     ppl_parameter.multicutVerbose = True
     ppl_parameter.multicutBlockShape = [50, 512, 512]
     ppl_parameter.multicutBlockOverlap = [5, 50, 50]
-    ppl_parameter.nFeatureChunks = 1
+    ppl_parameter.nFeatureChunks = 5
     n_levels = 1
 
     if blockwise_inference:
