@@ -8,9 +8,9 @@ import numpy as np
 def get_unique_rows(array, return_index=False, return_inverse=False):
     array_view = np.ascontiguousarray(array).view(np.dtype((np.void, array.dtype.itemsize * array.shape[1])))
     if return_inverse:
-        _, idx = np.unique(array_view, return_index=True)
-    else:
         _, idx, inverse_idx = np.unique(array_view, return_index=True, return_inverse=True)
+    else:
+        _, idx = np.unique(array_view, return_index=True)
     unique_rows = array[idx]
     return_vals = (unique_rows,)
     if return_index:
