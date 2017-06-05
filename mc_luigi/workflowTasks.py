@@ -10,6 +10,7 @@ from blockwiseMulticutTasks import BlockwiseMulticutSolver
 from dataTasks import StackedRegionAdjacencyGraph, ExternalSegmentation
 from customTargets import HDF5VolumeTarget
 from defectDetectionTasks import DefectSliceDetection
+from skeletonTasks import ResolveCandidates
 
 from pipelineParameter import PipelineParameter
 from tools import config_logger, run_decorator
@@ -22,14 +23,11 @@ import vigra
 
 # import the proper nifty version
 try:
-    import nifty
     import nifty.graph.rag as nrag
 except ImportError:
     try:
-        import nifty_with_cplex as nifty
         import nifty_with_cplex.graph.rag as nrag
     except ImportError:
-        import nifty_with_gurobi as nifty
         import nifty_with_gurobi.graph.rag as nrag
 
 # init the workflow logger
@@ -151,7 +149,7 @@ class MulticutSegmentation(SegmentationWorkflow):
 
 class BlockwiseMulticutSegmentation(SegmentationWorkflow):
 
-    numberOfLevels = luigi.IntParameter(default=2)
+    numberOfLevels = luigi.IntParameter(default=1)
 
     def requires(self):
         return_tasks = {
@@ -171,6 +169,39 @@ class BlockwiseMulticutSegmentation(SegmentationWorkflow):
         save_path = os.path.join(
             PipelineParameter().cache,
             "BlockwiseMulticutSegmentation_%s.h5" % (
+                "modifed" if PipelineParameter().defectPipeline else "standard",
+            )
+        )
+        return HDF5VolumeTarget(save_path, self.dtype, compression=PipelineParameter().compressionLevel)
+
+
+# TODO
+# -> make different skeleton methods accessible
+class ResolvedSegmentation(SegmentationWorkflow):
+
+    fragmentationPath = luigi.Parameter()
+    segmentationPath = luigi.Parameter()
+    fragmentClassifierPath = luigi.Parameter()
+    weight = luigi.Parameter(default=1.)
+    numberOfLevels = luigi.Parameter(default=1)
+
+    def requires(self):
+        return {
+            "mc_nodes": ResolveCandidates(
+                self.fragmentationPath,
+                self.segmentationPath,
+                self.fragmentClassifierPath,
+                self.weight,
+                self.numberOfLevels
+            ),
+            "rag": StackedRegionAdjacencyGraph(self.fragmentationPath),
+            "seg": ExternalSegmentation(self.fragmentationPath)
+        }
+
+    def output(self):
+        save_path = os.path.join(
+            PipelineParameter().cache,
+            "ResolvedSegmentation_%s.h5" % (
                 "modifed" if PipelineParameter().defectPipeline else "standard",
             )
         )

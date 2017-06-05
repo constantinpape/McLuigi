@@ -215,3 +215,41 @@ def string_to_factory(obj, solver_type, solver_kwargs={}, backend_kwargs={}):
         )
     else:
         raise RuntimeError("Invalid solver_type: %s" % solver_type)
+
+
+# TODO TODO TODO
+
+def nifty_lmc_objective(
+    uv_ids,
+    lifted_uv_ids,
+    costs,
+    lifted_costs
+):
+    pass
+
+
+def run_nifty_lmc(
+    objective,
+    factory
+):
+    pass
+
+
+def nifty_lmc_fm_factory(
+    objective,
+    backend_factory,
+    warmstart=True
+):
+    pass
+
+
+def nifty_lmc_greedy_factory(objective):
+    pass
+
+
+def nifty_lmc_kl_factory(objective, warmstart=True):
+    pass
+
+
+def nifty_lmc_mp_factory(objective):
+    pass
