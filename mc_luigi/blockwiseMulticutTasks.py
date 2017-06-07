@@ -37,13 +37,12 @@ workflow_logger = logging.getLogger(__name__)
 config_logger(workflow_logger)
 
 
-# produce reduced global graph from subproblems
-# solve global multicut problem on the reduced graph
-class BlockwiseMulticutSolver(luigi.Task):
+# parent class for blockwise solvers
+# TODO move basic functionality from BlockwiseMulticutSolver here
+class BlockwiseSolver(luigi.Task):
 
     pathToSeg = luigi.Parameter()
     globalProblem  = luigi.TaskParameter()
-
     numberOflevels = luigi.Parameter()
 
     def requires(self):
@@ -58,8 +57,6 @@ class BlockwiseMulticutSolver(luigi.Task):
         for l in xrange(self.numberOflevels):
             levelBlockShape = map(lambda x: x * blockFactor, initialBlockShape)
 
-            workflow_logger.info("BlockwiseMulticutSolver: scheduling reduced problem for level %i with block shape: %s" % (l, str(levelBlockShape)) )
-
             # TODO check that we don't get larger than the actual shape here
             problemHierarchy.append(
                 ReducedProblem(self.pathToSeg, problemHierarchy[-1], levelBlockShape, blockOverlap, l)
@@ -68,12 +65,37 @@ class BlockwiseMulticutSolver(luigi.Task):
 
         return problemHierarchy
 
+    def run(self):
+        raise NotImplementedError("BlockwiseSolver is abstract and does not implement a run functionality!")
+
+    # map back to the global solution
+    def _map_node_result_to_global(self, reduced_node_result):
+
+        problems = self.input()
+        n_nodes_global = problems[0].read('number_of_nodes')
+        reduced_problem = problems[-1]
+        to_global_nodes = reduced_problem.read("new2global")
+
+        # TODO vectorize
+        node_result = np.zeros(n_nodes_global, dtype='uint32')
+        for node_id, node_res in enumerate(reduced_node_result):
+            node_result[to_global_nodes[node_id]] = node_res
+
+        return node_result
+
+    def output(self):
+        raise NotImplementedError("BlockwiseSolver is abstract and does not implement the output functionality!")
+
+
+# produce reduced global graph from subproblems
+# solve global multicut problem on the reduced graph
+class BlockwiseMulticutSolver(BlockwiseSolver):
+
     @run_decorator
     def run(self):
 
         problems = self.input()
 
-        n_nodes_global = problems[0].read('number_of_nodes')
         # we solve the problem for the costs and the edges of the last level of hierarchy
         reduced_problem = problems[-1]
 
@@ -82,7 +104,10 @@ class BlockwiseMulticutSolver(luigi.Task):
         reduced_costs = reduced_problem.read("costs")
         reduced_objective = nifty.graph.optimization.multicut.multicutObjective(reduced_graph, reduced_costs)
 
-        # get solver and run global inference
+        #
+        # run global multicut inference
+        #
+
         solver_type = 'fm-kl'
         inf_params  = dict(
             sigma=PipelineParameter().multicutSigmaFusion,
@@ -100,21 +125,50 @@ class BlockwiseMulticutSolver(luigi.Task):
             time_limit=PipelineParameter().multicutGlobalTimeLimit
         )
 
-        workflow_logger.info("BlockwiseMulticutSolver: Inference of reduced problem for the whole volume took: %f s" % (time.time() - t_inf,))
-        # Note that we don't need to project back to global problem to calculate the correct energy !
-        workflow_logger.info("BlockwiseMulticutSolver: Problem solved with energy %f" % reduced_objective.evalNodeLabels(reduced_node_result) )
+        workflow_logger.info(
+            "BlockwiseMulticutSolver: Inference of reduced problem for the whole volume took: %f s"
+            % (time.time() - t_inf,)
+        )
 
-        to_global_nodes = reduced_problem.read("new2global")
+        # NOTE: we don't need to project back to global problem to calculate the correct energy !
+        workflow_logger.info(
+            "BlockwiseMulticutSolver: Problem solved with energy %f"
+            % reduced_objective.evalNodeLabels(reduced_node_result)
+        )
 
-        # TODO vectorize
-        node_result = np.zeros(n_nodes_global, dtype='uint32')
-        for node_id, node_res in enumerate(reduced_node_result):
-            node_result[to_global_nodes[node_id]] = node_res
-
+        node_result = self._map_node_result_to_global(reduced_node_result)
         self.output().write(node_result)
 
     def output(self):
-        save_path = os.path.join(PipelineParameter().cache, "BlockwiseMulticutSolver_%s.h5" % ("modifed" if PipelineParameter().defectPipeline else "standard",))
+        save_path = os.path.join(
+            PipelineParameter().cache,
+            "BlockwiseMulticutSolver_%s.h5"
+            % ("modifed" if PipelineParameter().defectPipeline else "standard",)
+        )
+        return HDF5DataTarget(save_path)
+
+
+# stitch blockwise sub-results
+class BlockwiseStitchingSolver(BlockwiseSolver):
+
+    @run_decorator
+    def run(self):
+        problems = self.input()
+        reduced_problem = problems[-1]
+
+        reduced_graph = nifty.graph.UndirectedGraph()
+        reduced_graph.deserialize(reduced_problem.read("graph"))
+        reduced_costs = reduced_problem.read("costs")
+
+        # TODO merge all edges along the block boundaries that are attractive (modulu bias?!)
+        # we might need some more information for this -> subblocks and the corresponding edges!
+
+    def output(self):
+        save_path = os.path.join(
+            PipelineParameter().cache,
+            "BlockwiseStitchingSolver_%s.h5"
+            % ("modifed" if PipelineParameter().defectPipeline else "standard",)
+        )
         return HDF5DataTarget(save_path)
 
 
@@ -131,12 +185,19 @@ class ReducedProblem(luigi.Task):
 
     def requires(self):
         return {
-            "sub_solution": BlockwiseSubSolver(self.pathToSeg, self.problem, self.blockShape, self.blockOverlap, self.level),
+            "sub_solution": BlockwiseSubSolver(
+                self.pathToSeg, self.problem, self.blockShape, self.blockOverlap, self.level
+            ),
             "problem": self.problem
         }
 
     @run_decorator
     def run(self):
+
+        workflow_logger.info(
+            "ReducedProblem: Reduced problem for level %i with block shape: %s"
+            % (self.level, str(self.blockShape))
+        )
 
         inp = self.input()
         problem   = inp["problem"]
@@ -204,7 +265,10 @@ class ReducedProblem(luigi.Task):
         t_merge = time.time() - t_merge
         workflow_logger.info("ReucedProblem: Time for merging: %f s" % (t_merge))
 
-        workflow_logger.info("ReucedProblem: Merging of blockwise results reduced problemsize (level %i):" % (self.level,))
+        workflow_logger.info(
+            "ReucedProblem: Merging of blockwise results reduced problemsize (level %i):"
+            % self.level
+        )
         workflow_logger.info("ReucedProblem: Nodes: From %i to %i" % (g.numberOfNodes, number_of_new_nodes))
         workflow_logger.info("ReucedProblem: Edges: From %i to %i" % (g.numberOfEdges, number_of_new_edges))
 
@@ -224,7 +288,8 @@ class ReducedProblem(luigi.Task):
 
     def output(self):
         blcksize_str = "_".join(map(str, list(self.blockShape)))
-        save_name = "ReducedProblem_%s_%s.h5" % (blcksize_str, "modifed" if PipelineParameter().defectPipeline else "standard")
+        save_name = "ReducedProblem_%s_%s.h5" \
+            % (blcksize_str, "modifed" if PipelineParameter().defectPipeline else "standard")
         save_path = os.path.join(PipelineParameter().cache, save_name)
         return HDF5DataTarget(save_path)
 
@@ -326,7 +391,11 @@ class BlockwiseSubSolver(luigi.Task):
         # block size in first hierarchy level
         initial_block_shape = PipelineParameter().multicutBlockShape
         initial_overlap = list(PipelineParameter().multicutBlockOverlap)
-        initial_blocking = nifty.tools.blocking(roiBegin=[0L, 0L, 0L], roiEnd=seg.shape(), blockShape=initial_block_shape)
+        initial_blocking = nifty.tools.blocking(
+            roiBegin=[0L, 0L, 0L],
+            roiEnd=seg.shape(),
+            blockShape=initial_block_shape
+        )
 
         # function for subproblem extraction
         # extraction only for level 0
@@ -345,16 +414,18 @@ class BlockwiseSubSolver(luigi.Task):
         number_of_blocks = blocking.numberOfBlocks
 
         # sequential for debugging
-        #subProblems = []
-        #for blockId in xrange(numberOfBlocks):
-        #    print "Running block:", blockId, "/", numberOfBlocks
-        #    t_block = time.time()
+        # subProblems = []
+        # for blockId in xrange(numberOfBlocks):
+        #     print "Running block:", blockId, "/", numberOfBlocks
+        #     t_block = time.time()
 
-        #    block = blocking.getBlockWithHalo(blockId, blockOverlap).outerBlock
-        #    blockBegin, blockEnd = block.begin, block.end
-        #    workflow_logger.debug( "Block id " + str(blockId) + " start " + str(blockBegin) + " end " + str(blockEnd) )
-        #    subBlocks = initialBlocking.getBlockIdsInBoundingBox(blockBegin, blockEnd, initialOverlap)
-        #    subProblems.append( extract_subproblem( blockId, subBlocks ) )
+        #     block = blocking.getBlockWithHalo(blockId, blockOverlap).outerBlock
+        #     blockBegin, blockEnd = block.begin, block.end
+        #     workflow_logger.debug(
+        #       "Block id " + str(blockId) + " start " + str(blockBegin) + " end " + str(blockEnd)
+        #     )
+        #     subBlocks = initialBlocking.getBlockIdsInBoundingBox(blockBegin, blockEnd, initialOverlap)
+        #     subProblems.append( extract_subproblem( blockId, subBlocks ) )
 
         n_workers = min(number_of_blocks, PipelineParameter().nThreads)
         # n_workers = 2
@@ -391,7 +462,8 @@ class BlockwiseSubSolver(luigi.Task):
 
         def _solve_mc(g, costs, block_id):
             workflow_logger.debug(
-                "BlockwiseSubSolver: Solving MC Problem with %i / %i number of variables" % (g.numberOfNodes, g.numberOfEdges)
+                "BlockwiseSubSolver: Solving MC Problem with %i / %i number of variables"
+                % (g.numberOfNodes, g.numberOfEdges)
             )
             obj = nifty.graph.optimization.multicut.multicutObjective(g, costs)
             factory = string_to_factory(obj, sub_solver_type, solver_params)
@@ -399,15 +471,16 @@ class BlockwiseSubSolver(luigi.Task):
             t_inf  = time.time()
             res    = solver.optimize()
             workflow_logger.debug(
-                "BlockwiseSubSolver: Inference for block %i with fusion moves solver in %f s" % (block_id, t_inf - time.time())
+                "BlockwiseSubSolver: Inference for block %i with fusion moves solver in %f s"
+                % (block_id, t_inf - time.time())
             )
             return res
 
         # sequential for debugging
-        #subResults = []
-        #for blockId, subProblem in enumerate(sub_problems):
-        #    print "Sequential prediction for block id:", blockId
-        #    subResults.append( _solve_mc( subProblem[2], costs[subProblem[0]], blockId) )
+        # subResults = []
+        # for blockId, subProblem in enumerate(sub_problems):
+        #     print "Sequential prediction for block id:", blockId
+        #     subResults.append( _solve_mc( subProblem[2], costs[subProblem[0]], blockId) )
 
         n_workers = min(len(sub_problems), PipelineParameter().nThreads)
         # n_workers = 1
@@ -441,7 +514,8 @@ class BlockwiseSubSolver(luigi.Task):
 
     def output(self):
         blcksize_str = "_".join(map(str, list(self.blockShape)))
-        save_name = "BlockwiseSubSolver_%s_%s.h5" % (blcksize_str, "modifed" if PipelineParameter().defectPipeline else "standard")
+        save_name = "BlockwiseSubSolver_%s_%s.h5" \
+            % (blcksize_str, "modifed" if PipelineParameter().defectPipeline else "standard")
         save_path = os.path.join(PipelineParameter().cache, save_name)
         return HDF5DataTarget(save_path)
 
@@ -457,9 +531,10 @@ class TestSubSolver(luigi.Task):
 
     def requires(self):
         nodes2blocks = NodesToInitialBlocks(self.pathToSeg, self.blockShape, self.blockOverlap)
-        return {"seg": ExternalSegmentation(self.pathToSeg),
-                "problem": MulticutProblem(self.pathToSeg, self.pathToClassifier),
-                "nodes2blocks": nodes2blocks
+        return {
+            "seg": ExternalSegmentation(self.pathToSeg),
+            "problem": MulticutProblem(self.pathToSeg, self.pathToClassifier),
+            "nodes2blocks": nodes2blocks
         }
 
     @run_decorator
@@ -549,7 +624,8 @@ class TestSubSolver(luigi.Task):
         for sub_solver_type in available:
             res = results[sub_solver_type]
             workflow_logger.info(
-                "TestSubSolver: Result of %s: mean-energy: %f, mean-inference-time: %f" % (sub_solver_type, res[0], res[1])
+                "TestSubSolver: Result of %s: mean-energy: %f, mean-inference-time: %f"
+                % (sub_solver_type, res[0], res[1])
             )
             for_serialization.append([res[0], res[1]])
 
@@ -558,6 +634,7 @@ class TestSubSolver(luigi.Task):
 
     def output(self):
         blcksize_str = "_".join(map(str, list(self.blockShape)))
-        save_name = "TestSubSolver_%s_%s.h5" % (blcksize_str, "modifed" if PipelineParameter().defectPipeline else "standard")
+        save_name = "TestSubSolver_%s_%s.h5" \
+            % (blcksize_str, "modifed" if PipelineParameter().defectPipeline else "standard")
         save_path = os.path.join(PipelineParameter().cache, save_name)
         return HDF5DataTarget(save_path)
