@@ -9,7 +9,7 @@ from customTargets import HDF5DataTarget
 from defectDetectionTasks import DefectSliceDetection
 from multicutProblemTasks import MulticutProblem
 
-from tools import config_logger, run_decorator, get_unique_rows
+from tools import config_logger, run_decorator, get_unique_rows, find_matching_row_indices
 from nifty_helper import run_nifty_solver, string_to_factory, available_factorys
 
 import os
@@ -69,7 +69,7 @@ class BlockwiseSolver(luigi.Task):
         raise NotImplementedError("BlockwiseSolver is abstract and does not implement a run functionality!")
 
     # map back to the global solution
-    def _map_node_result_to_global(self, reduced_node_result):
+    def map_node_result_to_global(self, reduced_node_result):
 
         problems = self.input()
         n_nodes_global = problems[0].read('number_of_nodes')
@@ -136,14 +136,14 @@ class BlockwiseMulticutSolver(BlockwiseSolver):
             % reduced_objective.evalNodeLabels(reduced_node_result)
         )
 
-        node_result = self._map_node_result_to_global(reduced_node_result)
+        node_result = self.map_node_result_to_global(reduced_node_result)
         self.output().write(node_result)
 
     def output(self):
         save_path = os.path.join(
             PipelineParameter().cache,
             "BlockwiseMulticutSolver_%s.h5"
-            % ("modifed" if PipelineParameter().defectPipeline else "standard",)
+            % ("modified" if PipelineParameter().defectPipeline else "standard",)
         )
         return HDF5DataTarget(save_path)
 
@@ -159,15 +159,25 @@ class BlockwiseStitchingSolver(BlockwiseSolver):
         reduced_graph = nifty.graph.UndirectedGraph()
         reduced_graph.deserialize(reduced_problem.read("graph"))
         reduced_costs = reduced_problem.read("costs")
+        outer_edges = reduced_problem.read("outer_edges")
+        uv_ids = reduced_graph.uvIds()
 
-        # TODO merge all edges along the block boundaries that are attractive (modulu bias?!)
-        # we might need some more information for this -> subblocks and the corresponding edges!
+        # merge all edges along the block boundaries that are attractive TODO (modulu bias?!)
+        merge_ids = outer_edges[reduced_costs[outer_edges] < 0]
+
+        ufd = nifty.ufd.ufd(reduced_graph.numberOfNodes)
+        ufd.merge(uv_ids[merge_ids])
+
+        reduced_node_result = ufd.elementLabeling()
+
+        node_result = self.map_node_result_to_global(reduced_node_result)
+        self.output().write(node_result)
 
     def output(self):
         save_path = os.path.join(
             PipelineParameter().cache,
             "BlockwiseStitchingSolver_%s.h5"
-            % ("modifed" if PipelineParameter().defectPipeline else "standard",)
+            % ("modified" if PipelineParameter().defectPipeline else "standard",)
         )
         return HDF5DataTarget(save_path)
 
@@ -207,13 +217,16 @@ class ReducedProblem(luigi.Task):
         g = nifty.graph.UndirectedGraph()
         g.deserialize(problem.read("graph"))
 
-        uv_ids = g.uvIds()
-        costs  = problem.read("costs")
+        # merge the edges that are not cuts
+        # and find the new nodes as well as the mapping
+        # from new 2 old nodes
 
+        # we time all the stuff for benchmarking
         t_merge = time.time()
+        uv_ids = g.uvIds()
+
         ufd = nifty.ufd.ufd(g.numberOfNodes)
 
-        # TODO maybe we could spped this up if we pass a list instead of an np.array!
         merge_nodes = uv_ids[cut_edges == 0]
         ufd.merge(merge_nodes)
 
@@ -221,6 +234,35 @@ class ReducedProblem(luigi.Task):
         new2old_nodes = ufd.representativesToSets()
         # number of nodes for the new problem
         number_of_new_nodes = len(new2old_nodes)
+        workflow_logger.info("ReducedProblem: Merging nodes took: %f s" % (time.time() - t_merge))
+
+        t_edges = time.time()
+        # find new edges and costs
+        uv_ids_new = self.find_new_edges_and_costs(
+            uv_ids,
+            problem,
+            cut_edges,
+            number_of_new_nodes,
+            old2new_nodes
+        )
+        workflow_logger.info("ReducedProblem: Computing new edges took: %f s" % (time.time() - t_edges))
+
+        # serialize the node converter
+        t_serialize = time.time()
+        self.serialize_node_conversions(problem, old2new_nodes, new2old_nodes, number_of_new_nodes)
+        workflow_logger.info("ReducedProblem: Serializing ndoe converters took: %f s" % (time.time() - t_serialize))
+
+        # find new outer edges
+        t_outer = time.time()
+        self.find_new_outer_edges(uv_ids, uv_ids_new, old2new_nodes)
+        workflow_logger.info("ReducedProblem: Finding new outer edges took: %f s" % (time.time() - t_outer))
+
+        workflow_logger.info("ReucedProblem: Nodes: From %i to %i" % (g.numberOfNodes, number_of_new_nodes))
+        workflow_logger.info("ReucedProblem: Edges: From %i to %i" % (g.numberOfEdges, len(uv_ids_new)))
+
+    def find_new_edges_and_costs(self, uv_ids, problem, cut_edges, number_of_new_nodes, old2new_nodes):
+
+        costs  = problem.read("costs")
 
         ##############################################
         # find new edges and edge weights (vectorized)
@@ -241,6 +283,15 @@ class ReducedProblem(luigi.Task):
         assert new_costs.shape[0] == number_of_new_edges
         reduced_graph = nifty.graph.UndirectedGraph(number_of_new_nodes)
         reduced_graph.insertEdges(uv_ids_new)
+
+        out = self.output()
+        out.write(reduced_graph.serialize(), "graph")
+        out.write(reduced_graph.numberOfNodes, 'number_of_nodes')
+        out.write(new_costs, "costs")
+
+        return uv_ids_new
+
+    def serialize_node_conversions(self, problem, old2new_nodes, new2old_nodes, number_of_new_nodes):
 
         if self.level == 0:
             global2new = old2new_nodes
@@ -263,34 +314,32 @@ class ReducedProblem(luigi.Task):
             assert -1 not in global2new
             global2new = global2new.astype('uint32')
 
-        t_merge = time.time() - t_merge
-        workflow_logger.info("ReucedProblem: Time for merging: %f s" % (t_merge))
+            out = self.output()
+            out.write(global2new, "global2new")
 
-        workflow_logger.info(
-            "ReucedProblem: Merging of blockwise results reduced problemsize (level %i):"
-            % self.level
+            # need to serialize this differently, due to list of list
+            new2old_nodes = np.array([np.array(n2o, dtype='uint32') for n2o in new2old_nodes])
+            out.writeVlen(new2old_nodes, "new2old")
+
+            new2global = np.array([np.array(n2g, dtype='uint32') for n2g in new2global])
+            out.writeVlen(new2global, "new2global")
+
+    # find new outer edges by mapping the uv-ids of the outer edges
+    # to the new node ids and then find the matching indices of the
+    # new uv-ids
+    def find_new_outer_edges(self, uv_ids, uv_ids_new, old2new_nodes):
+        outer_edges = self.input["sub_solution"].read("outer_edges")
+        outer_uvs = np.sort(
+            old2new_nodes[uv_ids[outer_edges]],
+            axis=1
         )
-        workflow_logger.info("ReucedProblem: Nodes: From %i to %i" % (g.numberOfNodes, number_of_new_nodes))
-        workflow_logger.info("ReucedProblem: Edges: From %i to %i" % (g.numberOfEdges, number_of_new_edges))
-
-        out = self.output()
-        out.write(reduced_graph.serialize(), "graph")
-        out.write(reduced_graph.numberOfNodes, 'number_of_nodes')
-        out.write(new_costs, "costs")
-
-        out.write(global2new, "global2new")
-
-        # need to serialize this differently, due to list of list
-        new2old_nodes = np.array([np.array(n2o, dtype='uint32') for n2o in new2old_nodes])
-        out.writeVlen(new2old_nodes, "new2old")
-
-        new2global = np.array([np.array(n2g, dtype='uint32') for n2g in new2global])
-        out.writeVlen(new2global, "new2global")
+        new_outer_edges = find_matching_row_indices(uv_ids_new, outer_uvs)[:, 0]
+        self.output.write(new_outer_edges, 'outer_edges')
 
     def output(self):
         blcksize_str = "_".join(map(str, list(self.blockShape)))
         save_name = "ReducedProblem_%s_%s.h5" \
-            % (blcksize_str, "modifed" if PipelineParameter().defectPipeline else "standard")
+            % (blcksize_str, "modified" if PipelineParameter().defectPipeline else "standard")
         save_path = os.path.join(PipelineParameter().cache, save_name)
         return HDF5DataTarget(save_path)
 
@@ -443,7 +492,11 @@ class BlockwiseSubSolver(luigi.Task):
                 tasks.append(executor.submit(extract_subproblem, block_id, sub_blocks))
             sub_problems = [task.result() for task in tasks]
 
-        # TODO we need to serialize the outer edges for the stitching solvers
+        # we need to serialize the outer edges for the stitching solvers
+        self.output().write(
+            np.unique(np.concatenate([sub_prob[1] for sub_prob in sub_problems])),
+            'outer_edges'
+        )
 
         assert len(sub_problems) == number_of_blocks, str(len(sub_problems)) + " , " + str(number_of_blocks)
         return sub_problems
@@ -518,7 +571,7 @@ class BlockwiseSubSolver(luigi.Task):
     def output(self):
         blcksize_str = "_".join(map(str, list(self.blockShape)))
         save_name = "BlockwiseSubSolver_%s_%s.h5" \
-            % (blcksize_str, "modifed" if PipelineParameter().defectPipeline else "standard")
+            % (blcksize_str, "modified" if PipelineParameter().defectPipeline else "standard")
         save_path = os.path.join(PipelineParameter().cache, save_name)
         return HDF5DataTarget(save_path)
 
@@ -638,6 +691,6 @@ class TestSubSolver(luigi.Task):
     def output(self):
         blcksize_str = "_".join(map(str, list(self.blockShape)))
         save_name = "TestSubSolver_%s_%s.h5" \
-            % (blcksize_str, "modifed" if PipelineParameter().defectPipeline else "standard")
+            % (blcksize_str, "modified" if PipelineParameter().defectPipeline else "standard")
         save_path = os.path.join(PipelineParameter().cache, save_name)
         return HDF5DataTarget(save_path)

@@ -6,7 +6,7 @@ import luigi
 from multicutProblemTasks import MulticutProblem
 
 from multicutSolverTasks import McSolverFusionMoves  # ,McSolverExact
-from blockwiseMulticutTasks import BlockwiseMulticutSolver
+from blockwiseMulticutTasks import BlockwiseMulticutSolver, BlockwiseStitchingSolver
 from dataTasks import StackedRegionAdjacencyGraph, ExternalSegmentation
 from customTargets import HDF5VolumeTarget
 from defectDetectionTasks import DefectSliceDetection
@@ -179,6 +179,34 @@ class BlockwiseMulticutSegmentation(SegmentationWorkflow):
         save_path = os.path.join(
             PipelineParameter().cache,
             "BlockwiseMulticutSegmentation_%s.h5" % (
+                "modifed" if PipelineParameter().defectPipeline else "standard",
+            )
+        )
+        return HDF5VolumeTarget(save_path, self.dtype, compression=PipelineParameter().compressionLevel)
+
+
+class BlockwiseStitchingSegmentation(SegmentationWorkflow):
+
+    numberOfLevels = luigi.IntParameter(default=1)
+
+    def requires(self):
+        return_tasks = {
+            "mc_nodes": BlockwiseStitchingSolver(
+                self.pathToSeg,
+                MulticutProblem(self.pathToSeg, self.pathToClassifier),
+                self.numberOfLevels
+            ),
+            "rag": StackedRegionAdjacencyGraph(self.pathToSeg),
+            "seg": ExternalSegmentation(self.pathToSeg)
+        }
+        if PipelineParameter().defectPipeline:
+            return_tasks["defect_slices"] = DefectSliceDetection(self.pathToSeg)
+        return return_tasks
+
+    def output(self):
+        save_path = os.path.join(
+            PipelineParameter().cache,
+            "BlockwiseStitichingSegmentation_%s.h5" % (
                 "modifed" if PipelineParameter().defectPipeline else "standard",
             )
         )
