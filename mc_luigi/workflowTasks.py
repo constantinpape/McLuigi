@@ -85,6 +85,11 @@ class SegmentationWorkflow(luigi.Task):
         shape = out.shape()
         defected_slices = vigra.readHDF5(defect_slices_path, 'defect_slices')
 
+        # we only replace slices if we actually have completely defected slices
+        if not defected_slices.size:
+            workflow_logger.info("SegmentationWorkflow: No completely defected slices found, doing nothing.")
+            return
+
         # find consecutive slices with defects
         consecutive_defects = np.split(defected_slices, np.where(np.diff(defected_slices) != 1)[0] + 1)
         # find the replace slices for defected slices
@@ -143,7 +148,12 @@ class MulticutSegmentation(SegmentationWorkflow):
         return return_tasks
 
     def output(self):
-        save_path = os.path.join(PipelineParameter().cache, "MulticutSegmentation.h5")
+        save_path = os.path.join(
+            PipelineParameter().cache,
+            "MulticutSegmentation_%s.h5" % (
+                "modifed" if PipelineParameter().defectPipeline else "standard",
+            )
+        )
         return HDF5VolumeTarget(save_path, self.dtype, compression=PipelineParameter().compressionLevel)
 
 

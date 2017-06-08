@@ -108,7 +108,7 @@ class BlockwiseMulticutSolver(BlockwiseSolver):
         # run global multicut inference
         #
 
-        solver_type = 'fm-kl'
+        solver_type = 'fm-kl'  # we use fm with kl as backend, because this shows the best scaling behaviour
         inf_params  = dict(
             sigma=PipelineParameter().multicutSigmaFusion,
             number_of_iterations=PipelineParameter().multicutNumIt,
@@ -191,6 +191,7 @@ class ReducedProblem(luigi.Task):
             "problem": self.problem
         }
 
+    # TODO we need to recover the edges between blocks for the stitching solver
     @run_decorator
     def run(self):
 
@@ -441,6 +442,8 @@ class BlockwiseSubSolver(luigi.Task):
                 )
                 tasks.append(executor.submit(extract_subproblem, block_id, sub_blocks))
             sub_problems = [task.result() for task in tasks]
+
+        # TODO we need to serialize the outer edges for the stitching solvers
 
         assert len(sub_problems) == number_of_blocks, str(len(sub_problems)) + " , " + str(number_of_blocks)
         return sub_problems

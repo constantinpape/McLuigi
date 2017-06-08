@@ -64,7 +64,11 @@ class MulticutProblem(luigi.Task):
 
         if PipelineParameter().defectPipeline:
             workflow_logger.info("MulticutProblem: computing MulticutProblem for defect correction pipeline.")
-            self._modified_multicut_proplem(edge_costs)
+            if inp['modified_adjacency'].read('has_defects'):
+                self._modified_multicut_proplem(edge_costs)
+            else:
+                self._standard_multicut_problem(edge_costs)
+
         else:
             workflow_logger.info("MulticutProblem: computing MulticutProblem for standard pipeline.")
             self._standard_multicut_problem(edge_costs)
@@ -100,12 +104,14 @@ class MulticutProblem(luigi.Task):
         weight           = PipelineParameter().multicutWeight
 
         edgeLens = inp['rag'].readKey('edgeLengths')
+
         if PipelineParameter().defectPipeline:
-            skipLens = self.input()["skip_edge_lengths"].read()
-            delete_edges = self.input()["modified_adjacency"].read("delete_edges")
-            edgeLens = np.delete(edgeLens, delete_edges)
-            edgeLens = np.concatenate([edgeLens, skipLens])
-            workflow_logger.info("MulticutProblem: removed delete edges and added skipLens to edgeLens")
+            if inp["modified_adjacency"].read("has_defects"):
+                skipLens = inp["skip_edge_lengths"].read()
+                delete_edges = inp["modified_adjacency"].read("delete_edges")
+                edgeLens = np.delete(edgeLens, delete_edges)
+                edgeLens = np.concatenate([edgeLens, skipLens])
+                workflow_logger.info("MulticutProblem: removed delete edges and added skipLens to edgeLens")
         assert edgeLens.shape[0] == edge_costs.shape[0], str(edgeLens.shape[0]) + " , " + str(edge_costs.shape[0])
 
         if weighting_scheme == "z":
@@ -220,7 +226,7 @@ class MulticutProblem(luigi.Task):
         save_path = os.path.join(
             PipelineParameter().cache,
             "MulticutProblem_%s.h5" % (
-                "modifed" if PipelineParameter().defectPipeline else "standard",
+                "modified" if PipelineParameter().defectPipeline else "standard",
             )
         )
         return HDF5DataTarget(save_path)

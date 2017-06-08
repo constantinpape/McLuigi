@@ -83,7 +83,6 @@ def nifty_fusion_move_factory(
         pgen = obj.greedyAdditiveProposals(sigma=sigma)
 
     fm_factory = obj.fusionMoveBasedFactory(
-        verbose=0,
         fusionMove=obj.fusionMoveSettings(mcFactory=backend_factory),
         proposalGen=pgen,
         numberOfIterations=number_of_iterations,
@@ -109,7 +108,6 @@ def nifty_fusion_move_factory(
 def nifty_ilp_factory(obj):
     factory = obj.multicutIlpFactory(
         ilpSolver=ilp_backend,
-        verbose=0,
         addThreeCyclesConstraints=True,
         addOnlyViolatedThreeCyclesConstraints=True
     )

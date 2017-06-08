@@ -19,14 +19,11 @@ from concurrent import futures
 
 # import the proper nifty version
 try:
-    import nifty
     import nifty.graph.rag as nrag
 except ImportError:
     try:
-        import nifty_with_cplex as nifty
         import nifty_with_cplex.graph.rag as nrag
     except ImportError:
-        import nifty_with_gurobi as nifty
         import nifty_with_gurobi.graph.rag as nrag
 
 
@@ -260,8 +257,7 @@ class RegionFeatures(luigi.Task):
             node_feats,
             uv_ids[:transition_edge],
             'features_xy',
-            out,
-            np.zeros(transition_edge, dtype='float32')
+            out
         )
 
         # compute the z-features with proper edges deleted from uv-ids
@@ -275,8 +271,7 @@ class RegionFeatures(luigi.Task):
             node_feats,
             uvs_z,
             'features_z',
-            out,
-            np.ones(uvs_z.shape[0], dtype='float32')
+            out
         )
 
         skip_edges = modified_adjacency.read('skip_edges')

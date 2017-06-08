@@ -58,7 +58,11 @@ class McSolverFusionMoves(luigi.Task):
         )
 
         backend_factory = nifty_ilp_factory(obj)
-        factory = nifty_fusion_move_factory(obj, backend_factory)
+        factory = nifty_fusion_move_factory(
+            obj,
+            backend_factory,
+            seed_fraction=PipelineParameter().multicutSeedFraction
+        )
         ret, mc_energy, t_inf = run_nifty_solver(obj, factory, verbose=True)
 
         workflow_logger.info("McSolverFusionMoves: inference with fusion move solver in %i s" % t_inf)

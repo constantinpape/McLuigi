@@ -206,7 +206,17 @@ class EdgeProbabilities(luigi.Task):
 
     def _predict(self, feature_tasks, out):
         inp = self.input()
+
+        # check if we predict for a dataset with defects
+        # we need to do this so clumsily, because 'modified_adjacency' does not exist
+        # as a key in inp if defectPipeline == False
+        # TODO this could be done better with a get("modified_adjacency") and a default value
+        has_defects = False
         if PipelineParameter().defectPipeline:
+            if inp["modified_adjacency"].read("has_defects"):
+                has_defects = True
+
+        if has_defects:
             n_edges = inp["modified_adjacency"].read("n_edges_modified")
             assert n_edges > 0
             n_edges_xy = inp['rag'].readKey('totalNumberOfInSliceEdges')
@@ -219,13 +229,16 @@ class EdgeProbabilities(luigi.Task):
 
         n_feats_xy = 0
         n_feats_z  = 0
+        n_feats_skip = 0
         for feat in feature_tasks:
             n_feats_xy += feat.shape('features_xy')[1]
             n_feats_z  += feat.shape('features_z')[1]
+            if has_defects:
+                n_feats_skip += feat.shape('features_skip')[1]
 
         feat_types = ['features_xy', 'features_z']
         classifier_types = feat_types if PipelineParameter().separateEdgeClassification else 2 * ['features_joined']
-        if PipelineParameter().defectPipeline:
+        if has_defects:
             feat_types += ['features_skip']
             classifier_types += ['features_skip']
 
@@ -237,16 +250,16 @@ class EdgeProbabilities(luigi.Task):
             )
 
             if feat_type == 'features_xy':
-                n_edgesType = n_edges_xy
+                n_edges_type = n_edges_xy
                 n_feats_type = n_feats_xy
                 start_type  = 0
             elif feat_type == 'features_z':
-                n_edgesType = n_edges_total_z - n_edges_skip if PipelineParameter().defectPipeline else n_edges_total_z
+                n_edges_type = n_edges_total_z - n_edges_skip if has_defects else n_edges_total_z
                 n_feats_type = n_feats_z
                 start_type  = n_edges_xy
             elif feat_type == 'features_skip':
-                n_edgesType = n_edges_skip
-                n_feats_type = n_feats_z
+                n_edges_type = n_edges_skip
+                n_feats_type = n_feats_skip
                 start_type  = n_edges - n_edges_skip
 
             if PipelineParameter().nFeatureChunks > 1:
@@ -260,7 +273,7 @@ class EdgeProbabilities(luigi.Task):
                     feature_tasks,
                     out,
                     feat_type,
-                    n_edgesType,
+                    n_edges_type,
                     n_feats_type,
                     start_type
                 )
@@ -275,7 +288,7 @@ class EdgeProbabilities(luigi.Task):
                     feature_tasks,
                     out,
                     feat_type,
-                    n_edgesType,
+                    n_edges_type,
                     n_feats_type,
                     start_type
                 )
