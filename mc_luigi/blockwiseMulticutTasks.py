@@ -124,10 +124,8 @@ class BlockwiseMulticutSolver(BlockwiseSolver):
             verbose=True,
             time_limit=PipelineParameter().multicutGlobalTimeLimit
         )
-
         workflow_logger.info(
-            "BlockwiseMulticutSolver: Inference of reduced problem for the whole volume took: %f s"
-            % (time.time() - t_inf,)
+            "BlockwiseMulticutSolver: Inference of reduced problem for the whole volume took: %f s" % t_inf
         )
 
         # NOTE: we don't need to project back to global problem to calculate the correct energy !
@@ -311,30 +309,30 @@ class ReducedProblem(luigi.Task):
                 global2new[globalNodes] = newNode
                 new2global.append(globalNodes)
 
-            assert -1 not in global2new
-            global2new = global2new.astype('uint32')
+        assert -1 not in global2new
+        global2new = global2new.astype('uint32')
 
-            out = self.output()
-            out.write(global2new, "global2new")
+        out = self.output()
+        out.write(global2new, "global2new")
 
-            # need to serialize this differently, due to list of list
-            new2old_nodes = np.array([np.array(n2o, dtype='uint32') for n2o in new2old_nodes])
-            out.writeVlen(new2old_nodes, "new2old")
+        # need to serialize this differently, due to list of list
+        new2old_nodes = np.array([np.array(n2o, dtype='uint32') for n2o in new2old_nodes])
+        out.writeVlen(new2old_nodes, "new2old")
 
-            new2global = np.array([np.array(n2g, dtype='uint32') for n2g in new2global])
-            out.writeVlen(new2global, "new2global")
+        new2global = np.array([np.array(n2g, dtype='uint32') for n2g in new2global])
+        out.writeVlen(new2global, "new2global")
 
     # find new outer edges by mapping the uv-ids of the outer edges
     # to the new node ids and then find the matching indices of the
     # new uv-ids
     def find_new_outer_edges(self, uv_ids, uv_ids_new, old2new_nodes):
-        outer_edges = self.input["sub_solution"].read("outer_edges")
+        outer_edges = self.input()["sub_solution"].read("outer_edges")
         outer_uvs = np.sort(
             old2new_nodes[uv_ids[outer_edges]],
             axis=1
         )
         new_outer_edges = find_matching_row_indices(uv_ids_new, outer_uvs)[:, 0]
-        self.output.write(new_outer_edges, 'outer_edges')
+        self.output().write(new_outer_edges, 'outer_edges')
 
     def output(self):
         blcksize_str = "_".join(map(str, list(self.blockShape)))

@@ -1,4 +1,4 @@
-from workflowTasks import MulticutSegmentation, BlockwiseMulticutSegmentation
+from workflowTasks import MulticutSegmentation, BlockwiseMulticutSegmentation, BlockwiseStitchingSegmentation
 from learningTasks import LearnClassifierFromGt, EdgeGroundtruth, EdgeProbabilities
 from dataTasks import StackedRegionAdjacencyGraph
 from featureTasks import RegionFeatures, EdgeFeatures

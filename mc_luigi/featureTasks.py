@@ -336,21 +336,22 @@ class EdgeFeatures(luigi.Task):
         data = data_file.get()
         out = self.output()
 
+        has_defects = False
         if PipelineParameter().defectPipeline:
             modified_adjacency = inp['modified_adjacency']
             if modified_adjacency.read('has_defects'):
-                self._compute_modified_feats(data, rag, modified_adjacency, out)
-            else:
-                self._compute_standard_feats(data, rag, out)
+                has_defects = True
+
+        if has_defects:
+            self._compute_modified_feats(data, rag, modified_adjacency, out)
         else:
             self._compute_standard_feats(data, rag, out)
 
         out.close()
         data_file.close()
 
-        if PipelineParameter().defectPipeline:
-            if modified_adjacency.read('has_defects'):
-                self._postprocess_modified_output(out)
+        if has_defects:
+            self._postprocess_modified_output(out)
 
     def _compute_standard_feats(self, data, rag, out):
 
