@@ -6,7 +6,7 @@ import luigi
 from multicutProblemTasks import MulticutProblem
 
 from multicutSolverTasks import McSolverFusionMoves  # ,McSolverExact
-from blockwiseMulticutTasks import BlockwiseMulticutSolver, BlockwiseStitchingSolver
+from blockwiseMulticutTasks import BlockwiseMulticutSolver, BlockwiseStitchingSolver, SubblockSegmentations
 from dataTasks import StackedRegionAdjacencyGraph, ExternalSegmentation
 from customTargets import HDF5VolumeTarget
 from defectDetectionTasks import DefectSliceDetection
@@ -206,7 +206,7 @@ class BlockwiseStitchingSegmentation(SegmentationWorkflow):
     def output(self):
         save_path = os.path.join(
             PipelineParameter().cache,
-            "BlockwiseStitichingSegmentation_%s.h5" % (
+            "BlockwiseStitchingSegmentation_%s.h5" % (
                 "modifed" if PipelineParameter().defectPipeline else "standard",
             )
         )
@@ -244,3 +244,24 @@ class ResolvedSegmentation(SegmentationWorkflow):
             )
         )
         return HDF5VolumeTarget(save_path, self.dtype, compression=PipelineParameter().compressionLevel)
+
+
+class SubblockSegmentationWorkflow(luigi.Task):
+
+    pathToSeg = luigi.Parameter()
+    pathToClassifier  = luigi.Parameter()
+    numberOfLevels = luigi.IntParameter(default=1)
+    dtype = luigi.Parameter(default='uint32')
+
+    def requires(self):
+        return SubblockSegmentations(
+            self.pathToSeg,
+            MulticutProblem(self.pathToSeg, self.pathToClassifier),
+            self.numberOfLevels
+        )
+
+    def run(self):
+        pass
+
+    def output(self):
+        pass

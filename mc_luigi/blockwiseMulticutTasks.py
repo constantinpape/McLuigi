@@ -4,12 +4,12 @@
 import luigi
 
 from pipelineParameter import PipelineParameter
-from dataTasks import ExternalSegmentation
-from customTargets import HDF5DataTarget
+from dataTasks import ExternalSegmentation, StackedRegionAdjacencyGraph
+from customTargets import HDF5DataTarget, FolderTarget
 from defectDetectionTasks import DefectSliceDetection
 from multicutProblemTasks import MulticutProblem
 
-from tools import config_logger, run_decorator, get_unique_rows, find_matching_row_indices
+from tools import config_logger, run_decorator
 from nifty_helper import run_nifty_solver, string_to_factory, available_factorys
 
 import os
@@ -23,14 +23,11 @@ from concurrent import futures
 # import the proper nifty version
 try:
     import nifty
-    ilp_backend = 'cplex'
 except ImportError:
     try:
         import nifty_with_cplex as nifty
-        ilp_backend = 'cplex'
     except ImportError:
         import nifty_with_gurobi as nifty
-        ilp_backend = 'gurobi'
 
 # init the workflow logger
 workflow_logger = logging.getLogger(__name__)
@@ -43,27 +40,27 @@ class BlockwiseSolver(luigi.Task):
 
     pathToSeg = luigi.Parameter()
     globalProblem  = luigi.TaskParameter()
-    numberOflevels = luigi.Parameter()
+    numberOfLevels = luigi.Parameter()
 
     def requires(self):
         # block size in first hierarchy level
         initialBlockShape = PipelineParameter().multicutBlockShape
         # block overlap, for now same for each hierarchy lvl
-        blockOverlap = PipelineParameter().multicutBlockOverlap
+        block_overlap = PipelineParameter().multicutBlockOverlap
 
-        problemHierarchy = [self.globalProblem]
-        blockFactor = 1
+        problems = [self.globalProblem]
+        block_factor = 1
 
-        for l in xrange(self.numberOflevels):
-            levelBlockShape = map(lambda x: x * blockFactor, initialBlockShape)
+        for l in xrange(self.numberOfLevels):
+            block_shape = map(lambda x: x * block_factor, initialBlockShape)
 
             # TODO check that we don't get larger than the actual shape here
-            problemHierarchy.append(
-                ReducedProblem(self.pathToSeg, problemHierarchy[-1], levelBlockShape, blockOverlap, l)
+            problems.append(
+                ReducedProblem(self.pathToSeg, problems[-1], block_shape, block_overlap, l)
             )
-            blockFactor *= 2
+            block_factor *= 2
 
-        return problemHierarchy
+        return problems
 
     def run(self):
         raise NotImplementedError("BlockwiseSolver is abstract and does not implement a run functionality!")
@@ -85,6 +82,99 @@ class BlockwiseSolver(luigi.Task):
 
     def output(self):
         raise NotImplementedError("BlockwiseSolver is abstract and does not implement the output functionality!")
+
+
+# stitch blockwise sub-results by overlap
+# TODO
+def BlockwiseOverlapSolver(BlockwiseSolver):
+    pass
+
+
+# Produce the sub-block segmentations for debugging
+class SubblockSegmentations(BlockwiseSolver):
+
+    def requires(self):
+        problems = super(SubblockSegmentations, self).requires()
+        block_shape = []
+
+        # block size in first hierarchy level
+        block_factor = (self.numberOfLevels - 1) * 2 if self.numberOfLevels > 1 else 1
+        block_shape = map(
+            lambda x: x * block_factor,
+            PipelineParameter().multicutBlockShape
+        )
+        block_overlap = PipelineParameter().multicutBlockOverlap
+
+        sub_solver = BlockwiseSubSolver(
+            self.pathToSeg,
+            problems[-2],
+            block_shape,
+            block_overlap,
+            self.numberOfLevels - 1,
+            True
+        )
+        return {
+            'sub_solver': sub_solver,
+            'rag': StackedRegionAdjacencyGraph(self.pathToSeg)
+        }
+
+    @run_decorator
+    def run(self):
+        # TODO refactor this properly
+        import nifty.graph.rag as nrag
+        import nifty.hdf5 as nh5
+
+        # read stuff from the sub solver
+        sub_solver = self.input()['sub_solver']
+        sub_results = sub_solver.read('sub_results')
+        block_begins = sub_solver.read('block_begins')
+        block_ends = sub_solver.read('block_ends')
+        sub_nodes = sub_solver.read('sub_nodes')
+
+        # get the rag
+        rag = self.input()['rag'].read()
+
+        out_path = self.output().path
+        if not os.path.exists(out_path):
+            os.mkdir(out_path)
+
+        # iterate over the blocks and serialize the sub-block result
+        for block_id in xrange(len(sub_results)):
+            sub_result = {sub_nodes[block_id][i]: sub_results[block_id][i]
+                          for i in xrange(len(sub_nodes[block_id]))}
+
+            shape = block_ends[block_id] - block_begins[block_id]
+            chunk_shape = [1, min(512, shape[1]), min(512, shape[2])]
+
+            print "Saving Block-Result for block %i / %i" % (block_id, len(sub_results))
+
+            res_path = os.path.join(out_path, 'Subsegementation_block%i.h5' % block_id)
+            res_file = nh5.createFile(res_path)
+            out_array = nh5.Hdf5ArrayUInt32(
+                res_file,
+                'data',
+                shape.tolist(),
+                chunk_shape,
+                compression=PipelineParameter().compressionLevel
+            )
+
+            sub_seg = nrag.projectScalarNodeDataInSubBlock(
+                rag,
+                sub_result,
+                out_array,
+                map(long, block_begins[block_id]),
+                map(long, block_ends[block_id])
+            )
+            nh5.closeFile(res_file)
+
+            # vigra.writeHDF5(sub_seg, res_path, 'data', compression='gzip')
+            vigra.writeHDF5(block_begins[block_id], res_path, 'block_begin')
+            vigra.writeHDF5(block_ends[block_id], res_path, 'block_end')
+
+    def output(self):
+        return FolderTarget(
+            os.path.join(PipelineParameter().cache, "SubblockSegmentations")
+        )
 
 
 # produce reduced global graph from subproblems
@@ -146,7 +236,8 @@ class BlockwiseMulticutSolver(BlockwiseSolver):
         return HDF5DataTarget(save_path)
 
 
-# stitch blockwise sub-results
+# stitch blockwise sub-results according to costs of the edges connecting
+# the sub-blocks
 class BlockwiseStitchingSolver(BlockwiseSolver):
 
     @run_decorator
@@ -165,7 +256,6 @@ class BlockwiseStitchingSolver(BlockwiseSolver):
 
         ufd = nifty.ufd.ufd(reduced_graph.numberOfNodes)
         ufd.merge(uv_ids[merge_ids])
-
         reduced_node_result = ufd.elementLabeling()
 
         node_result = self.map_node_result_to_global(reduced_node_result)
@@ -186,7 +276,7 @@ class ReducedProblem(luigi.Task):
     pathToSeg = luigi.Parameter()
     problem   = luigi.TaskParameter()
 
-    blockShape     = luigi.ListParameter()
+    blockShape   = luigi.ListParameter()
     blockOverlap = luigi.ListParameter()
 
     level = luigi.Parameter()
@@ -250,35 +340,34 @@ class ReducedProblem(luigi.Task):
         self.serialize_node_conversions(problem, old2new_nodes, new2old_nodes, number_of_new_nodes)
         workflow_logger.info("ReducedProblem: Serializing ndoe converters took: %f s" % (time.time() - t_serialize))
 
-        # find new outer edges
-        t_outer = time.time()
-        self.find_new_outer_edges(uv_ids, uv_ids_new, old2new_nodes)
-        workflow_logger.info("ReducedProblem: Finding new outer edges took: %f s" % (time.time() - t_outer))
-
         workflow_logger.info("ReucedProblem: Nodes: From %i to %i" % (g.numberOfNodes, number_of_new_nodes))
         workflow_logger.info("ReucedProblem: Edges: From %i to %i" % (g.numberOfEdges, len(uv_ids_new)))
 
-    def find_new_edges_and_costs(self, uv_ids, problem, cut_edges, number_of_new_nodes, old2new_nodes):
+    def find_new_edges_and_costs(
+        self,
+        uv_ids,
+        problem,
+        cut_edges,
+        number_of_new_nodes,
+        old2new_nodes
+    ):
 
+        # find mapping from new to old edges with nifty impl
+        edge_mapping = nifty.tools.EdgeMapping(len(uv_ids))
+        edge_mapping.initializeMapping(uv_ids, old2new_nodes)
+
+        # get the new uv-ids
+        uv_ids_new = edge_mapping.getNewUvIds()
+
+        # map the old costs to new costs
         costs  = problem.read("costs")
+        new_costs = edge_mapping.mapEdgeValues(costs)
 
-        ##############################################
-        # find new edges and edge weights (vectorized)
-        ##############################################
-        uv_ids_new = np.sort(old2new_nodes[uv_ids[cut_edges == 1]], axis=1)
-        uv_ids_new, inverse_idx = get_unique_rows(uv_ids_new, return_inverse=True)
+        # map the old outer edges to new outer edges
+        outer_edge_ids = self.input()["sub_solution"].read("outer_edges")
+        new_outer_edges = edge_mapping.getNewEdgeIds(outer_edge_ids)
 
-        number_of_new_edges = uv_ids_new.shape[0]
-
-        costs = costs[cut_edges == 1]
-        new_costs = np.zeros(number_of_new_edges, dtype='float32')
-        assert inverse_idx.shape[0] == costs.shape[0]
-
-        # TODO vectorize this too
-        for i, inv_idx in enumerate(inverse_idx):
-            new_costs[inv_idx] += costs[i]
-
-        assert new_costs.shape[0] == number_of_new_edges
+        assert len(new_costs) == len(uv_ids_new)
         reduced_graph = nifty.graph.UndirectedGraph(number_of_new_nodes)
         reduced_graph.insertEdges(uv_ids_new)
 
@@ -286,6 +375,7 @@ class ReducedProblem(luigi.Task):
         out.write(reduced_graph.serialize(), "graph")
         out.write(reduced_graph.numberOfNodes, 'number_of_nodes')
         out.write(new_costs, "costs")
+        out.write(new_outer_edges, "outer_edges")
 
         return uv_ids_new
 
@@ -321,18 +411,6 @@ class ReducedProblem(luigi.Task):
 
         new2global = np.array([np.array(n2g, dtype='uint32') for n2g in new2global])
         out.writeVlen(new2global, "new2global")
-
-    # find new outer edges by mapping the uv-ids of the outer edges
-    # to the new node ids and then find the matching indices of the
-    # new uv-ids
-    def find_new_outer_edges(self, uv_ids, uv_ids_new, old2new_nodes):
-        outer_edges = self.input()["sub_solution"].read("outer_edges")
-        outer_uvs = np.sort(
-            old2new_nodes[uv_ids[outer_edges]],
-            axis=1
-        )
-        new_outer_edges = find_matching_row_indices(uv_ids_new, outer_uvs)[:, 0]
-        self.output().write(new_outer_edges, 'outer_edges')
 
     def output(self):
         blcksize_str = "_".join(map(str, list(self.blockShape)))
@@ -395,6 +473,8 @@ class BlockwiseSubSolver(luigi.Task):
     blockOverlap = luigi.ListParameter()
 
     level = luigi.Parameter()
+    # needs to be true if we want to use the stitching - by overlap solver
+    serializeSubResults = luigi.Parameter(default=False)
 
     def requires(self):
         initialShape = PipelineParameter().multicutBlockShape
@@ -455,7 +535,7 @@ class BlockwiseSubSolver(luigi.Task):
                 "BlockwiseSubSolver: block id %i: Number of nodes %i" % (block_id, node_list.shape[0])
             )
             inner_edges, outer_edges, subgraph = graph.extractSubgraphFromNodes(node_list.tolist())
-            return np.array(inner_edges), np.array(outer_edges), subgraph
+            return np.array(inner_edges), np.array(outer_edges), subgraph, node_list
 
         block_overlap = list(self.blockOverlap)
         blocking = nifty.tools.blocking(roiBegin=[0L, 0L, 0L], roiEnd=seg.shape(), blockShape=self.blockShape)
@@ -490,11 +570,35 @@ class BlockwiseSubSolver(luigi.Task):
                 tasks.append(executor.submit(extract_subproblem, block_id, sub_blocks))
             sub_problems = [task.result() for task in tasks]
 
+        out = self.output()
         # we need to serialize the outer edges for the stitching solvers
-        self.output().write(
+        out.write(
             np.unique(np.concatenate([sub_prob[1] for sub_prob in sub_problems])),
             'outer_edges'
         )
+
+        # if we serialize the sub-results, write out the block positions and the sub nodes here
+        if self.serializeSubResults:
+            out.write(
+                np.concatenate([
+                    np.array(blocking.getBlockWithHalo(block_id, block_overlap).outerBlock.begin)[None, :]
+                    for block_id in xrange(number_of_blocks)],
+                    axis=0
+                ),
+                'block_begins'
+            )
+            out.write(
+                np.concatenate([
+                    np.array(blocking.getBlockWithHalo(block_id, block_overlap).outerBlock.end)[None, :]
+                    for block_id in xrange(number_of_blocks)],
+                    axis=0
+                ),
+                'block_ends'
+            )
+            out.writeVlen(
+                np.array([sub_prob[3] for sub_prob in sub_problems]),
+                'sub_nodes'
+            )
 
         assert len(sub_problems) == number_of_blocks, str(len(sub_problems)) + " , " + str(number_of_blocks)
         return sub_problems
@@ -563,8 +667,16 @@ class BlockwiseSubSolver(luigi.Task):
             cut_edges[sub_problems[block_id][1]] += 1
 
         # all edges which are cut at least once will be cut
+        out = self.output()
         cut_edges[cut_edges >= 1] = 1
-        self.output().write(cut_edges)
+        out.write(cut_edges)
+
+        # if we serialize the sub results, write them here
+        if self.serializeSubResults:
+            out.writeVlen(
+                np.array([sub_res for sub_res in sub_results]),
+                'sub_results'
+            )
 
     def output(self):
         blcksize_str = "_".join(map(str, list(self.blockShape)))
