@@ -8,7 +8,7 @@ import os
 from customTargets import HDF5DataTarget
 from pipelineParameter import PipelineParameter
 from tools import config_logger, run_decorator
-from nifty_helper import run_nifty_solver, nifty_fusion_move_factory, nifty_ilp_factory
+from nifty_helper import run_nifty_solver, nifty_ilp_factory, string_to_factory
 
 import logging
 
@@ -57,12 +57,20 @@ class McSolverFusionMoves(luigi.Task):
             "McSolverFusionMoves: solving multicut problem with %i number of variables" % g.numberOfNodes
         )
 
-        backend_factory = nifty_ilp_factory(obj)
-        factory = nifty_fusion_move_factory(
-            obj,
-            backend_factory,
-            seed_fraction=PipelineParameter().multicutSeedFraction
-        )
+        solver_type = 'fm-ilp'
+        if solver_type in ('fm-ilp', 'fm-kl'):
+            solver_params  = dict(
+                sigma=PipelineParameter().multicutSigmaFusion,
+                number_of_iterations=1500,
+                n_stop=20,
+                n_threads=PipelineParameter().nThreads,
+                n_fuse=2,
+                seed_fraction=0.01
+            )
+        else:
+            solver_params = dict()
+
+        factory = string_to_factory(obj, solver_type, solver_params)
         ret, mc_energy, t_inf = run_nifty_solver(obj, factory, verbose=True)
 
         workflow_logger.info("McSolverFusionMoves: inference with fusion move solver in %i s" % t_inf)

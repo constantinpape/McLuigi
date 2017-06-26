@@ -139,6 +139,7 @@ class SubblockSegmentations(BlockwiseSolver):
             os.mkdir(out_path)
 
         # iterate over the blocks and serialize the sub-block result
+        # for block_id in xrange(1):
         for block_id in xrange(len(sub_results)):
             sub_result = {sub_nodes[block_id][i]: sub_results[block_id][i]
                           for i in xrange(len(sub_nodes[block_id]))}
@@ -158,7 +159,7 @@ class SubblockSegmentations(BlockwiseSolver):
                 compression=PipelineParameter().compressionLevel
             )
 
-            sub_seg = nrag.projectScalarNodeDataInSubBlock(
+            nrag.projectScalarNodeDataInSubBlock(
                 rag,
                 sub_result,
                 out_array,
@@ -459,7 +460,7 @@ class NodesToInitialBlocks(luigi.Task):
         self.output().writeVlen(block_result)
 
     def output(self):
-        save_name = "NodesToInitialBlocks.h5"
+        save_name = "NodesToInitialBlocks_%s.h5" % ("modified" if PipelineParameter().defectPipeline else "standard",)
         save_path = os.path.join(PipelineParameter().cache, save_name)
         return HDF5DataTarget(save_path)
 
@@ -531,7 +532,7 @@ class BlockwiseSubSolver(luigi.Task):
             node_list = np.unique(np.concatenate([nodes2blocks[sub_id] for sub_id in sub_blocks]))
             if self.level != 0:
                 node_list = np.unique(global2new_nodes[node_list])
-            workflow_logger.debug(
+            workflow_logger.info(
                 "BlockwiseSubSolver: block id %i: Number of nodes %i" % (block_id, node_list.shape[0])
             )
             inner_edges, outer_edges, subgraph = graph.extractSubgraphFromNodes(node_list.tolist())
@@ -564,7 +565,7 @@ class BlockwiseSubSolver(luigi.Task):
                 block = blocking.getBlockWithHalo(block_id, block_overlap).outerBlock
                 block_begin, block_end = block.begin, block.end
                 sub_blocks = initial_blocking.getBlockIdsInBoundingBox(block_begin, block_end, initial_overlap)
-                workflow_logger.debug(
+                workflow_logger.info(
                     "BlockwiseSubSolver: block id %i start %s end %s" % (block_id, str(block_begin), str(block_end))
                 )
                 tasks.append(executor.submit(extract_subproblem, block_id, sub_blocks))
@@ -618,10 +619,17 @@ class BlockwiseSubSolver(luigi.Task):
         else:
             solver_params = dict()
 
+        workflow_logger.info("BlockwiseSubSolver: Solving sub-problems with solver %s" % sub_solver_type)
+        workflow_logger.info(
+            "BlockwiseSubSolver: With Params %s" % ' '.join(
+                ['%s, %s,' % (str(k), str(v)) for k, v in solver_params.iteritems()]
+            )
+        )
+
         def _solve_mc(g, costs, block_id):
-            workflow_logger.debug(
-                "BlockwiseSubSolver: Solving MC Problem with %i / %i number of variables"
-                % (g.numberOfNodes, g.numberOfEdges)
+            workflow_logger.info(
+                "BlockwiseSubSolver: Solving MC Problem for block %i with %i / %i number of variables"
+                % (block_id, g.numberOfNodes, g.numberOfEdges)
             )
             obj = nifty.graph.optimization.multicut.multicutObjective(g, costs)
             factory = string_to_factory(obj, sub_solver_type, solver_params)

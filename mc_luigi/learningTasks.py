@@ -196,7 +196,7 @@ class EdgeProbabilities(luigi.Task):
             workflow_logger.info("EdgeProbabilities: Total number of edges: %i" % n_edges)
 
         out  = self.output()
-        out.open([n_edges], [min(262144, n_edges)])  # 262144 = chunk size
+        out.open([n_edges], [min(262144, n_edges)])  # 262144 = chunk size (64**3)
 
         self._predict(feature_tasks, out)
 
