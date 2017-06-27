@@ -63,23 +63,22 @@ class SegmentationWorkflow(luigi.Task):
         workflow_logger.info("SegmentationWorkflow: Projecting node result to segmentation.")
         self._project_result_to_segmentation(rag, mc_nodes, out)
 
-        out.close()
-        seg.close()
-
         if PipelineParameter().defectPipeline:
             workflow_logger.info("SegmentationWorkflow: Postprocessing defected slices.")
             self._postprocess_defected_slices(inp, out)
+
+        out.close()
+        seg.close()
 
     def _project_result_to_segmentation(self, rag, mc_nodes, out):
         assert mc_nodes.shape[0] == rag.numberOfNodes
         # get rid of 0 because we don't want it as segment label because it is reserved for the ignore label
         mc_nodes, _, _ = vigra.analysis.relabelConsecutive(mc_nodes, start_label=0, keep_zeros=False)
         if np.dtype(self.dtype) != np.dtype(mc_nodes.dtype):
-                self.dtype = mc_nodes.dtype
-        nrag.projectScalarNodeDataToPixels(rag, mc_nodes, out.get(), 5)
+            self.dtype = mc_nodes.dtype
+        nrag.projectScalarNodeDataToPixels(rag, mc_nodes, out.get(), 5)  # TODO investigate number of threads here
 
     def _postprocess_defected_slices(self, inp, out):
-        import h5py
 
         defect_slices_path = inp['defect_slices'].path
         shape = out.shape()
@@ -118,15 +117,13 @@ class SegmentationWorkflow(luigi.Task):
                     "Postprocessing is not implemented for more than 4 consecutively defected slices. Clean your data!"
                 )
 
-        # FIXME strange nifty bugs, that's why we use h5py here
-        # post-process defected slices by replacement
-        with h5py.File(out.path) as f:
-            out_ds = f['data']
-            for z in defected_slices:
-                replace_z = replace_slice[z]
-                workflow_logger.info("SegmentationWorkflow: replacing defected slice %i by %i" % (z, replace_z))
-                replace = out_ds[replace_z]
-                out_ds[z] = replace
+        for z in defected_slices:
+            replace_z = replace_slice[z]
+            workflow_logger.info("SegmentationWorkflow: replacing defected slice %i by %i" % (z, replace_z))
+            out.write(
+                [z, 0L, 0L],
+                out.read([replace_z, 0L, 0L], [replace_z + 1, shape[1], shape[2]])
+            )
 
     def output(self):
         raise AttributeError(

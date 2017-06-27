@@ -144,12 +144,19 @@ class SubblockSegmentations(BlockwiseSolver):
             sub_result = {sub_nodes[block_id][i]: sub_results[block_id][i]
                           for i in xrange(len(sub_nodes[block_id]))}
 
+            print "Saving Block-Result for block %i / %i" % (block_id, len(sub_results))
+
+            # save the begin and end coordinates of this block for later use
+            block_path = os.path.join(out_path, 'block%i_coordinates.h5' % block_id)
+            vigra.writeHDF5(block_begins[block_id], block_path, 'block_begin')
+            vigra.writeHDF5(block_ends[block_id], block_path, 'block_end')
+
+            # determine the shape of this subblock
             shape = block_ends[block_id] - block_begins[block_id]
             chunk_shape = [1, min(512, shape[1]), min(512, shape[2])]
 
-            print "Saving Block-Result for block %i / %i" % (block_id, len(sub_results))
-
-            res_path = os.path.join(out_path, 'Subsegementation_block%i.h5' % block_id)
+            # save the segmentation for this subblock
+            res_path = os.path.join(out_path, 'block%i_segmentation.h5' % block_id)
             res_file = nh5.createFile(res_path)
             out_array = nh5.Hdf5ArrayUInt32(
                 res_file,
@@ -168,9 +175,6 @@ class SubblockSegmentations(BlockwiseSolver):
             )
             nh5.closeFile(res_file)
 
-            # vigra.writeHDF5(sub_seg, res_path, 'data', compression='gzip')
-            vigra.writeHDF5(block_begins[block_id], res_path, 'block_begin')
-            vigra.writeHDF5(block_ends[block_id], res_path, 'block_end')
 
     def output(self):
         return FolderTarget(
@@ -178,6 +182,7 @@ class SubblockSegmentations(BlockwiseSolver):
         )
 
 
+# TODO TODO TODO DEBUG!!!
 # produce reduced global graph from subproblems
 # solve global multicut problem on the reduced graph
 class BlockwiseMulticutSolver(BlockwiseSolver):
