@@ -3,7 +3,7 @@
 
 import luigi
 
-from customTargets import HDF5VolumeTarget
+from customTargets import FolderTarget, HDF5VolumeTarget
 from dataTasks import InputData, StackedRegionAdjacencyGraph, ExternalSegmentation
 from defectHandlingTasks import ModifiedAdjacency
 
@@ -20,11 +20,14 @@ from concurrent import futures
 # import the proper nifty version
 try:
     import nifty.graph.rag as nrag
+    import nifty.hdf5 as nh5
 except ImportError:
     try:
         import nifty_with_cplex.graph.rag as nrag
+        import nifty_with_cplex.hdf5 as nh5
     except ImportError:
         import nifty_with_gurobi.graph.rag as nrag
+        import nifty_with_gurobi.hdf5 as nh5
 
 
 # init the workflow logger
@@ -143,6 +146,9 @@ class RegionFeatures(luigi.Task):
 
         inp = self.input()
         out = self.output()
+        if not os.path.exists(out.path):
+            os.mkdir(out.path)
+
         node_feats_file = inp["node_feats"]
         node_feats_file.open()
         node_feats = node_feats_file.read([0, 0], node_feats_file.shape())
@@ -157,7 +163,6 @@ class RegionFeatures(luigi.Task):
             self._compute_standard_feats(node_feats, inp, out)
 
         node_feats_file.close()
-        out.close()
 
     def _compute_feats_from_uvs(
         self,
@@ -179,9 +184,12 @@ class RegionFeatures(luigi.Task):
         n_feats = 4 * nStatFeats + 4
         if isinstance(skip_ranges, np.ndarray):
             n_feats += 1
-        out_shape = [n_edges, n_feats]
-        chunk_shape = [2500, out_shape[1]]
-        out.open(out_shape, chunk_shape, key)
+
+        # we open the out file for this features
+        out_file = nh5.createFile(os.path.join(out.path, '%s.h5' % key))
+        out_shape = [long(n_edges), long(n_feats)]
+        chunk_shape = [2500L, out_shape[1]]
+        out_array = nh5.Hdf5ArrayFloat32(out_file, 'data', out_shape, chunk_shape)
 
         # the statistic features that are combined by min, max, sum and absdiff
         stats = node_feats[:, :nStatFeats]
@@ -204,7 +212,7 @@ class RegionFeatures(luigi.Task):
             sV = centers[uvs_sub[:, 1], :]
             feats_sub.append(quadratic_euclidean_dist(sU, sV))
             feats_sub = np.concatenate(feats_sub, axis=1)
-            out.write([edge_offset, 0], feats_sub, key)
+            out_array.writeSubarray([edge_offset, 0L], feats_sub)
             return True
 
         # TODO maybe some tweeking can speed this up further
@@ -230,7 +238,10 @@ class RegionFeatures(luigi.Task):
 
         if isinstance(skip_ranges, np.ndarray):
             assert skip_ranges.shape == (n_edges,)
-            out.write([0, n_feats - 1], skip_ranges[:, None], key)
+            out_array.writeSubarray([0L, n_feats - 1], skip_ranges[:, None])
+
+        # return the out file to close it after the array has gone out of scope
+        return out_file
 
     def _compute_standard_feats(self, node_feats, inp, out):
 
@@ -239,9 +250,12 @@ class RegionFeatures(luigi.Task):
         transition_edge = rag.readKey('totalNumberOfInSliceEdges')
 
         # xy-feature
-        self._compute_feats_from_uvs(node_feats, uv_ids[:transition_edge], "features_xy", out)
+        xy_file = self._compute_feats_from_uvs(node_feats, uv_ids[:transition_edge], "features_xy", out)
+        nh5.closeFile(xy_file)
+
         # z-feature
-        self._compute_feats_from_uvs(node_feats, uv_ids[transition_edge:], "features_z", out)
+        z_file = self._compute_feats_from_uvs(node_feats, uv_ids[transition_edge:], "features_z", out)
+        nh5.closeFile(z_file)
 
     # calculate and insert region features for the skip_edges
     # and delete the delete_edges
@@ -253,12 +267,13 @@ class RegionFeatures(luigi.Task):
         transition_edge = rag.readKey('totalNumberOfInSliceEdges')
 
         # compute the standard xy-features with additional ranges
-        self._compute_feats_from_uvs(
+        xy_file = self._compute_feats_from_uvs(
             node_feats,
             uv_ids[:transition_edge],
             'features_xy',
             out
         )
+        nh5.closeFile(xy_file)
 
         # compute the z-features with proper edges deleted from uv-ids
         delete_edges = modified_adjacency.read('delete_edges')
@@ -267,12 +282,14 @@ class RegionFeatures(luigi.Task):
             assert delete_edges.min() >= transition_edge
             delete_edges -= transition_edge
             uvs_z = np.delete(uvs_z, delete_edges, axis=0)
-        self._compute_feats_from_uvs(
+
+        z_file = self._compute_feats_from_uvs(
             node_feats,
             uvs_z,
             'features_z',
             out
         )
+        nh5.closeFile(z_file)
 
         skip_edges = modified_adjacency.read('skip_edges')
         skip_ranges = modified_adjacency.read('skip_ranges')
@@ -280,22 +297,23 @@ class RegionFeatures(luigi.Task):
 
         # if we have skip edges, compute features for them
         if skip_edges.size:
-            self._compute_feats_from_uvs(
+            skip_file = self._compute_feats_from_uvs(
                 node_feats,
                 skip_edges,
                 'features_skip',
                 out,
                 skip_ranges
             )
+            nh5.closeFile(skip_file)
 
     def output(self):
         seg_file = os.path.split(self.pathToSeg)[1][:-3]
         save_path = os.path.join(PipelineParameter().cache, "RegionFeatures_")
         if PipelineParameter().defectPipeline:
-            save_path += "modified_%s.h5" % seg_file
+            save_path += "modified_%s" % seg_file
         else:
-            save_path += "standard_%s.h5" % seg_file
-        return HDF5VolumeTarget(save_path, 'float32')
+            save_path += "standard_%s" % seg_file
+        return FolderTarget(save_path)
 
 
 class EdgeFeatures(luigi.Task):
@@ -334,7 +352,10 @@ class EdgeFeatures(luigi.Task):
         data_file = inp['data']
         data_file.open()
         data = data_file.get()
+
         out = self.output()
+        if not os.path.exists(out.path):
+            os.mkdir(out.path)
 
         has_defects = False
         if PipelineParameter().defectPipeline:
@@ -343,11 +364,14 @@ class EdgeFeatures(luigi.Task):
                 has_defects = True
 
         if has_defects:
-            self._compute_modified_feats(data, rag, modified_adjacency, out)
+            files = self._compute_modified_feats(data, rag, modified_adjacency, out)
+            for f in files:
+                nh5.closeFile(f)
         else:
-            self._compute_standard_feats(data, rag, out)
+            xy_file, z_file = self._compute_standard_feats(data, rag, out)
+            nh5.closeFile(xy_file)
+            nh5.closeFile(z_file)
 
-        out.close()
         data_file.close()
 
         if has_defects:
@@ -366,42 +390,60 @@ class EdgeFeatures(luigi.Task):
         out_shape_z    = [n_edges_z, n_feats]
         chunk_shape_z  = [min(2500, n_edges_z), n_feats]
 
-        out.open(out_shape_xy, chunk_shape_xy, 'features_xy')
-        out.open(out_shape_z, chunk_shape_z, 'features_z')
+        # open the output files
+        # we use seperate files here, because the way nh5 handles files with
+        # different keys is not portable across hdf5 versions
+        xy_file = nh5.createFile(os.path.join(out.path, 'features_xy.h5'))
+        out_xy = nh5.Hdf5ArrayFloat32(xy_file, 'data', out_shape_xy, chunk_shape_xy)
+
+        z_file = nh5.createFile(os.path.join(out.path, 'features_z.h5'))
+        out_z = nh5.Hdf5ArrayFloat32(z_file, 'data', out_shape_z, chunk_shape_z)
 
         nrag.accumulateEdgeFeaturesFromFilters(
             rag,
             data,
-            out.get('features_xy'),
-            out.get('features_z'),
+            out_xy,
+            out_z,
             self.keepOnlyXY,
             self.keepOnlyZ,
             PipelineParameter().nThreads
         )
+
         workflow_logger.info("EdgeFeatures: _compute_standard_feats done.")
+        return xy_file, z_file
 
     def _compute_modified_feats(self, data, rag, modified_adjacency, out):
 
         workflow_logger.info("EdgeFeatures: _compute_modified_feats called.")
         # first, compute the standard feats
-        self._compute_standard_feats(data, rag, out)
+        xy_file, z_file = self._compute_standard_feats(data, rag, out)
+
+        # close the xy-edges, that will not be needed any more
+        nh5.closeFile(xy_file)
 
         transition_edge = rag.totalNumberOfInSliceEdges
         # copy the z-features we keep and delete the ones that are not needed
         delete_edges = modified_adjacency.read('delete_edges')
-        if delete_edges.size and not self.keepOnlyXY:
+
+        has_delete_edges = delete_edges.size and not self.keepOnlyXY
+        if has_delete_edges:
             assert delete_edges.min() >= transition_edge
             # we substract the transition edge, because we count from the begin of z edges
             delete_edges -= transition_edge
 
-            standard_feat_shape = out.shape('features_z')
+            # read the original z-features
+            out_z = nh5.Hdf5ArrayFloat32(z_file, 'data')
+            standard_feat_shape = out_z.shape
 
             n_modified = standard_feat_shape[0] - delete_edges.shape[0]
             n_feats    = standard_feat_shape[1]
 
+            # open a new file for the modified edges
             out_shape   = [n_modified, n_feats]
             chunk_shape = [min(2500, n_modified), n_feats]
-            out.open(out_shape, chunk_shape, 'features_z_keep')
+
+            z_file_new = nh5.createFile(os.path.join(out.path, 'features_z_keep.h5'))
+            out_z_keep = nh5.Hdf5ArrayFloat32(z_file_new, 'data', out_shape, chunk_shape)
 
             # find all edges with continuous indices that will be deleted
             consecutive_deletes = np.split(
@@ -428,10 +470,9 @@ class EdgeFeatures(luigi.Task):
             for keep_start, keep_stop in keep_edge_intervals:
                 n_copy = keep_stop - keep_start
                 assert n_copy > 0, str(n_copy)
-                out.write(
-                    [total_copied, 0],
-                    out.read([keep_start, 0], [keep_stop, n_feats], 'features_z'),
-                    'features_z_keep'
+                out_z_keep.writeSubarray(
+                    [long(total_copied), 0L],
+                    out_z.readSubarray([long(keep_start), 0L], [long(keep_stop), long(n_feats)])
                 )
                 total_copied += n_copy
 
@@ -462,24 +503,32 @@ class EdgeFeatures(luigi.Task):
 
             assert skip_feats.shape[0] == skip_edges.shape[0]
             assert skip_feats.shape[1] == n_feats
-            print "Going to write skip edges"  # could use h5py too
-            out.open(
-                skip_feats.shape,
-                [min(2500, skip_feats.shape[0]), skip_feats.shape[1]],
-                'features_skip'
-            )
-            out.write([0, 0], skip_feats, 'features_skip')
 
-    # TODO check that this actually does what it is supposed to
+            # open file for the skip edges
+            skip_file = nh5.createFile(os.path.join(out.path, 'features_skip.h5'))
+            out_skip = nh5.Hdf5ArrayFloat32(
+                skip_file,
+                'data',
+                skip_feats.shape,
+                [min(2500L, skip_feats.shape[0]), skip_feats.shape[1]]
+            )
+            out_skip.writeSubarray([0L, 0L], skip_feats)
+
+        # return the file handles to close the files properly once the arrays are out of scope
+        files = [z_file]
+        if has_delete_edges:
+            files.append(z_file_new)
+        if skip_edges.size:
+            files.append(skip_file)
+        return files
+
+    # we delete the old features_z and then rename the keep features
     def _postprocess_modified_output(self, out):
-        import h5py
-        with h5py.File(out.path) as f:
-            # first remove the standard features_z
-            del f['features_z']
-            # next, rename the features_z_keep to features_z
-            # TODO make sure that this does not copy any data!
-            f['features_z'] = f['features_z_keep']
-            del f['features_z_keep']
+        from shutil import move
+        z_path = os.path.join(out.path, 'features_z.h5')
+        os.remove(z_path)
+        z_path_new = os.path.join(out.path, 'features_z_keep.h5')
+        move(z_path_new, z_path)
 
     def output(self):
         seg_file = os.path.split(self.pathToSeg)[1][:-3]
@@ -493,8 +542,7 @@ class EdgeFeatures(luigi.Task):
             save_path += '_xy'
         if self.keepOnlyZ:
             save_path += '_z'
-        save_path += '.h5'
-        return HDF5VolumeTarget(save_path, 'float32')
+        return FolderTarget(save_path)
 
 
 # TODO in nifty ??

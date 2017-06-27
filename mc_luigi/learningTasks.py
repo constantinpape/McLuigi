@@ -174,8 +174,6 @@ class EdgeProbabilities(luigi.Task):
         assert os.path.exists(self.pathToClassifier), self.pathToClassifier
         inp = self.input()
         feature_tasks = inp["features"]
-        for feat in feature_tasks:
-            feat.openExisting()
 
         if PipelineParameter().defectPipeline:
 
@@ -200,8 +198,6 @@ class EdgeProbabilities(luigi.Task):
 
         self._predict(feature_tasks, out)
 
-        for feat in feature_tasks:
-            feat.close()
         out.close()
 
     def _predict(self, feature_tasks, out):
@@ -227,14 +223,24 @@ class EdgeProbabilities(luigi.Task):
             n_edges_xy = inp['rag'].readKey('totalNumberOfInSliceEdges')
             n_edges_total_z  = n_edges - n_edges_xy
 
+        # find how many features we have for the different feature types
         n_feats_xy = 0
         n_feats_z  = 0
         n_feats_skip = 0
         for feat in feature_tasks:
-            n_feats_xy += feat.shape('features_xy')[1]
-            n_feats_z  += feat.shape('features_z')[1]
+
+            xy_path = os.path.join(feat.path, 'features_xy.h5')
+            with h5py.File(xy_path) as f:
+                n_feats_xy += f['data'].shape[1]
+
+            z_path = os.path.join(feat.path, 'features_z.h5')
+            with h5py.File(z_path) as f:
+                n_feats_z += f['data'].shape[1]
+
             if has_defects:
-                n_feats_skip += feat.shape('features_skip')[1]
+                skip_path = os.path.join(feat.path, 'features_skip.h5')
+                with h5py.File(skip_path) as f:
+                    n_feats_skip += f['data'].shape[1]
 
         feat_types = ['features_xy', 'features_z']
         classifier_types = feat_types if PipelineParameter().separateEdgeClassification else 2 * ['features_joined']
@@ -304,14 +310,17 @@ class EdgeProbabilities(luigi.Task):
             n_feats,
             start
     ):
-        # In core prediction
-        features = np.zeros((n_edges, n_feats), dtype='float32')
+
+        # read all features of this type in one chunk
         offset = 0
+        features = np.zeros((n_edges, n_feats), dtype='float32')
 
         for ii, feat in enumerate(feature_tasks):
-            features[:, offset:offset + feat.shape(feat_type)[1]] = feat.read(
-                [0, 0], feat.shape(feat_type), feat_type)
-            offset += feat.shape(feat_type)[1]
+            feat_path = os.path.join(feat.path, '%s.h5' % feat_type)
+            with h5py.File(feat_path) as f:
+                this_feats = f['data'][:]
+                features[:, offset:offset + this_feats.shape[1]] = this_feats
+                offset += this_feats.shape[1]
 
         probs = classifier.predict_probabilities(features, PipelineParameter().nThreads)[:, 1]
         out.write([long(start)], probs)
@@ -336,13 +345,13 @@ class EdgeProbabilities(luigi.Task):
             end_index   = int(float(sub_feat_id + 1) / n_sub_feats * n_edges)
             if sub_feat_id == n_sub_feats:
                 end_index = n_edges
-            sub_feats = np.concatenate(
-                [feat.read(
-                    [start_index, 0],
-                    [end_index, feat.shape(feat_type)[1]],
-                    feat_type) for feat in feature_tasks],
-                axis=1
-            )
+
+            sub_feats = []
+            for feat in feature_tasks:
+                feat_path = os.path.join(feat.path, '%s.h5' % feat_type)
+                with h5py.File(feat_path) as f:
+                    sub_feats.append(f['data'][start_index:end_index, 0:f['data'].shape[1]])
+            sub_feats = np.concatenate(sub_fets, axis=1)
 
             read_start = long(start_index + start)
 
@@ -459,21 +468,11 @@ class LearnClassifierFromGt(luigi.Task):
             assert n_inputs == len(feature_tasks)
 
             workflow_logger.info("LearnClassifierFromGt: call learning classifier for %i inputs" % n_inputs)
-            for feat_tasks_i in feature_tasks:
-                for feat in feat_tasks_i:
-                    feat.openExisting()
             self._learn_classifier_from_multiple_inputs(rag, gt, feature_tasks)
-            for feat_tasks_i in feature_tasks:
-                for feat in feat_tasks_i:
-                    feat.close()
 
         else:
             workflow_logger.info("LearnClassifierFromGt: call learning classifier for single inputs")
-            for feat in feature_tasks:
-                feat.openExisting()
             self._learn_classifier_from_single_input(rag, gt, feature_tasks)
-            for feat in feature_tasks:
-                feat.close()
 
     def _learn_classifier_from_single_input(self, rag, gt, feature_tasks):
         gt  = gt.read()
@@ -501,11 +500,18 @@ class LearnClassifierFromGt(luigi.Task):
 
         else:
             workflow_logger.info("LearnClassifierFromGt: learning classfier from single input for all edges.")
-            features = np.concatenate(
-                [feat.read([0, 0], feat.shape(key), key)
-                 for key in ('features_xy', 'features_z') for feat in feature_tasks],
-                axis=1
-            )
+            features = []
+            for feat in feature_tasks:
+
+                feat_path_xy = os.path.join(feat.path, 'features_xy')
+                with h5py.File(feat_path_xy) as f:
+                    features.append(f['data'][:])
+
+                feat_path_z = os.path.join(feat.path, 'features_z')
+                with h5py.File(feat_path_z) as f:
+                    features.append(f['data'][:])
+
+            features = np.concatenate(features, axis=1)
 
             if PipelineParameter().defectPipeline:
                 gt = gt[:skipTransition]
@@ -528,10 +534,14 @@ class LearnClassifierFromGt(luigi.Task):
 
     def _learn_classifier_from_single_input_xy(self, gt, feature_tasks, transitionEdge):
         gt = gt[:transitionEdge]
-        features = np.concatenate(
-            [feat_task.read([0, 0], feat_task.shape('features_xy'), 'features_xy') for feat_task in feature_tasks],
-            axis=1
-        )
+
+        features = []
+        for feat_task in feature_tasks:
+            feat_path = os.path.join(feat_task.path, 'features_xy.h5')
+            with h5py.File(feat_path) as f:
+                features.append(f['data'][:])
+        features = np.concatenate(features, axis=1)
+
         assert features.shape[0] == gt.shape[0], str(features.shape[0]) + " , " + str(gt.shape[0])
         classifier = RandomForest(
             features,
@@ -546,10 +556,13 @@ class LearnClassifierFromGt(luigi.Task):
     def _learn_classifier_from_single_input_z(self, gt, feature_tasks, transitionEdge, skipTransition):
 
         gt = gt[transitionEdge:skipTransition] if PipelineParameter().defectPipeline else gt[transitionEdge:]
-        features = np.concatenate(
-            [feat_task.read([0, 0], feat_task.shape('features_z'), 'features_z') for feat_task in feature_tasks],
-            axis=1
-        )
+        features = []
+        for feat_task in feature_tasks:
+            feat_path = os.path.join(feat_task.path, 'features_z.h5')
+            with h5py.File(feat_path) as f:
+                features.append(f['data'][:])
+        features = np.concatenate(features, axis=1)
+
         assert features.shape[0] == gt.shape[0], str(features.shape[0]) + " , " + str(gt.shape[0])
         classifier = RandomForest(
             features,
@@ -564,10 +577,12 @@ class LearnClassifierFromGt(luigi.Task):
     def _learn_classifier_from_single_input_defects(self, gt, feature_tasks, skipTransition):
         assert PipelineParameter().defectPipeline
         gt = gt[skipTransition:]
-        features = np.concatenate(
-            [feat_task.read([0, 0], feat_task.shape('features_skip'), 'features_skip') for feat_task in feature_tasks],
-            axis=1
-        )
+        for feat_task in feature_tasks:
+            feat_path = os.path.join(feat_task.path, 'features_skip.h5')
+            with h5py.File(feat_path) as f:
+                features.append(f['data'][:])
+        features = np.concatenate(features, axis=1)
+
         assert features.shape[0] == gt.shape[0], str(features.shape[0]) + " , " + str(gt.shape[0])
         classifier = RandomForest(
             features,
@@ -611,10 +626,14 @@ class LearnClassifierFromGt(luigi.Task):
 
             transitionEdge = rag_i.readKey('totalNumberOfInSliceEdges')
             gt_i = gt_i[:transitionEdge]
-            features_i = np.concatenate(
-                [feat_task.read([0, 0], feat_task.shape('features_xy'), 'features_xy') for feat_task in feat_tasks_i],
-                axis=1
-            )
+
+            features_i = []
+            for feat_task in feat_tasks_i:
+                feat_path = os.path.join(feat_task.path, 'features_xy.h5')
+                with h5py.File(feat_path) as f:
+                    features_i.append(f['data'][:])
+            features_i = np.concatenate(features_i, axis=1)
+
             features.append(features_i)
             gts.append(gt_i)
 
@@ -650,10 +669,13 @@ class LearnClassifierFromGt(luigi.Task):
             transitionEdge = rag_i.readKey('totalNumberOfInSliceEdges')
 
             gt_i = gt_i[transitionEdge:skipTransition] if PipelineParameter().defectPipeline else gt_i[transitionEdge:]
-            features_i = np.concatenate(
-                [feat_task.read([0, 0], feat_task.shape('features_z'), 'features_z') for feat_task in feat_tasks_i],
-                axis=1
-            )
+
+            features_i = []
+            for feat_task in feat_tasks_i:
+                feat_path = os.path.join(feat_task.path, 'features_z.h5')
+                with h5py.File(feat_path) as f:
+                    features_i.append(f['data'][:])
+            features_i = np.concatenate(features_i, axis=1)
 
             features.append(features_i)
             gts.append(gt_i)
@@ -685,12 +707,18 @@ class LearnClassifierFromGt(luigi.Task):
             else:
                 skipTransition = rag_i.readKey('numberOfEdges')
 
-            features.append(np.concatenate(
-                [feat.read([0, 0], feat.shape(key), key)
-                 for key in ('features_xy', 'features_z') for feat in feature_tasks[i]],
-                axis=1)
-            )
             gts.append(gt[i].read()[:skipTransition])
+
+            features_i = []
+            for feat_task in feature_tasks[i]:
+                feat_path_xy = os.path.join(feat_task.path, 'features_xy.h5')
+                with h5py.File(feat_path_xy) as f:
+                    features_i.append(f['data'][:])
+                feat_path_z = os.path.join(feat_task.path, 'features_z.h5')
+                with h5py.File(feat_path_z) as f:
+                    features_i.append(f['data'][:])
+
+            features_i = np.concatenate(features_i, axis=1)
 
         features = np.concatenate(features, axis=0)
         gts      = np.concatenate(gts)
@@ -722,11 +750,13 @@ class LearnClassifierFromGt(luigi.Task):
             skipTransition = rag_i.readKey('numberOfEdges') - mod_i.read("delete_edges").shape[0]
 
             gt_i = gt_i[skipTransition:]
-            features_i = np.concatenate(
-                [feat_task.read([0, 0], feat_task.shape('features_skip'), 'features_skip')
-                 for feat_task in feat_tasks_i],
-                axis=1
-            )
+
+            features_i = []
+            for feat_task in feat_tasks_i:
+                feat_path = os.path.join(feat_task.path, 'features_skip.h5')
+                with h5py.File(feat_path) as f:
+                    features_i.append(f['data'][:])
+            features_i = np.concatenate(features_i, axis=1)
 
             features.append(features_i)
             gts.append(gt_i)
