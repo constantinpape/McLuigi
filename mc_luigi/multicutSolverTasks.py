@@ -57,18 +57,26 @@ class McSolverFusionMoves(luigi.Task):
             "McSolverFusionMoves: solving multicut problem with %i number of variables" % g.numberOfNodes
         )
 
-        solver_type = 'fm-ilp'
+        solver_type = PipelineParameter().globalSolverType
         if solver_type in ('fm-ilp', 'fm-kl'):
             solver_params  = dict(
                 sigma=PipelineParameter().multicutSigmaFusion,
-                number_of_iterations=1500,
-                n_stop=20,
-                n_threads=PipelineParameter().nThreads,
-                n_fuse=2,
-                seed_fraction=0.01
+                number_of_iterations=PipelineParameter().multicutNumIt,
+                n_stop=PipelineParameter().multicutNumItStopGlobal,
+                n_threads=PipelineParameter().multicutNThreadsGlobal,
+                n_fuse=PipelineParameter().multicutNumFuse,
+                seed_fraction=PipelineParameter().multicutSeedFractionGlobal
             )
+
         else:
             solver_params = dict()
+
+        workflow_logger.info("McSolverFusionMoves: Solving problems with solver %s" % solver_type)
+        workflow_logger.info(
+            "McSolverFusionMoves: With Params %s" % ' '.join(
+                ['%s, %s,' % (str(k), str(v)) for k, v in solver_params.iteritems()]
+            )
+        )
 
         factory = string_to_factory(obj, solver_type, solver_params)
         ret, mc_energy, t_inf = run_nifty_solver(obj, factory, verbose=True)
@@ -79,7 +87,11 @@ class McSolverFusionMoves(luigi.Task):
         self.output().write(ret)
 
     def output(self):
-        save_path = os.path.join(PipelineParameter().cache, "McSolverFusionMoves.h5")
+        save_path = os.path.join(
+            PipelineParameter().cache,
+            "McSolverFusionMoves_%s.h5"
+            % ("modified" if PipelineParameter().defectPipeline else "standard",)
+        )
         return HDF5DataTarget(save_path)
 
 

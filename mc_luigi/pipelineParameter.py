@@ -81,6 +81,7 @@ class PipelineParameter(object):
         self.multicutSeedFractionGlobal = 1e-5
 
         self.subSolverType = 'fm-ilp'
+        self.globalSolverType = 'fm-kl'
 
         # parameters for segmentation tasks / wsdt
         self.wsdtThreshold = .2

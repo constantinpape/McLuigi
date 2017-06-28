@@ -178,11 +178,14 @@ class SubblockSegmentations(BlockwiseSolver):
 
     def output(self):
         return FolderTarget(
-            os.path.join(PipelineParameter().cache, "SubblockSegmentations")
+            os.path.join(
+                PipelineParameter().cache,
+                "SubblockSegmentations_%s"
+                % ("modified" if PipelineParameter().defectPipeline else "standard",)
+            )
         )
 
 
-# TODO TODO TODO DEBUG!!!
 # produce reduced global graph from subproblems
 # solve global multicut problem on the reduced graph
 class BlockwiseMulticutSolver(BlockwiseSolver):
@@ -204,7 +207,8 @@ class BlockwiseMulticutSolver(BlockwiseSolver):
         # run global multicut inference
         #
 
-        solver_type = 'fm-kl'  # we use fm with kl as backend, because this shows the best scaling behaviour
+        # we use fm with kl as default backend, because this shows the best scaling behaviour
+        solver_type = PipelineParameter().globalSolverType
         inf_params  = dict(
             sigma=PipelineParameter().multicutSigmaFusion,
             number_of_iterations=PipelineParameter().multicutNumIt,
@@ -213,6 +217,14 @@ class BlockwiseMulticutSolver(BlockwiseSolver):
             n_fuse=PipelineParameter().multicutNumFuse,
             seed_fraction=PipelineParameter().multicutSeedFractionGlobal
         )
+
+        workflow_logger.info("BlockwiseMulticutSolver: Solving problems with solver %s" % solver_type)
+        workflow_logger.info(
+            "BlockwiseMulticutSolver: With Params %s" % ' '.join(
+                ['%s, %s,' % (str(k), str(v)) for k, v in inf_params.iteritems()]
+            )
+        )
+
         factory = string_to_factory(reduced_objective, solver_type, inf_params)
         reduced_node_result, energy, t_inf = run_nifty_solver(
             reduced_objective,
@@ -426,6 +438,7 @@ class ReducedProblem(luigi.Task):
         return HDF5DataTarget(save_path)
 
 
+# TODO TODO TODO DEBUG!!!
 class NodesToInitialBlocks(luigi.Task):
 
     pathToSeg = luigi.Parameter()
@@ -448,8 +461,11 @@ class NodesToInitialBlocks(luigi.Task):
         seg = inp["seg"]
         seg.open()
 
+        # if we have defects, we need to skip the completly defected slices in the node extraction,
+        # because nodes inside them are completely excluded from the graph now
         if PipelineParameter().defectPipeline:
             defect_slices = vigra.readHDF5(inp["defect_slices"].path, 'defect_slices').astype('int64').tolist()
+            workflow_logger.info("NodesToInitialBlocks: Skipping slices %s due to defects." % str(defect_slices))
         else:
             defect_slices = []
 
@@ -470,6 +486,7 @@ class NodesToInitialBlocks(luigi.Task):
         return HDF5DataTarget(save_path)
 
 
+# TODO TODO TODO DEBUG!!!
 class BlockwiseSubSolver(luigi.Task):
 
     pathToSeg = luigi.Parameter()
@@ -519,6 +536,7 @@ class BlockwiseSubSolver(luigi.Task):
 
         seg.close()
 
+    # extract all sub-problems for current level
     def _run_subproblems_extraction(self, seg, graph, nodes2blocks, global2new_nodes):
 
         # get the initial blocking
@@ -529,6 +547,10 @@ class BlockwiseSubSolver(luigi.Task):
             roiBegin=[0L, 0L, 0L],
             roiEnd=seg.shape(),
             blockShape=initial_block_shape
+        )
+        workflow_logger.info(
+            "BlockwiseSubSolver: Extracting sub-problems with initial blocking of shape %s with overlaps %s."
+            % (str(initial_block_shape), str(initial_overlap))
         )
 
         # function for subproblem extraction
@@ -546,6 +568,11 @@ class BlockwiseSubSolver(luigi.Task):
         block_overlap = list(self.blockOverlap)
         blocking = nifty.tools.blocking(roiBegin=[0L, 0L, 0L], roiEnd=seg.shape(), blockShape=self.blockShape)
         number_of_blocks = blocking.numberOfBlocks
+
+        workflow_logger.info(
+            "BlockwiseSubSolver: Extracting sub-problems with current blocking of shape %s with overlaps %s."
+            % (str(self.blockShape), str(block_overlap))
+        )
 
         # sequential for debugging
         # subProblems = []
@@ -633,7 +660,7 @@ class BlockwiseSubSolver(luigi.Task):
 
         def _solve_mc(g, costs, block_id):
             workflow_logger.info(
-                "BlockwiseSubSolver: Solving MC Problem for block %i with %i / %i number of variables"
+                "BlockwiseSubSolver: Solving MC Problem for block %i with %i nodes / %i edges"
                 % (block_id, g.numberOfNodes, g.numberOfEdges)
             )
             obj = nifty.graph.optimization.multicut.multicutObjective(g, costs)
@@ -641,9 +668,9 @@ class BlockwiseSubSolver(luigi.Task):
             solver = factory.create(obj)
             t_inf  = time.time()
             res    = solver.optimize()
-            workflow_logger.debug(
+            workflow_logger.info(
                 "BlockwiseSubSolver: Inference for block %i with fusion moves solver in %f s"
-                % (block_id, t_inf - time.time())
+                % (block_id, time.time() - t_inf)
             )
             return res
 
