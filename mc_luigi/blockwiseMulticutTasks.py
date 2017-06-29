@@ -356,7 +356,7 @@ class ReducedProblem(luigi.Task):
         # serialize the node converter
         t_serialize = time.time()
         self.serialize_node_conversions(problem, old2new_nodes, new2old_nodes, number_of_new_nodes)
-        workflow_logger.info("ReducedProblem: Serializing ndoe converters took: %f s" % (time.time() - t_serialize))
+        workflow_logger.info("ReducedProblem: Serializing node converters took: %f s" % (time.time() - t_serialize))
 
         workflow_logger.info("ReucedProblem: Nodes: From %i to %i" % (g.numberOfNodes, number_of_new_nodes))
         workflow_logger.info("ReucedProblem: Edges: From %i to %i" % (g.numberOfEdges, len(uv_ids_new)))
@@ -438,7 +438,6 @@ class ReducedProblem(luigi.Task):
         return HDF5DataTarget(save_path)
 
 
-# TODO TODO TODO DEBUG!!!
 class NodesToInitialBlocks(luigi.Task):
 
     pathToSeg = luigi.Parameter()
@@ -486,7 +485,6 @@ class NodesToInitialBlocks(luigi.Task):
         return HDF5DataTarget(save_path)
 
 
-# TODO TODO TODO DEBUG!!!
 class BlockwiseSubSolver(luigi.Task):
 
     pathToSeg = luigi.Parameter()
@@ -559,7 +557,7 @@ class BlockwiseSubSolver(luigi.Task):
             node_list = np.unique(np.concatenate([nodes2blocks[sub_id] for sub_id in sub_blocks]))
             if self.level != 0:
                 node_list = np.unique(global2new_nodes[node_list])
-            workflow_logger.info(
+            workflow_logger.debug(
                 "BlockwiseSubSolver: block id %i: Number of nodes %i" % (block_id, node_list.shape[0])
             )
             inner_edges, outer_edges, subgraph = graph.extractSubgraphFromNodes(node_list.tolist())
@@ -597,7 +595,7 @@ class BlockwiseSubSolver(luigi.Task):
                 block = blocking.getBlockWithHalo(block_id, block_overlap).outerBlock
                 block_begin, block_end = block.begin, block.end
                 sub_blocks = initial_blocking.getBlockIdsInBoundingBox(block_begin, block_end, initial_overlap)
-                workflow_logger.info(
+                workflow_logger.debug(
                     "BlockwiseSubSolver: block id %i start %s end %s" % (block_id, str(block_begin), str(block_end))
                 )
                 tasks.append(executor.submit(extract_subproblem, block_id, sub_blocks))
@@ -659,7 +657,7 @@ class BlockwiseSubSolver(luigi.Task):
         )
 
         def _solve_mc(g, costs, block_id):
-            workflow_logger.info(
+            workflow_logger.debug(
                 "BlockwiseSubSolver: Solving MC Problem for block %i with %i nodes / %i edges"
                 % (block_id, g.numberOfNodes, g.numberOfEdges)
             )
@@ -668,7 +666,7 @@ class BlockwiseSubSolver(luigi.Task):
             solver = factory.create(obj)
             t_inf  = time.time()
             res    = solver.optimize()
-            workflow_logger.info(
+            workflow_logger.debug(
                 "BlockwiseSubSolver: Inference for block %i with fusion moves solver in %f s"
                 % (block_id, time.time() - t_inf)
             )
