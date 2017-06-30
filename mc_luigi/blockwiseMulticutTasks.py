@@ -8,6 +8,7 @@ from dataTasks import ExternalSegmentation, StackedRegionAdjacencyGraph
 from customTargets import HDF5DataTarget, FolderTarget
 from defectDetectionTasks import DefectSliceDetection
 from multicutProblemTasks import MulticutProblem
+from blocking_helper import NodesToBlocks
 
 from tools import config_logger, run_decorator
 from nifty_helper import run_nifty_solver, string_to_factory, available_factorys
@@ -254,6 +255,7 @@ class BlockwiseMulticutSolver(BlockwiseSolver):
         return HDF5DataTarget(save_path)
 
 
+# TODO use EdgesBetweenBlocks instead of outer_edges !
 # stitch blockwise sub-results according to costs of the edges connecting
 # the sub-blocks
 class BlockwiseStitchingSolver(BlockwiseSolver):
@@ -288,7 +290,6 @@ class BlockwiseStitchingSolver(BlockwiseSolver):
         return HDF5DataTarget(save_path)
 
 
-# TODO benchmark and speed up
 class ReducedProblem(luigi.Task):
 
     pathToSeg = luigi.Parameter()
@@ -438,53 +439,6 @@ class ReducedProblem(luigi.Task):
         return HDF5DataTarget(save_path)
 
 
-class NodesToInitialBlocks(luigi.Task):
-
-    pathToSeg = luigi.Parameter()
-
-    blockShape   = luigi.ListParameter()
-    blockOverlap = luigi.ListParameter()
-    dtype        = luigi.ListParameter('uint32')
-
-    def requires(self):
-        if PipelineParameter().defectPipeline:
-            return {"seg": ExternalSegmentation(self.pathToSeg),
-                    "defect_slices": DefectSliceDetection(self.pathToSeg)}
-        else:
-            return {"seg": ExternalSegmentation(self.pathToSeg)}
-
-    @run_decorator
-    def run(self):
-
-        inp = self.input()
-        seg = inp["seg"]
-        seg.open()
-
-        # if we have defects, we need to skip the completly defected slices in the node extraction,
-        # because nodes inside them are completely excluded from the graph now
-        if PipelineParameter().defectPipeline:
-            defect_slices = vigra.readHDF5(inp["defect_slices"].path, 'defect_slices').astype('int64').tolist()
-            workflow_logger.info("NodesToInitialBlocks: Skipping slices %s due to defects." % str(defect_slices))
-        else:
-            defect_slices = []
-
-        blocking = nifty.tools.blocking(roiBegin=[0L, 0L, 0L], roiEnd=seg.shape(), blockShape=self.blockShape)
-        number_of_blocks = blocking.numberOfBlocks
-        block_overlap = list(self.blockOverlap)
-
-        n_workers = min(number_of_blocks, PipelineParameter().nThreads)
-        # nWorkers = 1
-        block_result = nifty.tools.nodesToBlocksStacked(seg.get(), blocking, block_overlap, defect_slices, n_workers)
-
-        block_result = [np.array(b_res, dtype=self.dtype) for b_res in block_result]
-        self.output().writeVlen(block_result)
-
-    def output(self):
-        save_name = "NodesToInitialBlocks_%s.h5" % ("modified" if PipelineParameter().defectPipeline else "standard",)
-        save_path = os.path.join(PipelineParameter().cache, save_name)
-        return HDF5DataTarget(save_path)
-
-
 class BlockwiseSubSolver(luigi.Task):
 
     pathToSeg = luigi.Parameter()
@@ -501,7 +455,7 @@ class BlockwiseSubSolver(luigi.Task):
         initialShape = PipelineParameter().multicutBlockShape
         overlap      = PipelineParameter().multicutBlockOverlap
 
-        nodes2blocks = NodesToInitialBlocks(self.pathToSeg, initialShape, overlap)
+        nodes2blocks = NodesToBlocks(self.pathToSeg, initialShape, overlap)
         return {"seg": ExternalSegmentation(self.pathToSeg), "problem": self.problem, "nodes2blocks": nodes2blocks}
 
     @run_decorator
@@ -734,7 +688,7 @@ class TestSubSolver(luigi.Task):
     blockOverlap = luigi.ListParameter(default=PipelineParameter().multicutBlockOverlap)
 
     def requires(self):
-        nodes2blocks = NodesToInitialBlocks(self.pathToSeg, self.blockShape, self.blockOverlap)
+        nodes2blocks = NodesToBlocks(self.pathToSeg, self.blockShape, self.blockOverlap)
         return {
             "seg": ExternalSegmentation(self.pathToSeg),
             "problem": MulticutProblem(self.pathToSeg, self.pathToClassifier),

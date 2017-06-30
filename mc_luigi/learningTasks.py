@@ -351,7 +351,7 @@ class EdgeProbabilities(luigi.Task):
                 feat_path = os.path.join(feat.path, '%s.h5' % feat_type)
                 with h5py.File(feat_path) as f:
                     sub_feats.append(f['data'][start_index:end_index, 0:f['data'].shape[1]])
-            sub_feats = np.concatenate(sub_fets, axis=1)
+            sub_feats = np.concatenate(sub_feats, axis=1)
 
             read_start = long(start_index + start)
 
