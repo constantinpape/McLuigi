@@ -84,31 +84,48 @@ class BlockGridGraph(luigi.Task):
     blockOverlap = luigi.ListParameter()
 
     def requires(self):
-        return ExternalSegmentation(pathToSeg)
+        return ExternalSegmentation(self.pathToSeg)
 
     @run_decorator
     def run(self):
 
         # get the shape
         inp = self.input()
+        inp.open()
         shape = inp.shape()
         overlap = list(self.blockOverlap)
 
         # construct the blocking
-        blocking = nifty.tools.blocking(roiBegin=[0L, 0L, 0L], roiEnd=shape, blockShape=self.blockShape)
+        blocking = nifty.tools.blocking(
+            roiBegin=[0L, 0L, 0L],
+            roiEnd=shape,
+            blockShape=list(map(long, self.blockShape))
+        )
         n_blocks = blocking.numberOfBlocks
 
         # init the graph
         block_graph = nifty.graph.UndirectedGraph(n_blocks)
+        print overlap
 
         # construct the graph by iterating over the blocks and for each block finding blocks with overlap
         for block_id in xrange(n_blocks):
             block = blocking.getBlockWithHalo(block_id, overlap).outerBlock
+
             # find adjacent blocks via all blocks in the bounding box and excluding the current block id
-            adjacent_blocks = np.array(blocking.getBlockIdsInBoundingBox(block.begin, block.end))
+            adjacent_blocks = np.array(blocking.getBlockIdsOverlappingBoundingBox(block.begin, block.end, overlap))
             adjacent_blocks = adjacent_blocks[adjacent_blocks != block_id]
 
-            block_graph.insertEdges(adjacent_blocks)
+            assert adjacent_blocks.size, adjacent_blocks
+            # construct edge vector and append it
+            block_edges = np.sort(
+                np.concatenate(
+                    [block_id * np.ones((len(adjacent_blocks), 1)), adjacent_blocks[:, None]],
+                    axis=1
+                ),
+                axis=1
+            ).astype('uint32')
+
+            block_graph.insertEdges(block_edges)
 
         # serialize the graph
         out = self.output()
@@ -143,9 +160,9 @@ class EdgesBetweenBlocks(luigi.Task):
 
     def requires(self):
         return {
-            'block_graph': BlockGridGraph(pathToSeg, blockShape, blockOverlap),
-            'problem': problem,
-            'nodes_to_blocks': NodesToBlocks(pathToSeg, blockShape, blockOverlap)
+            'block_graph': BlockGridGraph(self.pathToSeg, self.blockShape, self.blockOverlap),
+            'problem': self.problem,
+            'nodes_to_blocks': NodesToBlocks(self.pathToSeg, self.blockShape, self.blockOverlap)
         }
 
     @run_decorator
@@ -157,23 +174,25 @@ class EdgesBetweenBlocks(luigi.Task):
         inp = self.input()
 
         # graph of the current problem
-        graph = nifty.UndirectedGraph()
+        graph = nifty.graph.UndirectedGraph()
         graph.deserialize(inp['problem'].read('graph'))
         uv_ids = graph.uvIds()
 
         # nodes to blocks and block_graph
-        block_graph = inp['block_graph'].read()
+        block_graph = nifty.graph.UndirectedGraph()
+        block_graph.deserialize(inp['block_graph'].read())
         nodes_to_blocks = inp['nodes_to_blocks'].read()
         assert len(nodes_to_blocks) == block_graph.numberOfNodes
 
         # we need to project the node ids to the reduced node ids in the current level
         to_new_nodes = inp['problem'].read('global2new')
         nodes_to_blocks_new = [
-            np.unique(to_new_nodes[nodes_to_blocks[block_id]]) for block_id in xrange(len(node_to_blocks))
+            np.unique(to_new_nodes[nodes_to_blocks[block_id]]) for block_id in xrange(len(nodes_to_blocks))
         ]
 
+        # TODO this seems to be quite expensive and could probably be parallelized
         # iterate over the adjacent blocks and save all graph edges that connect adjacent blocks
-        between_block_edges = []
+        edges_between_blocks = []
         for block_u, block_v in block_graph.uvIds():
 
             # get the nodes in both blocks
@@ -185,18 +204,18 @@ class EdgesBetweenBlocks(luigi.Task):
             potential_edges = cartesian([nodes_u, nodes_v])
             edge_ids = graph.findEdges(potential_edges)
             edge_ids = edge_ids[edge_ids != -1]  # exclude all invalid edge ids
-            between_block_edges.append(edge_ids)
+            edges_between_blocks.append(edge_ids)
 
         out = self.output()
 
         # serialize the between block edges
-        out.writeVlen(between_block_edges, 'between_block_edges')
+        out.writeVlen(edges_between_blocks, 'edges_between_blocks')
         # serialize the block uv ids for convinience
         out.write(block_graph.uvIds(), 'block_uv_ids')
 
     def output(self):
         block_string = '_'.join(map(str, self.blockShape))
         overlap_string = '_'.join(map(str, self.blockOverlap))
-        save_name = "EdgesBetweenBlocks_%s_%s_%l.h5" % (block_string, overlap_string, self.level)
+        save_name = "EdgesBetweenBlocks_%s_%s_%i.h5" % (block_string, overlap_string, self.level)
         save_path = os.path.join(PipelineParameter().cache, save_name)
         return HDF5DataTarget(save_path)

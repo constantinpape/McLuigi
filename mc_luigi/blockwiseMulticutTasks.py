@@ -8,7 +8,7 @@ from dataTasks import ExternalSegmentation, StackedRegionAdjacencyGraph
 from customTargets import HDF5DataTarget, FolderTarget
 from defectDetectionTasks import DefectSliceDetection
 from multicutProblemTasks import MulticutProblem
-from blocking_helper import NodesToBlocks
+from blocking_helper import NodesToBlocks, EdgesBetweenBlocks
 
 from tools import config_logger, run_decorator
 from nifty_helper import run_nifty_solver, string_to_factory, available_factorys
@@ -35,8 +35,12 @@ workflow_logger = logging.getLogger(__name__)
 config_logger(workflow_logger)
 
 
+# TODO TODO TODO
+# add number of levels and overlaps to all cache names for proper experiments
+# TODO TODO TODO
+
+
 # parent class for blockwise solvers
-# TODO move basic functionality from BlockwiseMulticutSolver here
 class BlockwiseSolver(luigi.Task):
 
     pathToSeg = luigi.Parameter()
@@ -67,9 +71,8 @@ class BlockwiseSolver(luigi.Task):
         raise NotImplementedError("BlockwiseSolver is abstract and does not implement a run functionality!")
 
     # map back to the global solution
-    def map_node_result_to_global(self, reduced_node_result):
+    def map_node_result_to_global(self, problems, reduced_node_result):
 
-        problems = self.input()
         n_nodes_global = problems[0].read('number_of_nodes')
         reduced_problem = problems[-1]
         to_global_nodes = reduced_problem.read("new2global")
@@ -86,8 +89,21 @@ class BlockwiseSolver(luigi.Task):
 
 
 # stitch blockwise sub-results by overlap
-# TODO
+# TODO implement
 def BlockwiseOverlapSolver(BlockwiseSolver):
+    pass
+
+
+# stitch blockwise sub-results by running Multicut only on the edges between blocks
+# -> no idea if this will actually work
+# -> two options:
+# --> run Multicut on all between block edges
+# --> run Multicuts for all pairs of adjacent blocks and check edges that are part of multiple
+#     block pairs for consistency -> if inconsistent, don't merge
+# -> maybe this needs a different problem formulation than Multicut ?!
+
+# TODO implement
+def BlockwiseMulticutStitchingSolver(BlockwiseSolver):
     pass
 
 
@@ -243,7 +259,7 @@ class BlockwiseMulticutSolver(BlockwiseSolver):
             % reduced_objective.evalNodeLabels(reduced_node_result)
         )
 
-        node_result = self.map_node_result_to_global(reduced_node_result)
+        node_result = self.map_node_result_to_global(problems, reduced_node_result)
         self.output().write(node_result)
 
     def output(self):
@@ -255,30 +271,58 @@ class BlockwiseMulticutSolver(BlockwiseSolver):
         return HDF5DataTarget(save_path)
 
 
-# TODO use EdgesBetweenBlocks instead of outer_edges !
-# stitch blockwise sub-results according to costs of the edges connecting
-# the sub-blocks
+# TODO introduce boundary bias
+# stitch blockwise sub-results according to costs of the edges connecting the sub-blocks
 class BlockwiseStitchingSolver(BlockwiseSolver):
+
+    # we have EdgesBetweenBlocks as additional requirements to the
+    # super class (BlockwiseSolver)
+    def requires(self):
+        required_problems = super(BlockwiseStitchingSolver, self).requires()
+        overlap = PipelineParameter().multicutBlockOverlap
+
+        # get the block shape of the current level
+        initial_shape = PipelineParameter().multicutBlockShape
+        block_factor  = max(1, (self.numberOfLevels - 1) * 2)
+        block_shape = list(map(lambda x: x * block_factor, initial_shape))
+
+        return {
+            'problems': required_problems,
+            'edges_between_blocks': EdgesBetweenBlocks(
+                self.pathToSeg,
+                required_problems[-1],
+                block_shape,
+                overlap,
+                self.numberOfLevels
+            )
+        }
 
     @run_decorator
     def run(self):
-        problems = self.input()
+        inp = self.input()
+        problems = inp['problems']
         reduced_problem = problems[-1]
 
+        # load the reduced graph of the current level
         reduced_graph = nifty.graph.UndirectedGraph()
         reduced_graph.deserialize(reduced_problem.read("graph"))
         reduced_costs = reduced_problem.read("costs")
-        outer_edges = reduced_problem.read("outer_edges")
         uv_ids = reduced_graph.uvIds()
 
+        # load the between block edges
+        edges_between_blocks = inp['edges_between_blocks'].read('edges_between_blocks')
+        edges_between_blocks = np.unique(
+            np.concatenate([bw_edges for bw_edges in edges_between_blocks])
+        )
+
         # merge all edges along the block boundaries that are attractive TODO (modulu bias?!)
-        merge_ids = outer_edges[reduced_costs[outer_edges] < 0]
+        merge_ids = edges_between_blocks[reduced_costs[edges_between_blocks] < 0]
 
         ufd = nifty.ufd.ufd(reduced_graph.numberOfNodes)
         ufd.merge(uv_ids[merge_ids])
         reduced_node_result = ufd.elementLabeling()
 
-        node_result = self.map_node_result_to_global(reduced_node_result)
+        node_result = self.map_node_result_to_global(problems, reduced_node_result)
         self.output().write(node_result)
 
     def output(self):
@@ -382,10 +426,6 @@ class ReducedProblem(luigi.Task):
         costs  = problem.read("costs")
         new_costs = edge_mapping.mapEdgeValues(costs)
 
-        # map the old outer edges to new outer edges
-        outer_edge_ids = self.input()["sub_solution"].read("outer_edges")
-        new_outer_edges = edge_mapping.getNewEdgeIds(outer_edge_ids)
-
         assert len(new_costs) == len(uv_ids_new)
         reduced_graph = nifty.graph.UndirectedGraph(number_of_new_nodes)
         reduced_graph.insertEdges(uv_ids_new)
@@ -394,7 +434,6 @@ class ReducedProblem(luigi.Task):
         out.write(reduced_graph.serialize(), "graph")
         out.write(reduced_graph.numberOfNodes, 'number_of_nodes')
         out.write(new_costs, "costs")
-        out.write(new_outer_edges, "outer_edges")
 
         return uv_ids_new
 
@@ -526,41 +565,30 @@ class BlockwiseSubSolver(luigi.Task):
             % (str(self.blockShape), str(block_overlap))
         )
 
-        # sequential for debugging
-        # subProblems = []
-        # for blockId in xrange(numberOfBlocks):
-        #     print "Running block:", blockId, "/", numberOfBlocks
-        #     t_block = time.time()
-
-        #     block = blocking.getBlockWithHalo(blockId, blockOverlap).outerBlock
-        #     blockBegin, blockEnd = block.begin, block.end
-        #     workflow_logger.debug(
-        #       "Block id " + str(blockId) + " start " + str(blockBegin) + " end " + str(blockEnd)
-        #     )
-        #     subBlocks = initialBlocking.getBlockIdsInBoundingBox(blockBegin, blockEnd, initialOverlap)
-        #     subProblems.append( extract_subproblem( blockId, subBlocks ) )
-
         n_workers = min(number_of_blocks, PipelineParameter().nThreads)
-        # n_workers = 2
         # parallel
         with futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
             tasks = []
             for block_id in xrange(number_of_blocks):
+
+                # get the current block with additional overlap
                 block = blocking.getBlockWithHalo(block_id, block_overlap).outerBlock
                 block_begin, block_end = block.begin, block.end
-                sub_blocks = initial_blocking.getBlockIdsInBoundingBox(block_begin, block_end, initial_overlap)
                 workflow_logger.debug(
                     "BlockwiseSubSolver: block id %i start %s end %s" % (block_id, str(block_begin), str(block_end))
                 )
+
+                # if we are past level 0, we must assemble the initial blocks, from which this block is made up of
+                # otherwise we simply schedule this block
+                if self.level > 0:
+                    sub_blocks = initial_blocking.getBlockIdsInBoundingBox(block_begin, block_end, initial_overlap)
+                else:
+                    sub_blocks = [block_id]
+
                 tasks.append(executor.submit(extract_subproblem, block_id, sub_blocks))
             sub_problems = [task.result() for task in tasks]
 
         out = self.output()
-        # we need to serialize the outer edges for the stitching solvers
-        out.write(
-            np.unique(np.concatenate([sub_prob[1] for sub_prob in sub_problems])),
-            'outer_edges'
-        )
 
         # if we serialize the sub-results, write out the block positions and the sub nodes here
         if self.serializeSubResults:
