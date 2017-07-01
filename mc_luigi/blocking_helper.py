@@ -214,8 +214,10 @@ class EdgesBetweenBlocks(luigi.Task):
         out.write(block_graph.uvIds(), 'block_uv_ids')
 
     def output(self):
-        block_string = '_'.join(map(str, self.blockShape))
-        overlap_string = '_'.join(map(str, self.blockOverlap))
-        save_name = "EdgesBetweenBlocks_%s_%s_%i.h5" % (block_string, overlap_string, self.level)
+        save_name = "EdgesBetweenBlocks_L%i_%s_%s.h5" % (
+            self.level,
+            '_'.join(map(str, self.blockShape)),
+            '_'.join(map(str, self.blockOverlap))
+        )
         save_path = os.path.join(PipelineParameter().cache, save_name)
         return HDF5DataTarget(save_path)

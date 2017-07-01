@@ -35,11 +35,6 @@ workflow_logger = logging.getLogger(__name__)
 config_logger(workflow_logger)
 
 
-# TODO TODO TODO
-# add number of levels and overlaps to all cache names for proper experiments
-# TODO TODO TODO
-
-
 # parent class for blockwise solvers
 class BlockwiseSolver(luigi.Task):
 
@@ -194,12 +189,16 @@ class SubblockSegmentations(BlockwiseSolver):
 
 
     def output(self):
+        # we add the number of levels, the initial block shape and the block overlap
+        # to the save name to make int unambiguous
+        save_name = "SubblockSegmentations_L%i_%s_%s_%s" % (
+            self.numberOfLevels,
+            '_'.join(map(str, PipelineParameter().multicutBlockShape)),
+            '_'.join(map(str, PipelineParameter().multicutBlockOverlap)),
+            "modified" if PipelineParameter().defectPipeline else "standard"
+        )
         return FolderTarget(
-            os.path.join(
-                PipelineParameter().cache,
-                "SubblockSegmentations_%s"
-                % ("modified" if PipelineParameter().defectPipeline else "standard",)
-            )
+            os.path.join(PipelineParameter().cache, save_name)
         )
 
 
@@ -263,11 +262,13 @@ class BlockwiseMulticutSolver(BlockwiseSolver):
         self.output().write(node_result)
 
     def output(self):
-        save_path = os.path.join(
-            PipelineParameter().cache,
-            "BlockwiseMulticutSolver_%s.h5"
-            % ("modified" if PipelineParameter().defectPipeline else "standard",)
+        save_name = "BlockwiseMulticutSolver_L%i_%s_%s_%s.h5" % (
+            self.numberOfLevels,
+            '_'.join(map(str, PipelineParameter().multicutBlockShape)),
+            '_'.join(map(str, PipelineParameter().multicutBlockOverlap)),
+            "modified" if PipelineParameter().defectPipeline else "standard"
         )
+        save_path = os.path.join(PipelineParameter().cache, save_name)
         return HDF5DataTarget(save_path)
 
 
@@ -326,11 +327,13 @@ class BlockwiseStitchingSolver(BlockwiseSolver):
         self.output().write(node_result)
 
     def output(self):
-        save_path = os.path.join(
-            PipelineParameter().cache,
-            "BlockwiseStitchingSolver_%s.h5"
-            % ("modified" if PipelineParameter().defectPipeline else "standard",)
+        save_name = "BlockwiseStitchingSolver_L%i_%s_%s_%s.h5" % (
+            self.numberOfLevels,
+            '_'.join(map(str, PipelineParameter().multicutBlockShape)),
+            '_'.join(map(str, PipelineParameter().multicutBlockOverlap)),
+            "modified" if PipelineParameter().defectPipeline else "standard"
         )
+        save_path = os.path.join(PipelineParameter().cache, save_name)
         return HDF5DataTarget(save_path)
 
 
@@ -471,9 +474,12 @@ class ReducedProblem(luigi.Task):
         out.writeVlen(new2global, "new2global")
 
     def output(self):
-        blcksize_str = "_".join(map(str, list(self.blockShape)))
-        save_name = "ReducedProblem_%s_%s.h5" \
-            % (blcksize_str, "modified" if PipelineParameter().defectPipeline else "standard")
+        save_name = "ReducedProblem_L%i_%s_%s_%s.h5" % (
+            self.level,
+            '_'.join(map(str, self.blockShape)),
+            '_'.join(map(str, self.blockOverlap)),
+            "modified" if PipelineParameter().defectPipeline else "standard"
+        )
         save_path = os.path.join(PipelineParameter().cache, save_name)
         return HDF5DataTarget(save_path)
 
@@ -699,9 +705,12 @@ class BlockwiseSubSolver(luigi.Task):
             )
 
     def output(self):
-        blcksize_str = "_".join(map(str, list(self.blockShape)))
-        save_name = "BlockwiseSubSolver_%s_%s.h5" \
-            % (blcksize_str, "modified" if PipelineParameter().defectPipeline else "standard")
+        save_name = "BlockwiseSubSolver_L%i_%s_%s_%s.h5" % (
+            self.level,
+            '_'.join(map(str, self.blockShape)),
+            '_'.join(map(str, self.blockOverlap)),
+            "modified" if PipelineParameter().defectPipeline else "standard"
+        )
         save_path = os.path.join(PipelineParameter().cache, save_name)
         return HDF5DataTarget(save_path)
 
