@@ -8,14 +8,15 @@ from dataTasks import ExternalSegmentation, StackedRegionAdjacencyGraph
 from customTargets import HDF5DataTarget, FolderTarget
 from defectDetectionTasks import DefectSliceDetection
 from multicutProblemTasks import MulticutProblem
-from blocking_helper import NodesToBlocks, EdgesBetweenBlocks
+from blocking_helper import NodesToBlocks, EdgesBetweenBlocks, BlockGridGraph
 
-from tools import config_logger, run_decorator
+from tools import config_logger, run_decorator, get_replace_slices
 from nifty_helper import run_nifty_solver, string_to_factory, available_factorys
 
 import os
 import logging
 import time
+import h5py
 
 import numpy as np
 import vigra
@@ -24,11 +25,20 @@ from concurrent import futures
 # import the proper nifty version
 try:
     import nifty
+    import nifty.graph.rag as nrag
+    import nifty.hdf5 as nh5
+    import nifty.ground_truth as ngt
 except ImportError:
     try:
         import nifty_with_cplex as nifty
+        import nifty_with_cplex.graph.rag as nrag
+        import nifty_with_cplex.hdf5 as nh5
+        import nifty_with_cplex.ground_truth as ngt
     except ImportError:
         import nifty_with_gurobi as nifty
+        import nifty_with_gurobi.graph.rag as nrag
+        import nifty_with_gurobi.hdf5 as nh5
+        import nifty_with_gurobi.ground_truth as ngt
 
 # init the workflow logger
 workflow_logger = logging.getLogger(__name__)
@@ -83,23 +93,197 @@ class BlockwiseSolver(luigi.Task):
         raise NotImplementedError("BlockwiseSolver is abstract and does not implement the output functionality!")
 
 
+# TODO test !!!
 # stitch blockwise sub-results by overlap
-# TODO implement
-def BlockwiseOverlapSolver(BlockwiseSolver):
-    pass
+class BlockwiseOverlapSolver(BlockwiseSolver):
 
+    def requires(self):
 
-# stitch blockwise sub-results by running Multicut only on the edges between blocks
-# -> no idea if this will actually work
-# -> two options:
-# --> run Multicut on all between block edges
-# --> run Multicuts for all pairs of adjacent blocks and check edges that are part of multiple
-#     block pairs for consistency -> if inconsistent, don't merge
-# -> maybe this needs a different problem formulation than Multicut ?!
+        # get the problem hierarchy from the super class
+        problems = super(SubblockSegmentations, self).requires()
 
-# TODO implement
-def BlockwiseMulticutStitchingSolver(BlockwiseSolver):
-    pass
+        # get the overlap
+        overlap = PipelineParameter().multicutBlockOverlap
+
+        # get the block shape of the current level
+        initial_shape = PipelineParameter().multicutBlockShape
+        block_factor  = max(1, (self.numberOfLevels - 1) * 2)
+        block_shape = list(map(lambda x: x * block_factor, initial_shape))
+
+        # get the sub solver results
+        sub_solver = BlockwiseSubSolver(
+            self.pathToSeg,
+            problems[-2],
+            block_shape,
+            overlap,
+            self.numberOfLevels - 1,
+            True
+        )
+
+        return {
+            'subblocks': SubblockSegmentations(self.pathToSeg, self.globalProblem, self.numberOfLevels),
+            'problems': problems,
+            'block_graph': BlockGridGraph(
+                self.pathToSeg,
+                block_shape,
+                overlap
+            ),
+            'sub_solver': sub_solver
+        }
+
+    @run_decorator
+    def run(self):
+
+        # get all inputs
+        inp = self.input()
+        subblocks = inp['subblocks']
+        problems = inp['problems']
+        block_graph = nifty.UndirectedGraph()
+        block_graph.deserialize(inp['block_graph'].read())
+        sub_solver = inp['sub_solver']
+
+        # read the relevant problem, which is the second to last reduced problem ->
+        # because we merge according to results of last BlockwiseSubSolver
+        reduced_problem = problems[-2]
+        reduced_graph = nifty.graph.UndirectedGraph()
+        reduced_graph.deserialize(reduced_problem.read("graph"))
+        reduced_costs = reduced_problem.read("costs")
+        reduced_objective = nifty.graph.optimization.multicut.multicutObjective(reduced_graph, reduced_costs)
+
+        # find the node overlaps
+        t_ovlp = time.time()
+        node_overlaps = self._find_node_overlaps(subblocks, block_graph)
+        workflow_logger.info(
+            "BlockwiseOverlapSolver: extracting overlapping nodes from blocks in %f s" % (time.time() - t_ovlp,)
+        )
+
+        # stitch the blocks based on the node overlaps
+        t_stitch = time.time()
+        reduced_node_result = self._stitch_blocks(block_graph, node_overlaps, reduced_graph, sub_solver, reduced_graph)
+        workflow_logger.info(
+            "BlockwiseOverlapSolver: stitching blocks in %f s" % (time.time() - t_stitch,)
+        )
+
+        # get the energy of the solution
+        workflow_logger.info(
+            "BlockwiseOverlapSolver: Problem solved with energy %f"
+            % reduced_objective.evalNodeLabels(reduced_node_result)
+        )
+
+        # map back to the global nodes and write result
+        node_result = self.map_node_result_to_global(problems, reduced_node_result)
+        self.output().write(node_result)
+
+    # TODO test !!!
+    def _find_node_overlaps(self, subblocks, block_graph):
+
+        block_res_path = subblocks.path
+        # read the nodes from the sub solver to convert back to
+        # the actual problem node ids
+
+        # extract the overlaps for all the edges
+        def node_overlaps_for_block_pair(block_edge_id, block_u, block_v):
+
+            # get the uv-ids connecting the two blocks and the paths to the block segmentations
+            block_u_path = os.path.join(block_res_path, 'block%i_segmentation.h5' % block_u)
+            block_v_path = os.path.join(block_res_path, 'block%i_segmentation.h5' % block_v)
+
+            # find the actual overlapping regions in block u and v and load them
+            overlap_bb_u = 1
+            overlap_bb_v = 2
+
+            with h5py.File(block_u_path) as f_u, \
+                    h5py.File(block_v_path) as f_v:
+
+                seg_u = f_u['data'][overlap_bb_u]
+                seg_v = f_v['data'][overlap_bb_v]
+
+            n_nodes_u = np.max(seg_u) + 1
+            # find the overlaps between the two segmentations
+            overlap_counter = ngt.Overlap(n_nodes_u - 1, seg_u, seg_v)
+
+            return [overlap_counter.overlapArraysNormalized(node_u) for node_u in xrange(n_nodes_u)]
+
+        with futures.ThreadPoolExecutor(max_workers=PipelineParameter().n_threads) as tp:
+            tasks = [
+                tp.submit(node_overlaps_for_block_pair, block_edge_id, block_u, block_v)
+                for block_edge_id, block_u, block_v in enumerate(block_graph.uvIds())
+            ]
+            # TODO merge the node overlaps ?!
+            node_overlaps = [t.result() for t in tasks]
+
+        return node_overlaps
+
+    # TODO test !!!
+    # TODO this is the most naive stitching for now (always stitch max overlap).
+    # once this works, try better stitching heuristics
+    def _stitch_blocks(self, block_graph, node_overlaps, sub_solver, reduced_graph):
+
+        n_blocks = block_graph.nuberOfNodes
+        # read the sub_node results
+        sub_node_results = sub_solver.read('sub_results')
+        assert len(sub_node_results) == n_blocks
+
+        # apply offset to each sub-block result to have unique ids before stitching
+        offset = 0
+        block_offsets = []
+        for sub_res in sub_node_results:
+            block_offsets.append(offset)
+            sub_res += offset
+            offset += sub_res.max() + 1
+
+        # create ufd to merge with last offset value -> number of nodes that need to be merged
+        ufd = nifty.ufd.ufd(offset)
+
+        # now, we iterate over the block pairs and merge nodes according to their overlap
+        for block_pair_id, block_u, block_v in enumerate(block_graph.uvIds()):
+
+            # get the results from the overlap calculations
+            overlapping_nodes, overlaps = node_overlaps[block_pair_id]
+
+            offsets_u = block_offsets[block_u]
+            offsets_v = block_offsets[block_v]
+
+            # iterate over the nodes in overlap(u) and merge with nodes in overlap(v)
+            # according to the overlaps
+            # TODO for now we simply merge the maximum overlap node,
+            # but we want to do more clever things eventually
+            for node_u_id, nodes_v in enumerate(overlapping_nodes):
+                merge_node_v = nodes_v[0]  # TODO is this ordered in descending order by nifty ?
+                ufd.merge(node_u_id + offsets_u, node_v + offsets_v)
+
+        # get the merge result
+        node_result = ufd.elementLabeling()
+
+        # project back to the reduced problem nodes via iterating over the blocks and projection of
+        # the block node result
+        reduced_node_result = np.zeros(reduced_graph.numberOfNodes, dtyp='uint32')
+        sub_nodes = sub_solver.read('sub_nodes')
+
+        for block_id in xrange(n_blocks):
+
+            # first find the result for the nodes in this block
+            block_result = node_result[block_offsets[block_id], block_offsets[block_id + 1]] \
+                if block_id < n_blocks -1 else node_result[block_offsets[block_id]:offset]
+
+            # next, map the merge result to the sub-result nodes
+            sub_result = sub_node_results[block_id]
+            reduced_result = block_result[sub_result]
+
+            # finally, write to the block result
+            reduced_node_result[sub_nodes[block_id]] = reduced_result
+
+        return reduced_node_result
+
+    def output(self):
+        save_name = "BlockwiseOverlapSolver_L%i_%s_%s_%s.h5" % (
+            self.numberOfLevels,
+            '_'.join(map(str, PipelineParameter().multicutBlockShape)),
+            '_'.join(map(str, PipelineParameter().multicutBlockOverlap)),
+            "modified" if PipelineParameter().defectPipeline else "standard"
+        )
+        save_path = os.path.join(PipelineParameter().cache, save_name)
+        return HDF5DataTarget(save_path)
 
 
 # Produce the sub-block segmentations for debugging
@@ -125,16 +309,18 @@ class SubblockSegmentations(BlockwiseSolver):
             self.numberOfLevels - 1,
             True
         )
-        return {
+        return_tasks = {
             'sub_solver': sub_solver,
             'rag': StackedRegionAdjacencyGraph(self.pathToSeg)
         }
 
+        if PipelineParameter().defectPipeline:
+            return_tasks["defect_slices"] = DefectSliceDetection(self.pathToSeg)
+
+        return return_tasks
+
     @run_decorator
     def run(self):
-        # TODO refactor this properly
-        import nifty.graph.rag as nrag
-        import nifty.hdf5 as nh5
 
         # read stuff from the sub solver
         sub_solver = self.input()['sub_solver']
@@ -142,6 +328,13 @@ class SubblockSegmentations(BlockwiseSolver):
         block_begins = sub_solver.read('block_begins')
         block_ends = sub_solver.read('block_ends')
         sub_nodes = sub_solver.read('sub_nodes')
+
+        has_defects = False
+        if PipelineParameter().defectPipeline:
+            defect_slices_path = self.input()['defect_slices'].path
+            defect_slices = vigra.readHDF5(defect_slices_path, 'defect_slices')
+            if defect_slices.size:
+                has_defects = True
 
         # get the rag
         rag = self.input()['rag'].read()
@@ -157,15 +350,17 @@ class SubblockSegmentations(BlockwiseSolver):
                           for i in xrange(len(sub_nodes[block_id]))}
 
             print "Saving Block-Result for block %i / %i" % (block_id, len(sub_results))
+            block_begin = block_begins[block_id]
+            block_end = block_ends[block_id]
 
             # save the begin and end coordinates of this block for later use
             block_path = os.path.join(out_path, 'block%i_coordinates.h5' % block_id)
-            vigra.writeHDF5(block_begins[block_id], block_path, 'block_begin')
-            vigra.writeHDF5(block_ends[block_id], block_path, 'block_end')
+            vigra.writeHDF5(block_begin, block_path, 'block_begin')
+            vigra.writeHDF5(block_end, block_path, 'block_end')
 
             # determine the shape of this subblock
-            shape = block_ends[block_id] - block_begins[block_id]
-            chunk_shape = [1, min(512, shape[1]), min(512, shape[2])]
+            block_shape = block_end - block_begin
+            chunk_shape = [1, min(512, block_shape[1]), min(512, block_shape[2])]
 
             # save the segmentation for this subblock
             res_path = os.path.join(out_path, 'block%i_segmentation.h5' % block_id)
@@ -173,7 +368,7 @@ class SubblockSegmentations(BlockwiseSolver):
             out_array = nh5.Hdf5ArrayUInt32(
                 res_file,
                 'data',
-                shape.tolist(),
+                block_shape.tolist(),
                 chunk_shape,
                 compression=PipelineParameter().compressionLevel
             )
@@ -185,8 +380,31 @@ class SubblockSegmentations(BlockwiseSolver):
                 map(long, block_begins[block_id]),
                 map(long, block_ends[block_id])
             )
-            nh5.closeFile(res_file)
 
+            # if we have defected slices in this sub-block, replace them by an adjacent slice
+            if has_defects:
+
+                # project the defected slicces in global coordinates to the subblock coordinates
+                this_defect_slices = defect_slices - block_begin
+                this_defect_slices = this_defect_slices[
+                    np.logical_and(this_defect_slices > 0, this_defect_slices < block_shape[0])
+                ]
+
+                # only replace slices if there are any in the subblock
+                if this_defect_slices.size:
+                    replace_slice = get_replace_slices(this_defect_slices, block_shape)
+                    for z in this_defect_slices:
+                        replace_z = replace_slice[z]
+                        workflow_logger.debug(
+                            "SubblockSegmentationWorkflow: block %i replacing defected slice %i by %i"
+                            % (block_id, z, replace_z)
+                        )
+                        out_array.writeSubarray(
+                            [z, 0L, 0L],
+                            out_array.readSubarray([replace_z, 0L, 0L], [replace_z + 1, block_shape[1], block_shape[2]])
+                        )
+
+            nh5.closeFile(res_file)
 
     def output(self):
         # we add the number of levels, the initial block shape and the block overlap
@@ -272,6 +490,7 @@ class BlockwiseMulticutSolver(BlockwiseSolver):
         return HDF5DataTarget(save_path)
 
 
+# TODO test !!!
 # TODO introduce boundary bias
 # stitch blockwise sub-results according to costs of the edges connecting the sub-blocks
 class BlockwiseStitchingSolver(BlockwiseSolver):
@@ -335,6 +554,19 @@ class BlockwiseStitchingSolver(BlockwiseSolver):
         )
         save_path = os.path.join(PipelineParameter().cache, save_name)
         return HDF5DataTarget(save_path)
+
+
+# stitch blockwise sub-results by running Multicut only on the edges between blocks
+# -> no idea if this will actually work
+# -> two options:
+# --> run Multicut on all between block edges
+# --> run Multicuts for all pairs of adjacent blocks and check edges that are part of multiple
+#     block pairs for consistency -> if inconsistent, don't merge
+# -> maybe this needs a different problem formulation than Multicut ?!
+
+# TODO implement
+def BlockwiseMulticutStitchingSolver(BlockwiseSolver):
+    pass
 
 
 class ReducedProblem(luigi.Task):
