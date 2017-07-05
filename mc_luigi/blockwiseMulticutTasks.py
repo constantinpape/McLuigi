@@ -100,7 +100,7 @@ class BlockwiseOverlapSolver(BlockwiseSolver):
     def requires(self):
 
         # get the problem hierarchy from the super class
-        problems = super(SubblockSegmentations, self).requires()
+        problems = super(BlockwiseOverlapSolver, self).requires()
 
         # get the overlap
         overlap = PipelineParameter().multicutBlockOverlap
@@ -138,7 +138,7 @@ class BlockwiseOverlapSolver(BlockwiseSolver):
         inp = self.input()
         subblocks = inp['subblocks']
         problems = inp['problems']
-        block_graph = nifty.UndirectedGraph()
+        block_graph = nifty.graph.UndirectedGraph()
         block_graph.deserialize(inp['block_graph'].read())
         sub_solver = inp['sub_solver']
 
@@ -182,13 +182,15 @@ class BlockwiseOverlapSolver(BlockwiseSolver):
         # the actual problem node ids
 
         # extract the overlaps for all the edges
-        def node_overlaps_for_block_pair(block_edge_id, block_u, block_v):
+        def node_overlaps_for_block_pair(block_edge_id, block_uv):
 
+            block_u, block_v = block_uv
             # get the uv-ids connecting the two blocks and the paths to the block segmentations
             block_u_path = os.path.join(block_res_path, 'block%i_segmentation.h5' % block_u)
             block_v_path = os.path.join(block_res_path, 'block%i_segmentation.h5' % block_v)
 
             # find the actual overlapping regions in block u and v and load them
+            # TODO TODO TODO
             overlap_bb_u = 1
             overlap_bb_v = 2
 
@@ -204,10 +206,10 @@ class BlockwiseOverlapSolver(BlockwiseSolver):
 
             return [overlap_counter.overlapArraysNormalized(node_u) for node_u in xrange(n_nodes_u)]
 
-        with futures.ThreadPoolExecutor(max_workers=PipelineParameter().n_threads) as tp:
+        with futures.ThreadPoolExecutor(max_workers=PipelineParameter().nThreads) as tp:
             tasks = [
-                tp.submit(node_overlaps_for_block_pair, block_edge_id, block_u, block_v)
-                for block_edge_id, block_u, block_v in enumerate(block_graph.uvIds())
+                tp.submit(node_overlaps_for_block_pair, block_edge_id, block_uv)
+                for block_edge_id, block_uv in enumerate(block_graph.uvIds())
             ]
             # TODO merge the node overlaps ?!
             node_overlaps = [t.result() for t in tasks]
@@ -385,7 +387,7 @@ class SubblockSegmentations(BlockwiseSolver):
             if has_defects:
 
                 # project the defected slicces in global coordinates to the subblock coordinates
-                this_defect_slices = defect_slices - block_begin
+                this_defect_slices = defect_slices - block_begin[0]
                 this_defect_slices = this_defect_slices[
                     np.logical_and(this_defect_slices > 0, this_defect_slices < block_shape[0])
                 ]
@@ -490,15 +492,16 @@ class BlockwiseMulticutSolver(BlockwiseSolver):
         return HDF5DataTarget(save_path)
 
 
-# TODO test !!!
-# TODO introduce boundary bias
+# TODO debug !!!
 # stitch blockwise sub-results according to costs of the edges connecting the sub-blocks
 class BlockwiseStitchingSolver(BlockwiseSolver):
+
+    boundaryBias = luigi.Parameter(default=.7)
 
     # we have EdgesBetweenBlocks as additional requirements to the
     # super class (BlockwiseSolver)
     def requires(self):
-        required_problems = super(BlockwiseStitchingSolver, self).requires()
+        problems = super(BlockwiseStitchingSolver, self).requires()
         overlap = PipelineParameter().multicutBlockOverlap
 
         # get the block shape of the current level
@@ -507,10 +510,10 @@ class BlockwiseStitchingSolver(BlockwiseSolver):
         block_shape = list(map(lambda x: x * block_factor, initial_shape))
 
         return {
-            'problems': required_problems,
+            'problems': problems,
             'edges_between_blocks': EdgesBetweenBlocks(
                 self.pathToSeg,
-                required_problems[-1],
+                problems[-1],
                 block_shape,
                 overlap,
                 self.numberOfLevels
@@ -527,6 +530,7 @@ class BlockwiseStitchingSolver(BlockwiseSolver):
         reduced_graph = nifty.graph.UndirectedGraph()
         reduced_graph.deserialize(reduced_problem.read("graph"))
         reduced_costs = reduced_problem.read("costs")
+        reduced_objective = nifty.graph.optimization.multicut.multicutObjective(reduced_graph, reduced_costs)
         uv_ids = reduced_graph.uvIds()
 
         # load the between block edges
@@ -534,13 +538,31 @@ class BlockwiseStitchingSolver(BlockwiseSolver):
         edges_between_blocks = np.unique(
             np.concatenate([bw_edges for bw_edges in edges_between_blocks])
         )
+        assert max(edges_between_blocks) < len(uv_ids)
 
-        # merge all edges along the block boundaries that are attractive TODO (modulu bias?!)
-        merge_ids = edges_between_blocks[reduced_costs[edges_between_blocks] < 0]
+        workflow_logger.info(
+            "BlockwiseStitchingSolver: Looking for merge edges in %i between block edges of %i total edges"
+            % (len(edges_between_blocks), len(uv_ids))
+        )
+
+        # merge all edges along the block boundaries that are attractive
+        energyBias = 0 if self.boundaryBias == .5 else \
+            np.log((1. - self.boundaryBias) / self.boundaryBias)
+        merge_ids = edges_between_blocks[reduced_costs[edges_between_blocks] < energyBias]
+
+        workflow_logger.info(
+            "BlockwiseStitchingSolver: Merging %i edges with value smaller than bias %f of %i between block edges"
+            % (len(merge_ids), energyBias, len(edges_between_blocks))
+        )
 
         ufd = nifty.ufd.ufd(reduced_graph.numberOfNodes)
         ufd.merge(uv_ids[merge_ids])
         reduced_node_result = ufd.elementLabeling()
+
+        workflow_logger.info(
+            "BlockwiseStitchingSolver: Problem solved with energy %f"
+            % reduced_objective.evalNodeLabels(reduced_node_result)
+        )
 
         node_result = self.map_node_result_to_global(problems, reduced_node_result)
         self.output().write(node_result)

@@ -1,5 +1,5 @@
 from workflowTasks import MulticutSegmentation, BlockwiseMulticutSegmentation, BlockwiseStitchingSegmentation
-from workflowTasks import SubblockSegmentationWorkflow
+from workflowTasks import SubblockSegmentationWorkflow, BlockwiseOverlapSegmentation
 
 from learningTasks import LearnClassifierFromGt, EdgeGroundtruth, EdgeProbabilities
 from pipelineParameter import PipelineParameter

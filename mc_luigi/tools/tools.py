@@ -81,4 +81,4 @@ def get_replace_slices(defected_slices, shape):
                 "Postprocessing is not implemented for more than 4 consecutively defected slices. Clean your data!"
             )
 
-        return replace_slice
+    return replace_slice

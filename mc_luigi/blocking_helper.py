@@ -168,15 +168,12 @@ class EdgesBetweenBlocks(luigi.Task):
     @run_decorator
     def run(self):
 
-        from itertools import combinations
-
         # get the inputs:
         inp = self.input()
 
         # graph of the current problem
         graph = nifty.graph.UndirectedGraph()
         graph.deserialize(inp['problem'].read('graph'))
-        uv_ids = graph.uvIds()
 
         # nodes to blocks and block_graph
         block_graph = nifty.graph.UndirectedGraph()

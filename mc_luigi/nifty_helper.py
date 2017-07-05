@@ -25,10 +25,10 @@ def available_factorys():
 
 
 def run_nifty_solver(
-        obj,
-        factory,
-        verbose=False,
-        time_limit=None
+    obj,
+    factory,
+    verbose=False,
+    time_limit=None
 ):
 
     solver = factory.create(obj)
@@ -52,8 +52,8 @@ def run_nifty_solver(
 
 
 def nifty_greedy_factory(
-        obj,
-        use_andres=False
+    obj,
+    use_andres=False
 ):
     if use_andres:
         return obj.greedyAdditiveFactory()
@@ -62,18 +62,18 @@ def nifty_greedy_factory(
 
 
 def nifty_fusion_move_factory(
-        obj,
-        backend_factory,
-        n_threads=20,
-        seed_fraction=0.001,
-        greedy_chain=True,
-        kl_chain=True,
-        number_of_iterations=2000,
-        n_stop=20,
-        pgen_type='ws',
-        parallel_per_thread=2,
-        n_fuse=2,
-        sigma=10
+    obj,
+    backend_factory,
+    n_threads=20,
+    seed_fraction=0.001,
+    greedy_chain=True,
+    kl_chain=True,
+    number_of_iterations=2000,
+    n_stop=20,
+    pgen_type='ws',
+    parallel_per_thread=2,
+    n_fuse=2,
+    sigma=10
 ):
 
     assert pgen_type in ('ws', 'greedy')
@@ -116,18 +116,18 @@ def nifty_ilp_factory(obj):
 
 # TODO
 def nifty_decomposer_factory(
-        obj,
-        backend_factory
+    obj,
+    backend_factory
 ):
     pass
 
 
 # TODO params
 def nifty_cgc_factory(
-        obj,
-        greedy_chain=True,
-        kl_chain=False,
-        cut_phase=False
+    obj,
+    greedy_chain=True,
+    kl_chain=False,
+    cut_phase=False
 ):
     factory = obj.cgcFactory(doCutPhase=cut_phase)
     if kl_chain and greedy_chain:
@@ -143,29 +143,35 @@ def nifty_cgc_factory(
         return factory
 
 
+# TODO use nifty factory once the new nifty version is properly fixed
 def nifty_kl_factory(
-        obj,
-        greedy_chain=True
+    obj,
+    greedy_chain=True,
+    use_andres=True
 ):
-    return obj.multicutAndresKernighanLinFactory(greedyWarmstart=greedy_chain)
+    if use_andres:
+        factory = obj.multicutAndresKernighanLinFactory(greedyWarmstart=greedy_chain)
+    else:
+        factory = obj.kernighanLinFactory(warmStartGreedy=greedy_chain)
+    return factory
 
 
 # TODO more mp settings
 def nifty_mp_factory(
-        obj,
-        backend_factory=None,  # default is none which uses KL
-        number_of_iterations=1000,
-        timeout=0,
-        n_threads=1,
-        tighten=True,
-        standardReparametrization='anisotropic',
-        tightenReparametrization='damped_uniform',
-        roundingReparametrization='damped_uniform',
-        tightenIteration=2,
-        tightenInterval=49,
-        tightenSlope=0.1,
-        tightenConstraintsPercentage=0.05,
-        primalComputationInterval=13,
+    obj,
+    backend_factory=None,  # default is none which uses KL
+    number_of_iterations=1000,
+    timeout=0,
+    n_threads=1,
+    tighten=True,
+    standardReparametrization='anisotropic',
+    tightenReparametrization='damped_uniform',
+    roundingReparametrization='damped_uniform',
+    tightenIteration=2,
+    tightenInterval=49,
+    tightenSlope=0.1,
+    tightenConstraintsPercentage=0.05,
+    primalComputationInterval=13,
 ):
 
     factory = obj.multicutMpFactory(
