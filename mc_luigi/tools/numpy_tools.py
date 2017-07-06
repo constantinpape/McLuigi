@@ -102,3 +102,9 @@ def cartesian(arrays, out=None):
         for j in xrange(1, arrays[0].size):
             out[j*m:(j+1)*m,1:] = out[0:m,1:]
     return out
+
+
+if __name__ == '__main__':
+    x = np.array([0,1,2,3])
+    y = np.array([5,6])
+    print cartesian([x, y])

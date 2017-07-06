@@ -4,6 +4,7 @@ from customTargets import HDF5DataTarget
 from dataTasks import ExternalSegmentation
 from pipelineParameter import PipelineParameter
 from defectDetectionTasks import DefectSliceDetection
+from tools import find_matching_row_indices
 
 import numpy as np
 import os
@@ -105,7 +106,6 @@ class BlockGridGraph(luigi.Task):
 
         # init the graph
         block_graph = nifty.graph.UndirectedGraph(n_blocks)
-        print overlap
 
         # construct the graph by iterating over the blocks and for each block finding blocks with overlap
         for block_id in xrange(n_blocks):
@@ -140,15 +140,8 @@ class BlockGridGraph(luigi.Task):
         return HDF5DataTarget(save_path)
 
 
-# NOTE: This is not done in the most efficient manner:
-# we extract the global (== original segmentation) nodes for the current level / problem
-# again and also construct the block graph for the current level again (although the latter is not a performance issue)
-# instead one could use the nodes extracted via 'NodesToBlocks' from the initial blocking (level 1) and then map to
-# the current blocking.
-# However, this is more complicated in terms of mapping between different blockings, that's why it is not implemented this way
-# for now. If this is ever put into production for larger volumes, this should be changed.
-
 # computes the edges between blocks for a given graph / problem
+# based on the outer edges in this problem
 class EdgesBetweenBlocks(luigi.Task):
 
     pathToSeg    = luigi.Parameter()
@@ -174,6 +167,11 @@ class EdgesBetweenBlocks(luigi.Task):
         # graph of the current problem
         graph = nifty.graph.UndirectedGraph()
         graph.deserialize(inp['problem'].read('graph'))
+        uv_ids = graph.uvIds()
+
+        # outer edges
+        outer_edges = inp['problem'].read('outer_edges')
+        outer_uvs = uv_ids[outer_edges]
 
         # nodes to blocks and block_graph
         block_graph = nifty.graph.UndirectedGraph()
@@ -188,7 +186,7 @@ class EdgesBetweenBlocks(luigi.Task):
         ]
 
         # TODO this seems to be quite expensive and could probably be parallelized
-        # iterate over the adjacent blocks and save all graph edges that connect adjacent blocks
+        # iterate over the adjacent blocks and save the outer edge-ids that connect the blocks
         edges_between_blocks = []
         for block_u, block_v in block_graph.uvIds():
 
@@ -199,9 +197,9 @@ class EdgesBetweenBlocks(luigi.Task):
             # by first constructing all potential edges (= all combinations of nodes in block u, v)
             # then searching these edges in the graph
             potential_edges = cartesian([nodes_u, nodes_v])
-            edge_ids = graph.findEdges(potential_edges)
-            edge_ids = edge_ids[edge_ids != -1]  # exclude all invalid edge ids
-            edges_between_blocks.append(edge_ids)
+            matches = find_matching_row_indices(outer_uvs, potential_edges)[:, 0]
+
+            edges_between_blocks.append(outer_edges[matches])
 
         out = self.output()
 

@@ -180,7 +180,7 @@ class BlockwiseStitchingSegmentation(SegmentationWorkflow):
     def output(self):
         save_path = os.path.join(
             PipelineParameter().cache,
-            "BlockwiseOverlapSegmentation_L%i_%s_%s_%s.h5" % (
+            "BlockwiseStitchingSegmentation_L%i_%s_%s_%s.h5" % (
                 self.numberOfLevels,
                 '_'.join(map(str, PipelineParameter().multicutBlockShape)),
                 '_'.join(map(str, PipelineParameter().multicutBlockOverlap)),
@@ -211,7 +211,7 @@ class BlockwiseOverlapSegmentation(SegmentationWorkflow):
     def output(self):
         save_path = os.path.join(
             PipelineParameter().cache,
-            "BlockwiseStitchingSegmentation_L%i_%s_%s_%s.h5" % (
+            "BlockwiseOverlapSegmentation_L%i_%s_%s_%s.h5" % (
                 self.numberOfLevels,
                 '_'.join(map(str, PipelineParameter().multicutBlockShape)),
                 '_'.join(map(str, PipelineParameter().multicutBlockOverlap)),
