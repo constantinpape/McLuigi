@@ -483,7 +483,7 @@ class BlockwiseMulticutSolver(BlockwiseSolver):
         )
 
         # TODO change to debug
-        if workflow_logger.getEffectiveLevel() == 'info':
+        if workflow_logger.isEnabledFor(logging.INFO):
             assert len(engergy) == len(t_inf)
             workflow_logger.info(
                 "BlockwiseMulticutSolver: logging energy during inference:"
