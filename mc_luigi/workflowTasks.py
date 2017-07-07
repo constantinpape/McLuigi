@@ -6,7 +6,8 @@ import luigi
 from multicutProblemTasks import MulticutProblem
 
 from multicutSolverTasks import McSolverFusionMoves  # ,McSolverExact
-from blockwiseMulticutTasks import BlockwiseMulticutSolver, BlockwiseStitchingSolver, SubblockSegmentations, BlockwiseOverlapSolver
+from blockwiseMulticutTasks import BlockwiseMulticutSolver, BlockwiseStitchingSolver
+from blockwiseMulticutTasks import SubblockSegmentations, BlockwiseOverlapSolver
 from dataTasks import StackedRegionAdjacencyGraph, ExternalSegmentation
 from customTargets import HDF5VolumeTarget
 from defectDetectionTasks import DefectSliceDetection
@@ -59,6 +60,12 @@ class SegmentationWorkflow(luigi.Task):
         shape = seg.shape()
         out = self.output()
         out.open(shape)
+
+        ## TODO: this is only temporary for the sampleD experiments
+        ## where we don't need the segmentation (and writing it takes quite long....)
+        #seg.close()
+        #out.close()
+        #quit()
 
         workflow_logger.info("SegmentationWorkflow: Projecting node result to segmentation.")
         self._project_result_to_segmentation(rag, mc_nodes, out)

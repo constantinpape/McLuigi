@@ -484,7 +484,7 @@ class BlockwiseMulticutSolver(BlockwiseSolver):
 
         # TODO change to debug
         if workflow_logger.isEnabledFor(logging.INFO):
-            assert len(engergy) == len(t_inf)
+            assert len(energy) == len(t_inf)
             workflow_logger.info(
                 "BlockwiseMulticutSolver: logging energy during inference:"
             )
@@ -492,8 +492,6 @@ class BlockwiseMulticutSolver(BlockwiseSolver):
                 workflow_logger.info(
                     "BlockwiseMulticutSolver: t: %f s energy: %f" % (t_inf[ii], energy[ii])
                 )
-
-
 
         node_result = self.map_node_result_to_global(problems, reduced_node_result)
         self.output().write(node_result)
