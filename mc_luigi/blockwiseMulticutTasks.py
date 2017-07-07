@@ -252,7 +252,7 @@ class BlockwiseOverlapSolver(BlockwiseSolver):
             # but we want to do more clever things eventually
             for node_u_id, nodes_v in enumerate(overlapping_nodes):
                 merge_node_v = nodes_v[0]  # TODO is this ordered in descending order by nifty ?
-                ufd.merge(node_u_id + offsets_u, node_v + offsets_v)
+                ufd.merge(node_u_id + offsets_u, merge_node_v + offsets_v)
 
         # get the merge result
         node_result = ufd.elementLabeling()
@@ -266,7 +266,7 @@ class BlockwiseOverlapSolver(BlockwiseSolver):
 
             # first find the result for the nodes in this block
             block_result = node_result[block_offsets[block_id], block_offsets[block_id + 1]] \
-                if block_id < n_blocks -1 else node_result[block_offsets[block_id]:offset]
+                if block_id < n_blocks - 1 else node_result[block_offsets[block_id]:offset]
 
             # next, map the merge result to the sub-result nodes
             sub_result = sub_node_results[block_id]
@@ -596,15 +596,17 @@ def BlockwiseMulticutStitchingSolver(BlockwiseSolver):
 
         t_extract = time.time()
         sub_problems = self._extract_subproblems(reduced_graph, reduced_costs)
-        workflow_logger.info("BlockwiseMulticutStitchingSolver: Problem extraction took %f s" % (time.time() - t_extract))
+        workflow_logger.info(
+            "BlockwiseMulticutStitchingSolver: Problem extraction took %f s" % (time.time() - t_extract)
+        )
 
         t_solve = time.time()
         edge_results = self._extract_subproblems(sub_problems, reduced_costs, reduced_graph.numberOfEdges)
         workflow_logger.info("BlockwiseMulticutStitchingSolver: Problem solving took %f s" % (time.time() - t_solve))
 
         t_merge = time.time()
-        reduced_node_result = self._merge_blocks(reduced_graph, sub_problems, edge_result)
-        workflow_logger.info("BlockwiseMulticutStitchingSolver: Problem solving took %f s" % (time.time() - t_solve))
+        reduced_node_result = self._merge_blocks(reduced_graph, sub_problems, edge_results)
+        workflow_logger.info("BlockwiseMulticutStitchingSolver: Problem solving took %f s" % (time.time() - t_merge))
 
         workflow_logger.info(
             "BlockwiseMulticutStitchingSolver: Problem solved with energy %f"
@@ -655,7 +657,7 @@ def BlockwiseMulticutStitchingSolver(BlockwiseSolver):
         )
 
         def mc(graph, costs):
-            obj = nifty.graph.optimization.multicut.multicutObjective(g, costs)
+            obj = nifty.graph.optimization.multicut.multicutObjective(graph, costs)
             factory = string_to_factory(obj, sub_solver_type, solver_params)
             solver = factory.create(obj)
             return solver.optimize()
@@ -792,7 +794,7 @@ class ReducedProblem(luigi.Task):
 
         # map the old outer edges to new outer edges
         outer_edge_ids = self.input()["sub_solution"].read("outer_edges")
-	new_outer_edges = edge_mapping.getNewEdgeIds(outer_edge_ids)
+        new_outer_edges = edge_mapping.getNewEdgeIds(outer_edge_ids)
 
         assert len(new_costs) == len(uv_ids_new)
         reduced_graph = nifty.graph.UndirectedGraph(number_of_new_nodes)
@@ -802,7 +804,7 @@ class ReducedProblem(luigi.Task):
         out.write(reduced_graph.serialize(), "graph")
         out.write(reduced_graph.numberOfNodes, 'number_of_nodes')
         out.write(new_costs, "costs")
-	out.write(new_outer_edges, 'outer_edges')
+        out.write(new_outer_edges, 'outer_edges')
 
         return uv_ids_new
 
@@ -860,7 +862,7 @@ class BlockwiseSubSolver(luigi.Task):
 
     level = luigi.Parameter()
     # needs to be true if we want to use the stitching - by overlap solver
-    serializeSubResults = luigi.Parameter(default=False)
+    serializeSubResults = luigi.Parameter(default=True)
 
     def requires(self):
         initialShape = PipelineParameter().multicutBlockShape
