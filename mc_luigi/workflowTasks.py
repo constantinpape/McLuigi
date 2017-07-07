@@ -6,7 +6,7 @@ import luigi
 from multicutProblemTasks import MulticutProblem
 
 from multicutSolverTasks import McSolverFusionMoves  # ,McSolverExact
-from blockwiseMulticutTasks import BlockwiseMulticutSolver, BlockwiseStitchingSolver
+from blockwiseMulticutTasks import BlockwiseMulticutSolver, BlockwiseStitchingSolver, BlockwiseMultuctStitchingSolver
 from blockwiseMulticutTasks import SubblockSegmentations, BlockwiseOverlapSolver
 from dataTasks import StackedRegionAdjacencyGraph, ExternalSegmentation
 from customTargets import HDF5VolumeTarget
@@ -188,6 +188,37 @@ class BlockwiseStitchingSegmentation(SegmentationWorkflow):
         save_path = os.path.join(
             PipelineParameter().cache,
             "BlockwiseStitchingSegmentation_L%i_%s_%s_%s.h5" % (
+                self.numberOfLevels,
+                '_'.join(map(str, PipelineParameter().multicutBlockShape)),
+                '_'.join(map(str, PipelineParameter().multicutBlockOverlap)),
+                "modified" if PipelineParameter().defectPipeline else "standard",
+            )
+        )
+        return HDF5VolumeTarget(save_path, self.dtype, compression=PipelineParameter().compressionLevel)
+
+
+class BlockwiseMulticutStitchingSegmentation(SegmentationWorkflow):
+
+    numberOfLevels = luigi.IntParameter(default=1)
+
+    def requires(self):
+        return_tasks = {
+            "mc_nodes": BlockwiseMulticutStitchingSolver(
+                self.pathToSeg,
+                MulticutProblem(self.pathToSeg, self.pathToClassifier),
+                self.numberOfLevels
+            ),
+            "rag": StackedRegionAdjacencyGraph(self.pathToSeg),
+            "seg": ExternalSegmentation(self.pathToSeg)
+        }
+        if PipelineParameter().defectPipeline:
+            return_tasks["defect_slices"] = DefectSliceDetection(self.pathToSeg)
+        return return_tasks
+
+    def output(self):
+        save_path = os.path.join(
+            PipelineParameter().cache,
+            "BlockwiseMulticutStitchingSegmentation_L%i_%s_%s_%s.h5" % (
                 self.numberOfLevels,
                 '_'.join(map(str, PipelineParameter().multicutBlockShape)),
                 '_'.join(map(str, PipelineParameter().multicutBlockOverlap)),

@@ -174,8 +174,41 @@ class BlockwiseOverlapSolver(BlockwiseSolver):
         node_result = self.map_node_result_to_global(problems, reduced_node_result)
         self.output().write(node_result)
 
-    # TODO test !!!
     def _find_node_overlaps(self, subblocks, block_graph):
+
+        # get the overlap as bounding box in local block coordinates
+	def block_overlaps(begin_a, begin_b, end_a, end_b):
+
+            # check whether the query begin is in [begin, end]
+            def is_overlapping(query, begin, end):
+                return np.greater_equal(query, begin).all() and np.less(query, end).all()
+
+            # determine block with larger begin
+            a_in_b = is_overlapping(begin_a, begin_b, end_b)
+            b_in_a = is_overlapping(begin_b, begin_a, end_a)
+
+            # return the global overlap accordingly
+            if a_in_b:
+                global_begin, global_end = begin_a, end_b
+            elif b_in_a:
+                global_begin, global_end = begin_b, end_a
+            else:
+                raise RuntimeError("Your circuit's dead, there's something wrong. Can you hear me Major Tom?")
+
+            # construct the local bounding box
+            overlap_a = np.s_[
+                global_begin[0] - begin_a[0], global_end - begin_a[0],
+                global_begin[1] - begin_a[1], global_end - begin_a[1],
+                global_begin[2] - begin_a[2], global_end - begin_a[2]
+            ]
+
+            overlap_b = np.s_[
+                global_begin[0] - begin_b[0], global_end - begin_b[0],
+                global_begin[1] - begin_b[1], global_end - begin_b[1],
+                global_begin[2] - begin_b[2], global_end - begin_b[2]
+            ]
+
+            return overlap_a, overlap_b
 
         block_res_path = subblocks.path
         # read the nodes from the sub solver to convert back to
@@ -189,10 +222,16 @@ class BlockwiseOverlapSolver(BlockwiseSolver):
             block_u_path = os.path.join(block_res_path, 'block%i_segmentation.h5' % block_u)
             block_v_path = os.path.join(block_res_path, 'block%i_segmentation.h5' % block_v)
 
+            coord_u_path = os.path.join(block_res_path, 'block%i_coordinates.h5' % block_u)
+            block_begin_u = vigra.readHDF5(coord_u_path, 'block_begin')
+            block_end_u = vigra.readHDF5(coord_u_path, 'block_end')
+
+            coord_v_path = os.path.join(block_res_path, 'block%i_coordinates.h5' % block_v)
+            block_begin_v = vigra.readHDF5(coord_v_path, 'block_begin')
+            block_end_v = vigra.readHDF5(coord_v_path, 'block_end')
+
             # find the actual overlapping regions in block u and v and load them
-            # TODO TODO TODO
-            overlap_bb_u = 1
-            overlap_bb_v = 2
+            overlap_bb_u, overlap_bb_v = block_overlaps(block_begin_u, block_begin_v, block_end_u, block_end_v)
 
             with h5py.File(block_u_path) as f_u, \
                     h5py.File(block_v_path) as f_v:
@@ -573,7 +612,7 @@ class BlockwiseStitchingSolver(BlockwiseSolver):
 #     block pairs for consistency -> if inconsistent, don't merge
 # -> maybe this needs a different problem formulation than Multicut ?!
 
-# TODO implement
+# TODO test
 def BlockwiseMulticutStitchingSolver(BlockwiseSolver):
 
     # we have EdgesBetweenBlocks as additional requirements to the
@@ -787,6 +826,7 @@ class ReducedProblem(luigi.Task):
         workflow_logger.info("ReucedProblem: Nodes: From %i to %i" % (g.numberOfNodes, number_of_new_nodes))
         workflow_logger.info("ReucedProblem: Edges: From %i to %i" % (g.numberOfEdges, len(uv_ids_new)))
 
+    # TODO parallelize in nifty if possible
     def find_new_edges_and_costs(
         self,
         uv_ids,
