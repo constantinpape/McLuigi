@@ -461,22 +461,39 @@ class BlockwiseMulticutSolver(BlockwiseSolver):
             )
         )
 
+        # we set visit-nth to 1 for the fusion move solvers and to 100 for kernighan lin
+        # NOTE: we will not use ilp here, so it does not matter that it is handled incorrectly
+        visit_nth = 1 if solver_type.startswith('fm') else 100
+
         factory = string_to_factory(reduced_objective, solver_type, inf_params)
         reduced_node_result, energy, t_inf = run_nifty_solver(
             reduced_objective,
             factory,
-            verbose=True,
-            time_limit=PipelineParameter().multicutGlobalTimeLimit
+            verbose=1,
+            time_limit=PipelineParameter().multicutGlobalTimeLimit,
+            visit_nth=visit_nth
         )
         workflow_logger.info(
-            "BlockwiseMulticutSolver: Inference of reduced problem for the whole volume took: %f s" % t_inf
+            "BlockwiseMulticutSolver: Inference of reduced problem for the whole volume took: %f s" % t_inf[-1]
         )
 
-        # NOTE: we don't need to project back to global problem to calculate the correct energy !
         workflow_logger.info(
             "BlockwiseMulticutSolver: Problem solved with energy %f"
-            % reduced_objective.evalNodeLabels(reduced_node_result)
+            % energy[-1]
         )
+
+        # TODO change to debug
+        if workflow_logger.getEffectiveLevel() == 'info':
+            assert len(engergy) == len(t_inf)
+            workflow_logger.info(
+                "BlockwiseMulticutSolver: logging energy during inference:"
+            )
+            for ii in xrange(len(energy)):
+                workflow_logger.info(
+                    "BlockwiseMulticutSolver: t: %f s energy: %f" % (t_inf[ii], energy[ii])
+                )
+
+
 
         node_result = self.map_node_result_to_global(problems, reduced_node_result)
         self.output().write(node_result)

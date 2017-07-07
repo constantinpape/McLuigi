@@ -28,10 +28,6 @@ except ImportError:
 workflow_logger = logging.getLogger(__name__)
 config_logger(workflow_logger)
 
-#
-# TODO use nifty-helper
-#
-
 
 class McSolverFusionMoves(luigi.Task):
 
@@ -79,7 +75,9 @@ class McSolverFusionMoves(luigi.Task):
         )
 
         factory = string_to_factory(obj, solver_type, solver_params)
-        ret, mc_energy, t_inf = run_nifty_solver(obj, factory, verbose=True)
+        ret, mc_energy, t_inf = run_nifty_solver(obj, factory, verbose=0)
+        mc_energy = mc_energy[-1]
+        t_inf = t_inf[-1]
 
         workflow_logger.info("McSolverFusionMoves: inference with fusion move solver in %i s" % t_inf)
         workflow_logger.info("McSolverFusionMoves: energy of the solution %f" % mc_energy)
@@ -116,7 +114,9 @@ class McSolverExact(luigi.Task):
         obj = nifty.graph.multicut.multicutObjective(g, edgeCosts)
 
         factory = nifty_ilp_factory(obj)
-        ret, mc_energy, t_inf = run_nifty_solver(obj, factory, verbose=True)
+        ret, mc_energy, t_inf = run_nifty_solver(obj, factory, verbose=1)
+        mc_energy = mc_energy[-1]
+        t_inf = t_inf[-1]
 
         workflow_logger.info("McSolverExact: inference with exact solver in %i s" % t_inf)
         workflow_logger.info("McSolverExact: energy of the solution %f" % mc_energy)
