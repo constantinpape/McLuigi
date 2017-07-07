@@ -69,7 +69,9 @@ class NodesToBlocks(luigi.Task):
     def output(self):
         block_string = '_'.join(map(str, self.blockShape))
         overlap_string = '_'.join(map(str, self.blockOverlap))
-        save_name = "NodesToBlocks_%s_%s_%s.h5" % (block_string, overlap_string, "modified" if PipelineParameter().defectPipeline else "standard")
+        save_name = "NodesToBlocks_%s_%s_%s.h5" % (
+            block_string, overlap_string, "modified" if PipelineParameter().defectPipeline else "standard"
+        )
         save_path = os.path.join(PipelineParameter().cache, save_name)
         return HDF5DataTarget(save_path)
 
@@ -131,7 +133,6 @@ class BlockGridGraph(luigi.Task):
         out = self.output()
         out.write(block_graph.serialize())
 
-
     def output(self):
         block_string = '_'.join(map(str, self.blockShape))
         overlap_string = '_'.join(map(str, self.blockOverlap))
@@ -151,6 +152,9 @@ class EdgesBetweenBlocks(luigi.Task):
     blockOverlap = luigi.ListParameter()
     level        = luigi.Parameter()
 
+    # TODO try both combinations
+    outerEdgesOnly = luigi.Parameter(default=True)
+
     def requires(self):
         return {
             'block_graph': BlockGridGraph(self.pathToSeg, self.blockShape, self.blockOverlap),
@@ -167,11 +171,12 @@ class EdgesBetweenBlocks(luigi.Task):
         # graph of the current problem
         graph = nifty.graph.UndirectedGraph()
         graph.deserialize(inp['problem'].read('graph'))
-        uv_ids = graph.uvIds()
 
         # outer edges
-        outer_edges = inp['problem'].read('outer_edges')
-        outer_uvs = uv_ids[outer_edges]
+        if self.outerEdgesOnly:
+            uv_ids = graph.uvIds()
+            outer_edges = inp['problem'].read('outer_edges')
+            outer_uvs = uv_ids[outer_edges]
 
         # nodes to blocks and block_graph
         block_graph = nifty.graph.UndirectedGraph()
@@ -197,9 +202,14 @@ class EdgesBetweenBlocks(luigi.Task):
             # by first constructing all potential edges (= all combinations of nodes in block u, v)
             # then searching these edges in the graph
             potential_edges = cartesian([nodes_u, nodes_v])
-            matches = find_matching_row_indices(outer_uvs, potential_edges)[:, 0]
+            if self.outerEdgesOnly:
+                matches = find_matching_row_indices(outer_uvs, potential_edges)[:, 0]
+                bb_edges = outer_edges[matches]
+            else:
+                matches = graph.findEdges(potential_edges)
+                bb_edges = matches[matches != -1]
 
-            edges_between_blocks.append(outer_edges[matches])
+            edges_between_blocks.append(bb_edges)
 
         out = self.output()
 
