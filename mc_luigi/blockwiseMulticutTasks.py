@@ -76,10 +76,10 @@ class BlockwiseSolver(luigi.Task):
         raise NotImplementedError("BlockwiseSolver is abstract and does not implement a run functionality!")
 
     # map back to the global solution
-    def map_node_result_to_global(self, problems, reduced_node_result):
+    def map_node_result_to_global(self, problems, reduced_node_result, reduced_problem_index=-1):
 
         n_nodes_global = problems[0].read('number_of_nodes')
-        reduced_problem = problems[-1]
+        reduced_problem = problems[reduced_problem_index]
         to_global_nodes = reduced_problem.read("new2global")
 
         # TODO vectorize
@@ -93,9 +93,13 @@ class BlockwiseSolver(luigi.Task):
         raise NotImplementedError("BlockwiseSolver is abstract and does not implement the output functionality!")
 
 
-# TODO test !!!
+# TODO debug !!!
 # stitch blockwise sub-results by overlap
 class BlockwiseOverlapSolver(BlockwiseSolver):
+
+    # only nodes which have an overlap bigger than this (relative) threshold
+    # will be merged
+    overlapThreshold = luigi.Parameter(default=.99)
 
     def requires(self):
 
@@ -128,7 +132,8 @@ class BlockwiseOverlapSolver(BlockwiseSolver):
                 block_shape,
                 overlap
             ),
-            'sub_solver': sub_solver
+            'sub_solver': sub_solver,
+            'seg': ExternalSegmentation(self.pathToSeg)
         }
 
     @run_decorator
@@ -142,6 +147,12 @@ class BlockwiseOverlapSolver(BlockwiseSolver):
         block_graph.deserialize(inp['block_graph'].read())
         sub_solver = inp['sub_solver']
 
+        # get the shape
+        seg = inp['seg']
+        seg.open()
+        shape = seg.shape()
+        seg.close()
+
         # read the relevant problem, which is the second to last reduced problem ->
         # because we merge according to results of last BlockwiseSubSolver
         reduced_problem = problems[-2]
@@ -152,14 +163,14 @@ class BlockwiseOverlapSolver(BlockwiseSolver):
 
         # find the node overlaps
         t_ovlp = time.time()
-        node_overlaps = self._find_node_overlaps(subblocks, block_graph)
+        node_overlaps = self._find_node_overlaps(subblocks, block_graph, shape)
         workflow_logger.info(
             "BlockwiseOverlapSolver: extracting overlapping nodes from blocks in %f s" % (time.time() - t_ovlp,)
         )
 
         # stitch the blocks based on the node overlaps
         t_stitch = time.time()
-        reduced_node_result = self._stitch_blocks(block_graph, node_overlaps, reduced_graph, sub_solver, reduced_graph)
+        reduced_node_result = self._stitch_blocks(block_graph, node_overlaps, sub_solver, reduced_graph)
         workflow_logger.info(
             "BlockwiseOverlapSolver: stitching blocks in %f s" % (time.time() - t_stitch,)
         )
@@ -171,48 +182,33 @@ class BlockwiseOverlapSolver(BlockwiseSolver):
         )
 
         # map back to the global nodes and write result
-        node_result = self.map_node_result_to_global(problems, reduced_node_result)
+        # we only need to do this for nLevels > 1, because for nLevels == 1, we already have the original problem
+        # and hence original node ids
+        if self.numberOfLevels > 1:
+            node_result = self.map_node_result_to_global(problems, reduced_node_result, -2)
+        else:
+            node_result = reduced_node_result
         self.output().write(node_result)
 
-    def _find_node_overlaps(self, subblocks, block_graph):
-
-        # get the overlap as bounding box in local block coordinates
-	def block_overlaps(begin_a, begin_b, end_a, end_b):
-
-            # check whether the query begin is in [begin, end]
-            def is_overlapping(query, begin, end):
-                return np.greater_equal(query, begin).all() and np.less(query, end).all()
-
-            # determine block with larger begin
-            a_in_b = is_overlapping(begin_a, begin_b, end_b)
-            b_in_a = is_overlapping(begin_b, begin_a, end_a)
-
-            # return the global overlap accordingly
-            if a_in_b:
-                global_begin, global_end = begin_a, end_b
-            elif b_in_a:
-                global_begin, global_end = begin_b, end_a
-            else:
-                raise RuntimeError("Your circuit's dead, there's something wrong. Can you hear me Major Tom?")
-
-            # construct the local bounding box
-            overlap_a = np.s_[
-                global_begin[0] - begin_a[0], global_end - begin_a[0],
-                global_begin[1] - begin_a[1], global_end - begin_a[1],
-                global_begin[2] - begin_a[2], global_end - begin_a[2]
-            ]
-
-            overlap_b = np.s_[
-                global_begin[0] - begin_b[0], global_end - begin_b[0],
-                global_begin[1] - begin_b[1], global_end - begin_b[1],
-                global_begin[2] - begin_b[2], global_end - begin_b[2]
-            ]
-
-            return overlap_a, overlap_b
+    def _find_node_overlaps(self, subblocks, block_graph, shape):
 
         block_res_path = subblocks.path
         # read the nodes from the sub solver to convert back to
         # the actual problem node ids
+
+        # construct the blocking for the current block size
+        # get the overlap
+        overlap = list(PipelineParameter().multicutBlockOverlap)
+
+        # get the block shape of the current level
+        initial_shape = PipelineParameter().multicutBlockShape
+        block_factor  = max(1, (self.numberOfLevels - 1) * 2)
+        block_shape = list(map(lambda x: x * block_factor, initial_shape))
+        blocking = nifty.tools.blocking(
+            roiBegin=[0L, 0L, 0L],
+            roiEnd=shape,
+            blockShape=block_shape
+        )
 
         # extract the overlaps for all the edges
         def node_overlaps_for_block_pair(block_edge_id, block_uv):
@@ -222,16 +218,19 @@ class BlockwiseOverlapSolver(BlockwiseSolver):
             block_u_path = os.path.join(block_res_path, 'block%i_segmentation.h5' % block_u)
             block_v_path = os.path.join(block_res_path, 'block%i_segmentation.h5' % block_v)
 
-            coord_u_path = os.path.join(block_res_path, 'block%i_coordinates.h5' % block_u)
-            block_begin_u = vigra.readHDF5(coord_u_path, 'block_begin')
-            block_end_u = vigra.readHDF5(coord_u_path, 'block_end')
-
-            coord_v_path = os.path.join(block_res_path, 'block%i_coordinates.h5' % block_v)
-            block_begin_v = vigra.readHDF5(coord_v_path, 'block_begin')
-            block_end_v = vigra.readHDF5(coord_v_path, 'block_end')
-
             # find the actual overlapping regions in block u and v and load them
-            overlap_bb_u, overlap_bb_v = block_overlaps(block_begin_u, block_begin_v, block_end_u, block_end_v)
+            have_overlap, ovlp_begin_u, ovlp_end_u, ovlp_begin_v, ovlp_end_v = blocking.getLocalOverlaps(block_u, block_v, overlap)
+            if not have_overlap:
+                u_block = blocking.getBlockWithHalo(block_u, overlap).outerBlock
+                v_block = blocking.getBlockWithHalo(block_v, overlap).outerBlock
+                u_begin, u_end = u_block.begin, u_block.end
+                v_begin, v_end = v_block.begin, v_block.end
+                raise RuntimeError(
+                    "No overlap found for blocks %i, %i with coords %s, %s and %s, %s" % (block_u, block_v, str(u_begin), str(u_end), str(v_begin), str(v_end))
+                )
+
+            overlap_bb_u = np.s_[ovlp_begin_u[0]:ovlp_end_u[0], ovlp_begin_u[1]:ovlp_end_u[1], ovlp_begin_u[2]:ovlp_end_u[2]]
+            overlap_bb_v = np.s_[ovlp_begin_v[0]:ovlp_end_v[0], ovlp_begin_v[1]:ovlp_end_v[1], ovlp_begin_v[2]:ovlp_end_v[2]]
 
             with h5py.File(block_u_path) as f_u, \
                     h5py.File(block_v_path) as f_v:
@@ -239,28 +238,49 @@ class BlockwiseOverlapSolver(BlockwiseSolver):
                 seg_u = f_u['data'][overlap_bb_u]
                 seg_v = f_v['data'][overlap_bb_v]
 
-            n_nodes_u = np.max(seg_u) + 1
+            # debugging view
+            if False:
+                from volumina_viewer import volumina_n_layer
+                u_block = blocking.getBlockWithHalo(block_u, overlap).outerBlock
+                raw_path = PipelineParameter().inputs['data'][0]
+                oseg_path = PipelineParameter().inputs['seg']
+                u_begin, u_end = u_block.begin, u_block.end
+                with h5py.File(raw_path) as f_raw, \
+                    h5py.File(oseg_path) as f_oseg:
+                    global_bb = np.s_[
+                        ovlp_begin_u[0] - u_begin[0]:ovlp_end_u[0] - u_begin[0],
+                        ovlp_begin_u[1] - u_begin[1]:ovlp_end_u[1] - u_begin[1],
+                        ovlp_begin_u[2] - u_begin[2]:ovlp_end_u[2] - u_begin[2]
+                    ]
+                    raw = f_raw['data'][global_bb].astype('float32')
+                    oseg = f_oseg['data'][global_bb]
+                volumina_n_layer([raw, oseg, seg_u, seg_v])
+                quit()
+
+            nodes_u = np.unique(seg_u)
             # find the overlaps between the two segmentations
-            overlap_counter = ngt.Overlap(n_nodes_u - 1, seg_u, seg_v)
+            # NOTE: nodes_u is not dense, I don't know if this is much of a performance issue, but I
+            # really don't want to do all the mapping to make it dense
+            overlap_counter = ngt.Overlap(nodes_u[-1], seg_u, seg_v)
 
-            return [overlap_counter.overlapArraysNormalized(node_u) for node_u in xrange(n_nodes_u)]
+            return {node_u : overlap_counter.overlapArraysNormalized(node_u) for node_u in nodes_u}
 
-        with futures.ThreadPoolExecutor(max_workers=PipelineParameter().nThreads) as tp:
-            tasks = [
-                tp.submit(node_overlaps_for_block_pair, block_edge_id, block_uv)
-                for block_edge_id, block_uv in enumerate(block_graph.uvIds())
-            ]
-            # TODO merge the node overlaps ?!
-            node_overlaps = [t.result() for t in tasks]
+        # serial for debugging
+        node_overlaps = [node_overlaps_for_block_pair(block_edge_id, block_uv) for block_edge_id, block_uv in enumerate(block_graph.uvIds())]
+
+        # parallel
+        # with futures.ThreadPoolExecutor(max_workers=PipelineParameter().nThreads) as tp:
+        #     tasks = [
+        #         tp.submit(node_overlaps_for_block_pair, block_edge_id, block_uv)
+        #         for block_edge_id, block_uv in enumerate(block_graph.uvIds())
+        #     ]
+        #     node_overlaps = [t.result() for t in tasks]
 
         return node_overlaps
 
-    # TODO test !!!
-    # TODO this is the most naive stitching for now (always stitch max overlap).
-    # once this works, try better stitching heuristics
     def _stitch_blocks(self, block_graph, node_overlaps, sub_solver, reduced_graph):
 
-        n_blocks = block_graph.nuberOfNodes
+        n_blocks = block_graph.numberOfNodes
         # read the sub_node results
         sub_node_results = sub_solver.read('sub_results')
         assert len(sub_node_results) == n_blocks
@@ -270,44 +290,51 @@ class BlockwiseOverlapSolver(BlockwiseSolver):
         block_offsets = []
         for sub_res in sub_node_results:
             block_offsets.append(offset)
-            sub_res += offset
-            offset += sub_res.max() + 1
+            offset += np.max(sub_res) + 1
+
+        block_offsets = np.array(block_offsets, dtype='uint32')
+        offset = int(offset)
 
         # create ufd to merge with last offset value -> number of nodes that need to be merged
         ufd = nifty.ufd.ufd(offset)
 
         # now, we iterate over the block pairs and merge nodes according to their overlap
-        for block_pair_id, block_u, block_v in enumerate(block_graph.uvIds()):
+        for block_pair_id, block_uv in enumerate(block_graph.uvIds()):
+            block_u, block_v = block_uv
 
             # get the results from the overlap calculations
-            overlapping_nodes, overlaps = node_overlaps[block_pair_id]
+            this_node_overlaps = node_overlaps[block_pair_id]
+            assert len(this_node_overlaps) <= len(sub_node_results[block_u]), "%i, %i" % (len(this_node_overlaps), len(sub_node_results[block_u]))
 
             offsets_u = block_offsets[block_u]
             offsets_v = block_offsets[block_v]
 
             # iterate over the nodes in overlap(u) and merge with nodes in overlap(v)
             # according to the overlaps
-            # TODO for now we simply merge the maximum overlap node,
-            # but we want to do more clever things eventually
-            for node_u_id, nodes_v in enumerate(overlapping_nodes):
-                merge_node_v = nodes_v[0]  # TODO is this ordered in descending order by nifty ?
-                ufd.merge(node_u_id + offsets_u, merge_node_v + offsets_v)
+            # we only merge with the max overlap node, if the relative overlap is bigger then the threshold
+            for node_u_id, node_ovlp in this_node_overlaps.iteritems():
+                # nodes are sorted in ascending order of their relative overlap
+                relative_ovlp = node_ovlp[1][-1]
+                if relative_ovlp > self.overlapThreshold:
+                    merge_node_v = node_ovlp[0][-1]
+                    ufd.merge(node_u_id + offsets_u, merge_node_v + offsets_v)
 
         # get the merge result
         node_result = ufd.elementLabeling()
+        assert len(node_result) == offset, "%i, %i" % (len(node_result), offset)
 
         # project back to the reduced problem nodes via iterating over the blocks and projection of
         # the block node result
-        reduced_node_result = np.zeros(reduced_graph.numberOfNodes, dtyp='uint32')
+        reduced_node_result = np.zeros(reduced_graph.numberOfNodes, dtype='uint32')
         sub_nodes = sub_solver.read('sub_nodes')
 
         for block_id in xrange(n_blocks):
 
             # first find the result for the nodes in this block
-            block_result = node_result[block_offsets[block_id], block_offsets[block_id + 1]] \
+            block_result = node_result[block_offsets[block_id]:block_offsets[block_id + 1]] \
                 if block_id < n_blocks - 1 else node_result[block_offsets[block_id]:offset]
 
-            # next, map the merge result to the sub-result nodes
+            # next, map the merge result to the reduced-problem nodes
             sub_result = sub_node_results[block_id]
             reduced_result = block_result[sub_result]
 
@@ -612,8 +639,8 @@ class BlockwiseStitchingSolver(BlockwiseSolver):
 #     block pairs for consistency -> if inconsistent, don't merge
 # -> maybe this needs a different problem formulation than Multicut ?!
 
-# TODO test
-def BlockwiseMulticutStitchingSolver(BlockwiseSolver):
+# TODO debug !!!
+class BlockwiseMulticutStitchingSolver(BlockwiseSolver):
 
     # we have EdgesBetweenBlocks as additional requirements to the
     # super class (BlockwiseSolver)
@@ -646,20 +673,21 @@ def BlockwiseMulticutStitchingSolver(BlockwiseSolver):
         reduced_graph = nifty.graph.UndirectedGraph()
         reduced_graph.deserialize(reduced_problem.read("graph"))
         reduced_costs = reduced_problem.read("costs")
+        assert len(reduced_costs) == reduced_graph.numberOfEdges
         reduced_objective = nifty.graph.optimization.multicut.multicutObjective(reduced_graph, reduced_costs)
 
         t_extract = time.time()
-        sub_problems = self._extract_subproblems(reduced_graph, reduced_costs)
+        sub_problems = self._extract_subproblems(reduced_graph)
         workflow_logger.info(
             "BlockwiseMulticutStitchingSolver: Problem extraction took %f s" % (time.time() - t_extract)
         )
 
         t_solve = time.time()
-        edge_results = self._extract_subproblems(sub_problems, reduced_costs, reduced_graph.numberOfEdges)
+        edge_results = self._solve_subproblems(sub_problems, reduced_costs)
         workflow_logger.info("BlockwiseMulticutStitchingSolver: Problem solving took %f s" % (time.time() - t_solve))
 
         t_merge = time.time()
-        reduced_node_result = self._merge_blocks(reduced_graph, sub_problems, edge_results)
+        reduced_node_result = self._merge_blocks(reduced_graph, edge_results)
         workflow_logger.info("BlockwiseMulticutStitchingSolver: Problem solving took %f s" % (time.time() - t_merge))
 
         workflow_logger.info(
@@ -672,7 +700,7 @@ def BlockwiseMulticutStitchingSolver(BlockwiseSolver):
 
     def _extract_subproblems(self, reduced_graph):
 
-        block_edges = self.input('edges_between_blocks')
+        block_edges = self.input()['edges_between_blocks']
         edges_between_blocks = block_edges.read('edges_between_blocks')
         uv_ids = reduced_graph.uvIds()
 
@@ -681,13 +709,13 @@ def BlockwiseMulticutStitchingSolver(BlockwiseSolver):
             this_uvs = uv_ids[this_edges]
             this_nodes = np.unique(this_uvs)
             to_local_nodes = {node: i for i, node in enumerate(this_nodes)}
-            g = nifty.UndirectedGraph(len(this_nodes))
+            g = nifty.graph.UndirectedGraph(len(this_nodes))
             g.insertEdges(replace_from_dict(this_uvs, to_local_nodes))
             return g, this_edges
 
         return [extract_subproblem(block_edge_id) for block_edge_id in xrange(len(edges_between_blocks))]
 
-    def _solve_subproblems(self, sub_problems, reduced_costs, number_of_edges):
+    def _solve_subproblems(self, sub_problems, reduced_costs):
 
         # we use the same sub-solver and settings as 'BlockwiseSubSolver'
         sub_solver_type = PipelineParameter().subSolverType
@@ -721,7 +749,7 @@ def BlockwiseMulticutStitchingSolver(BlockwiseSolver):
             tasks = [tp.submit(mc, prob[0], reduced_costs[prob[1]]) for prob in sub_problems]
             sub_results = [t.result() for t in tasks]
 
-        edge_result = np.zeros(number_of_edges, dtype='uint8')
+        edge_result = np.zeros(len(reduced_costs), dtype='uint8')
 
         # combine the subproblem results into global edge vector
         for problem_id in xrange(len(sub_problems)):
