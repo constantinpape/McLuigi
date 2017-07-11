@@ -6,8 +6,9 @@ import luigi
 from multicutProblemTasks import MulticutProblem
 
 from multicutSolverTasks import McSolverFusionMoves  # ,McSolverExact
-from blockwiseMulticutTasks import BlockwiseMulticutSolver, BlockwiseStitchingSolver, BlockwiseMulticutStitchingSolver
-from blockwiseMulticutTasks import SubblockSegmentations, BlockwiseOverlapSolver
+from blockwiseMulticutTasks import BlockwiseMulticutSolver
+from blockwiseBaselineTasks import SubblockSegmentations, BlockwiseOverlapSolver
+from blockwiseBaselineTasks import BlockwiseStitchingSolver, BlockwiseMulticutStitchingSolver
 from dataTasks import StackedRegionAdjacencyGraph, ExternalSegmentation
 from customTargets import HDF5VolumeTarget
 from defectDetectionTasks import DefectSliceDetection
