@@ -183,7 +183,7 @@ class SubblockSegmentations(BlockwiseSolver):
 # stitch blockwise sub-results according to costs of the edges connecting the sub-blocks
 class BlockwiseStitchingSolver(BlockwiseSolver):
 
-    boundaryBias = luigi.Parameter(default=.95)
+    boundaryBias = luigi.Parameter(default=.5)
 
     @run_decorator
     def run(self):
@@ -207,7 +207,7 @@ class BlockwiseStitchingSolver(BlockwiseSolver):
         # merge all edges along the block boundaries that are attractive
         energyBias = 0 if self.boundaryBias == .5 else \
             np.log((1. - self.boundaryBias) / self.boundaryBias)
-        merge_ids = outer_edges[reduced_costs[outer_edges] < energyBias]
+        merge_ids = outer_edges[reduced_costs[outer_edges] > energyBias]
 
         workflow_logger.info(
             "BlockwiseStitchingSolver: Merging %i edges with value smaller than bias %f of %i between block edges"
