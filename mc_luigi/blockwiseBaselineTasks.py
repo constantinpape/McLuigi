@@ -179,7 +179,6 @@ class SubblockSegmentations(BlockwiseSolver):
         )
 
 
-# TODO debug !!!
 # stitch blockwise sub-results according to costs of the edges connecting the sub-blocks
 class BlockwiseStitchingSolver(BlockwiseSolver):
 
@@ -204,13 +203,13 @@ class BlockwiseStitchingSolver(BlockwiseSolver):
             % (len(outer_edges), len(uv_ids))
         )
 
-        # merge all edges along the block boundaries that are attractive
-        energyBias = 0 if self.boundaryBias == .5 else \
+        # merge all edges along the block boundaries that are attractive (energy bigger than bias)
+        energyBias = 0. if self.boundaryBias == .5 else \
             np.log((1. - self.boundaryBias) / self.boundaryBias)
         merge_ids = outer_edges[reduced_costs[outer_edges] > energyBias]
 
         workflow_logger.info(
-            "BlockwiseStitchingSolver: Merging %i edges with value smaller than bias %f of %i between block edges"
+            "BlockwiseStitchingSolver: Merging %i edges with value larger than bias %f of %i between block edges"
             % (len(merge_ids), energyBias, len(outer_edges))
         )
 
@@ -227,11 +226,12 @@ class BlockwiseStitchingSolver(BlockwiseSolver):
         self.output().write(node_result)
 
     def output(self):
-        save_name = "BlockwiseStitchingSolver_L%i_%s_%s_%s.h5" % (
+        save_name = "BlockwiseStitchingSolver_L%i_%s_%s_%s_%.2f.h5" % (
             self.numberOfLevels,
             '_'.join(map(str, PipelineParameter().multicutBlockShape)),
             '_'.join(map(str, PipelineParameter().multicutBlockOverlap)),
-            "modified" if PipelineParameter().defectPipeline else "standard"
+            "modified" if PipelineParameter().defectPipeline else "standard",
+            self.boundaryBias
         )
         save_path = os.path.join(PipelineParameter().cache, save_name)
         return HDF5DataTarget(save_path)
@@ -392,10 +392,6 @@ class BlockwiseMulticutStitchingSolver(BlockwiseSolver):
 # stitch blockwise sub-results by overlap
 class BlockwiseOverlapSolver(BlockwiseSolver):
 
-    # only nodes which have an overlap bigger than this (relative) threshold
-    # will be merged
-    overlapThreshold = luigi.Parameter(default=.99)
-
     def requires(self):
 
         # get the problem hierarchy from the super class
@@ -439,7 +435,8 @@ class BlockwiseOverlapSolver(BlockwiseSolver):
         subblocks = inp['subblocks']
         problems = inp['problems']
         block_graph = nifty.graph.UndirectedGraph()
-        block_graph.deserialize(inp['block_graph'].read())
+        # we only consider blocks that are in 6 adjacency
+        block_graph.deserialize(inp['block_graph'].read('nearest_neighbors'))
         sub_solver = inp['sub_solver']
 
         # get the shape
@@ -553,12 +550,35 @@ class BlockwiseOverlapSolver(BlockwiseSolver):
                 quit()
 
             nodes_u = np.unique(seg_u)
+            nodes_v = np.unique(seg_v)
             # find the overlaps between the two segmentations
             # NOTE: nodes_u is not dense, I don't know if this is much of a performance issue, but I
             # really don't want to do all the mapping to make it dense
-            overlap_counter = ngt.Overlap(nodes_u[-1], seg_u, seg_v)
 
-            return {node_u : overlap_counter.overlapArraysNormalized(node_u) for node_u in nodes_u}
+            # get the overlap counters
+            overlap_counter_u = ngt.Overlap(nodes_u[-1], seg_u, seg_v)
+            overlap_counter_v = ngt.Overlap(nodes_v[-1], seg_v, seg_u)
+
+            # FIXME this looks very inefficient....
+            # if we ever want to put this into production, move to c++
+            overlaps_u = {}
+            # calculate the symmetrical overlaps
+            for node_u in nodes_u:
+                ovlp_nodes, rel_ovlps = overlap_counter_u.overlapArraysNormalized(node_u)
+
+                symmetrical_overlaps = np.zeros_like(rel_ovlps, dtype=rel_ovlps.dtype)
+                for ii, node_v in enumerate(ovlp_nodes):
+                    ovlp_u = rel_ovlps[ii]
+                    ovlp_nodes_v, rel_ovlps_v = overlap_counter_v.overlapArraysNormalized(node_v)
+                    where_node_u = ovlp_nodes_v == node_u
+                    ovlp_v = rel_ovlps_v[where_node_u]
+
+                    # TODO for now we just average the relative overlaps, but maybe it would be a better idea to use min
+                    symmetrical_overlaps[ii] = (ovlp_u + ovlp_v) / 2.
+
+                overlaps_u[node_u] = (ovlp_nodes, symmetrical_overlaps)
+
+            return overlaps_u
 
         # serial for debugging
         node_overlaps = [node_overlaps_for_block_pair(block_edge_id, block_uv) for block_edge_id, block_uv in enumerate(block_graph.uvIds())]
@@ -610,7 +630,7 @@ class BlockwiseOverlapSolver(BlockwiseSolver):
             for node_u_id, node_ovlp in this_node_overlaps.iteritems():
                 # nodes are sorted in ascending order of their relative overlap
                 relative_ovlp = node_ovlp[1][-1]
-                if relative_ovlp > self.overlapThreshold:
+                if relative_ovlp > PipelineParameter().overlapThreshold:
                     merge_node_v = node_ovlp[0][-1]
                     ufd.merge(node_u_id + offsets_u, merge_node_v + offsets_v)
 
@@ -639,11 +659,12 @@ class BlockwiseOverlapSolver(BlockwiseSolver):
         return reduced_node_result
 
     def output(self):
-        save_name = "BlockwiseOverlapSolver_L%i_%s_%s_%s.h5" % (
+        save_name = "BlockwiseOverlapSolver_L%i_%s_%s_%s_%.2f.h5" % (
             self.numberOfLevels,
             '_'.join(map(str, PipelineParameter().multicutBlockShape)),
             '_'.join(map(str, PipelineParameter().multicutBlockOverlap)),
-            "modified" if PipelineParameter().defectPipeline else "standard"
+            "modified" if PipelineParameter().defectPipeline else "standard",
+            PipelineParameter().overlapThreshold
         )
         save_path = os.path.join(PipelineParameter().cache, save_name)
         return HDF5DataTarget(save_path)

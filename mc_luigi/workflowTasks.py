@@ -170,13 +170,15 @@ class BlockwiseMulticutSegmentation(SegmentationWorkflow):
 class BlockwiseStitchingSegmentation(SegmentationWorkflow):
 
     numberOfLevels = luigi.IntParameter(default=1)
+    boundaryBias = luigi.FloatParameter(default=.5)
 
     def requires(self):
         return_tasks = {
             "mc_nodes": BlockwiseStitchingSolver(
                 self.pathToSeg,
                 MulticutProblem(self.pathToSeg, self.pathToClassifier),
-                self.numberOfLevels
+                self.numberOfLevels,
+                self.boundaryBias
             ),
             "rag": StackedRegionAdjacencyGraph(self.pathToSeg),
             "seg": ExternalSegmentation(self.pathToSeg)
@@ -188,11 +190,12 @@ class BlockwiseStitchingSegmentation(SegmentationWorkflow):
     def output(self):
         save_path = os.path.join(
             PipelineParameter().cache,
-            "BlockwiseStitchingSegmentation_L%i_%s_%s_%s.h5" % (
+            "BlockwiseStitchingSegmentation_L%i_%s_%s_%s_%.2f.h5" % (
                 self.numberOfLevels,
                 '_'.join(map(str, PipelineParameter().multicutBlockShape)),
                 '_'.join(map(str, PipelineParameter().multicutBlockOverlap)),
                 "modified" if PipelineParameter().defectPipeline else "standard",
+                self.boundaryBias
             )
         )
         return HDF5VolumeTarget(save_path, self.dtype, compression=PipelineParameter().compressionLevel)
@@ -250,11 +253,12 @@ class BlockwiseOverlapSegmentation(SegmentationWorkflow):
     def output(self):
         save_path = os.path.join(
             PipelineParameter().cache,
-            "BlockwiseOverlapSegmentation_L%i_%s_%s_%s.h5" % (
+            "BlockwiseOverlapSegmentation_L%i_%s_%s_%s_%.2f.h5" % (
                 self.numberOfLevels,
                 '_'.join(map(str, PipelineParameter().multicutBlockShape)),
                 '_'.join(map(str, PipelineParameter().multicutBlockOverlap)),
                 "modified" if PipelineParameter().defectPipeline else "standard",
+                PipelineParameter().overlapThreshold
             )
         )
         return HDF5VolumeTarget(save_path, self.dtype, compression=PipelineParameter().compressionLevel)

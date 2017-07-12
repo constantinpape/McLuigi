@@ -91,6 +91,9 @@ class PipelineParameter(object):
         self.wsdtSigWeights = 0.
         self.wsdtInvert    = False
 
+        # for BlockWiseStitchingSolver
+        self.overlapThreshold = .5
+
     # TODO range and type cheks via @property and setproperty
 
     # TODO don't allow setting a field that does not already exist to avoid setting incorrect parameter

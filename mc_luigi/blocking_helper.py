@@ -106,19 +106,26 @@ class BlockGridGraph(luigi.Task):
         )
         n_blocks = blocking.numberOfBlocks
 
-        # init the graph
+        # init the graphs
+        # block graph connecting all blocks sharing overlap
         block_graph = nifty.graph.UndirectedGraph(n_blocks)
+        # block graph only connecting nodes in 6 adjacency
+        block_graph_nn = nifty.graph.UndirectedGraph(n_blocks)
 
         # construct the graph by iterating over the blocks and for each block finding blocks with overlap
         for block_id in xrange(n_blocks):
             block = blocking.getBlockWithHalo(block_id, overlap).outerBlock
 
             # find adjacent blocks via all blocks in the bounding box and excluding the current block id
+            inner_block = blocking.getBlockWithHalo(block_id, overlap).innerBlock
+            inner_begin, inner_end =  np.array(inner_block.begin), np.array(inner_block.end)
+            center = (inner_end + inner_begin) / 2.
+
             adjacent_blocks = np.array(blocking.getBlockIdsOverlappingBoundingBox(block.begin, block.end, overlap))
             adjacent_blocks = adjacent_blocks[adjacent_blocks != block_id]
 
             assert adjacent_blocks.size, adjacent_blocks
-            # construct edge vector and append it
+            # constuct the edge vector for edges to all adjacent blocks
             block_edges = np.sort(
                 np.concatenate(
                     [block_id * np.ones((len(adjacent_blocks), 1)), adjacent_blocks[:, None]],
@@ -126,12 +133,28 @@ class BlockGridGraph(luigi.Task):
                 ),
                 axis=1
             ).astype('uint32')
-
             block_graph.insertEdges(block_edges)
 
-        # serialize the graph
+            # add edges to the nearest neighbours
+            for adj_id in adjacent_blocks:
+
+                if adj_id == block_id:
+                    continue
+
+                adj_block = blocking.getBlock(adj_id)
+                adj_begin, adj_end = np.array(adj_block.begin), np.array(adj_block.end)
+                adj_center = (adj_end + adj_begin) / 2.
+
+                block_dist = np.absolute(center - adj_center)
+
+                # coordinates for nearest neighbors are only different in a single dimension
+                if np.sum(block_dist > 0) == 1:
+                    block_graph_nn.insertEdge(min(block_id, adj_id), max(block_id, adj_id))
+
+        # serialize the graphs
         out = self.output()
         out.write(block_graph.serialize())
+        out.write(block_graph_nn.serialize(), 'nearest_neighbors')
 
     def output(self):
         block_string = '_'.join(map(str, self.blockShape))
