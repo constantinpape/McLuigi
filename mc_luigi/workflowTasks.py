@@ -8,7 +8,7 @@ from multicutProblemTasks import MulticutProblem
 from multicutSolverTasks import McSolverFusionMoves  # ,McSolverExact
 from blockwiseMulticutTasks import BlockwiseMulticutSolver
 from blockwiseBaselineTasks import SubblockSegmentations, BlockwiseOverlapSolver
-from blockwiseBaselineTasks import BlockwiseStitchingSolver, BlockwiseMulticutStitchingSolver
+from blockwiseBaselineTasks import BlockwiseStitchingSolver, BlockwiseMulticutStitchingSolver, NoStitchingSolver
 from dataTasks import StackedRegionAdjacencyGraph, ExternalSegmentation
 from customTargets import HDF5VolumeTarget
 from defectDetectionTasks import DefectSliceDetection
@@ -259,6 +259,37 @@ class BlockwiseOverlapSegmentation(SegmentationWorkflow):
                 '_'.join(map(str, PipelineParameter().multicutBlockOverlap)),
                 "modified" if PipelineParameter().defectPipeline else "standard",
                 PipelineParameter().overlapThreshold
+            )
+        )
+        return HDF5VolumeTarget(save_path, self.dtype, compression=PipelineParameter().compressionLevel)
+
+
+class NoStitchingSegmentation(SegmentationWorkflow):
+
+    numberOfLevels = luigi.IntParameter(default=1)
+
+    def requires(self):
+        return_tasks = {
+            "mc_nodes": NoStitchingSolver(
+                self.pathToSeg,
+                MulticutProblem(self.pathToSeg, self.pathToClassifier),
+                self.numberOfLevels
+            ),
+            "rag": StackedRegionAdjacencyGraph(self.pathToSeg),
+            "seg": ExternalSegmentation(self.pathToSeg)
+        }
+        if PipelineParameter().defectPipeline:
+            return_tasks["defect_slices"] = DefectSliceDetection(self.pathToSeg)
+        return return_tasks
+
+    def output(self):
+        save_path = os.path.join(
+            PipelineParameter().cache,
+            "NoStitchingSegmentation_L%i_%s_%s_%s.h5" % (
+                self.numberOfLevels,
+                '_'.join(map(str, PipelineParameter().multicutBlockShape)),
+                '_'.join(map(str, PipelineParameter().multicutBlockOverlap)),
+                "modified" if PipelineParameter().defectPipeline else "standard"
             )
         )
         return HDF5VolumeTarget(save_path, self.dtype, compression=PipelineParameter().compressionLevel)

@@ -263,7 +263,9 @@ class ReducedProblem(luigi.Task):
 
         # map the old outer edges to new outer edges
         outer_edge_ids = self.input()["sub_solution"].read("outer_edges")
-        new_outer_edges = edge_mapping.getNewEdgeIds(outer_edge_ids)
+        with futures.ThreadPoolExecutor(max_workers=PipelineParameter().nThreads) as tp:
+            tasks = [tp.submit(edge_mapping.getNewEdgeIds, oeids) for oeids in outer_edge_ids]
+            new_outer_edges = np.array([np.array(t.result()) for t in tasks])
 
         assert len(new_costs) == len(uv_ids_new)
         reduced_graph = nifty.graph.UndirectedGraph(number_of_new_nodes)
@@ -273,7 +275,7 @@ class ReducedProblem(luigi.Task):
         out.write(reduced_graph.serialize(), "graph")
         out.write(reduced_graph.numberOfNodes, 'number_of_nodes')
         out.write(new_costs, "costs")
-        out.write(new_outer_edges, 'outer_edges')
+        out.writeVlen(new_outer_edges, 'outer_edges')
 
         return uv_ids_new
 
@@ -321,7 +323,6 @@ class ReducedProblem(luigi.Task):
         return HDF5DataTarget(save_path)
 
 
-# TODO make cutting outer edges optional
 class BlockwiseSubSolver(luigi.Task):
 
     pathToSeg = luigi.Parameter()
@@ -333,6 +334,9 @@ class BlockwiseSubSolver(luigi.Task):
     level = luigi.Parameter()
     # needs to be true if we want to use the stitching - by overlap solver
     serializeSubResults = luigi.Parameter(default=True)
+    # will outer edges be cut ?
+    # should be left at true, because results seem to degraded if false
+    cutOuterEdges = luigi.Parameter(default=True)
 
     def requires(self):
         initialShape = PipelineParameter().multicutBlockShape
@@ -433,9 +437,8 @@ class BlockwiseSubSolver(luigi.Task):
             sub_problems = [task.result() for task in tasks]
 
         out = self.output()
-        # we need to serialize the outer edges for the stitching solvers
-        out.write(
-            np.unique(np.concatenate([sub_prob[1] for sub_prob in sub_problems])),
+        out.writeVlen(
+            np.array([sub_prob[1] for sub_prob in sub_problems]),
             'outer_edges'
         )
 
@@ -533,7 +536,8 @@ class BlockwiseSubSolver(luigi.Task):
 
             cut_edges[sub_problems[block_id][0]] += edge_result
             # add up outer edges
-            cut_edges[sub_problems[block_id][1]] += 1
+            if self.cutOuterEdges:
+                cut_edges[sub_problems[block_id][1]] += 1
 
         # all edges which are cut at least once will be cut
         out = self.output()

@@ -197,6 +197,9 @@ class BlockwiseStitchingSolver(BlockwiseSolver):
 
         uv_ids = reduced_graph.uvIds()
         outer_edges = reduced_problem.read('outer_edges')
+        outer_edges = np.unique(
+            np.concatenate([out_edges for out_edges in outer_edges])
+        )
 
         workflow_logger.info(
             "BlockwiseStitchingSolver: Looking for merge edges in %i between block edges of %i total edges"
@@ -240,12 +243,11 @@ class BlockwiseStitchingSolver(BlockwiseSolver):
 # stitch blockwise sub-results by running Multicut only on the edges between blocks
 # -> no idea if this will actually work
 # -> two options:
-# --> run Multicut on all between block edges
+# --> run Multicut on the block overlaps
 # --> run Multicuts for all pairs of adjacent blocks and check edges that are part of multiple
 #     block pairs for consistency -> if inconsistent, don't merge
 # -> maybe this needs a different problem formulation than Multicut ?!
 
-# TODO debug !!!
 class BlockwiseMulticutStitchingSolver(BlockwiseSolver):
 
     # we have EdgesBetweenBlocks as additional requirements to the
@@ -260,6 +262,7 @@ class BlockwiseMulticutStitchingSolver(BlockwiseSolver):
         block_shape = list(map(lambda x: x * block_factor, initial_shape))
 
         return {
+            'seg': ExternalSegmentation(self.pathToSeg),
             'problems': problems,
             'edges_between_blocks': EdgesBetweenBlocks(
                 self.pathToSeg,
@@ -272,8 +275,16 @@ class BlockwiseMulticutStitchingSolver(BlockwiseSolver):
 
     @run_decorator
     def run(self):
-        problems = self.input()['problems']
+        inp = self.input()
+        problems = inp['problems']
         reduced_problem = problems[-1]
+        global2new_nodes = reduced_problem.read('global2new')
+
+        edges_between_blocks = inp['edges_between_blocks'].read('edges_between_blocks')
+        block_uv_ids = inp['edges_between_blocks'].read('block_uv_ids')
+
+        seg = inp['seg']
+        seg.open()
 
         # load the reduced graph of the current level
         reduced_graph = nifty.graph.UndirectedGraph()
@@ -283,7 +294,7 @@ class BlockwiseMulticutStitchingSolver(BlockwiseSolver):
         reduced_objective = nifty.graph.optimization.multicut.multicutObjective(reduced_graph, reduced_costs)
 
         t_extract = time.time()
-        sub_problems = self._extract_subproblems(reduced_graph)
+        sub_problems = self._extract_subproblems(reduced_graph, block_uv_ids, seg, global2new_nodes, edges_between_blocks)
         workflow_logger.info(
             "BlockwiseMulticutStitchingSolver: Problem extraction took %f s" % (time.time() - t_extract)
         )
@@ -294,7 +305,12 @@ class BlockwiseMulticutStitchingSolver(BlockwiseSolver):
 
         t_merge = time.time()
         reduced_node_result = self._merge_blocks(reduced_graph, edge_results)
-        workflow_logger.info("BlockwiseMulticutStitchingSolver: Problem solving took %f s" % (time.time() - t_merge))
+        workflow_logger.info("BlockwiseMulticutStitchingSolver: Merging took %f s" % (time.time() - t_merge))
+
+        workflow_logger.debug(
+            "BlockwiseMulticutStitchingSolver: Number of nodes after merging: %i / %i"
+            % (len(np.unique(reduced_node_result)), reduced_graph.numberOfNodes)
+        )
 
         workflow_logger.info(
             "BlockwiseMulticutStitchingSolver: Problem solved with energy %f"
@@ -302,24 +318,92 @@ class BlockwiseMulticutStitchingSolver(BlockwiseSolver):
         )
 
         node_result = self.map_node_result_to_global(problems, reduced_node_result)
+        assert len(np.unique(node_result)) == len(np.unique(reduced_node_result))
         self.output().write(node_result)
+        seg.close()
 
-    def _extract_subproblems(self, reduced_graph):
+    def _extract_subproblems(self, reduced_graph, block_uv_ids, seg, global2new_nodes, edges_between_blocks):
 
-        block_edges = self.input()['edges_between_blocks']
-        edges_between_blocks = block_edges.read('edges_between_blocks')
         uv_ids = reduced_graph.uvIds()
 
-        def extract_subproblem(block_edge_id):
-            this_edges = edges_between_blocks[block_edge_id]
-            this_uvs = uv_ids[this_edges]
-            this_nodes = np.unique(this_uvs)
-            to_local_nodes = {node: i for i, node in enumerate(this_nodes)}
-            g = nifty.graph.UndirectedGraph(len(this_nodes))
-            g.insertEdges(replace_from_dict(this_uvs, to_local_nodes))
-            return g, this_edges
+        # construct the blocking for the current block size
+        # get the overlap
+        overlap = list(PipelineParameter().multicutBlockOverlap)
 
-        return [extract_subproblem(block_edge_id) for block_edge_id in xrange(len(edges_between_blocks))]
+        # get the block shape of the current level
+        initial_shape = PipelineParameter().multicutBlockShape
+        block_factor  = max(1, (self.numberOfLevels - 1) * 2)
+        block_shape = list(map(lambda x: x * block_factor, initial_shape))
+        blocking = nifty.tools.blocking(
+            roiBegin=[0L, 0L, 0L],
+            roiEnd=seg.shape(),
+            blockShape=block_shape
+        )
+
+        def extract_subproblem(block_edge_id, block_uv):
+
+            block_u, block_v = block_uv
+
+            # find the actual overlapping regions in block u and v and load them
+            have_overlap, ovlp_begin_u, ovlp_end_u, ovlp_begin_v, ovlp_end_v = blocking.getLocalOverlaps(block_u, block_v, overlap)
+
+            outer_block_u = blocking.getBlockWithHalo(block_u, overlap).outerBlock
+            begin_u, end_u = outer_block_u.begin, outer_block_u.end
+
+            # make sure that they are indeed overlapping
+            if not have_overlap:
+                v_block = blocking.getBlockWithHalo(block_v, overlap).outerBlock
+                v_begin, v_end = v_block.begin, v_block.end
+                raise RuntimeError(
+                    "No overlap found for blocks %i, %i with coords %s, %s and %s, %s" % (block_u, block_v, str(u_begin), str(u_end), str(v_begin), str(v_end))
+                )
+
+            # read the segmentation in the ovlp get the nodes and transform them to current node ids
+            ovlp_begin = (np.array(ovlp_begin_u) + np.array(begin_u)).tolist()
+            ovlp_end   = (np.array(ovlp_end_u) + np.array(begin_u)).tolist()
+            seg_ovlp = seg.read(ovlp_begin, ovlp_end)
+
+            # debug views
+            if False and block_edge_id != 0:
+                from volumina_viewer import volumina_n_layer
+                rawp = PipelineParameter().inputs['data'][0]
+                bb = np.s_[
+                    ovlp_begin[0]:ovlp_end[0],
+                    ovlp_begin[1]:ovlp_end[1],
+                    ovlp_begin[2]:ovlp_end[2],
+                ]
+                with h5py.File(rawp) as f:
+                    raw = f['data'][bb].astype('float32')
+                volumina_n_layer([raw, seg_ovlp])
+                quit()
+
+            workflow_logger.debug(
+                "BlockwiseMulticutStitchingSolver: Extracting problem from block-edge %i ovlp between block %i, %i with shape %s"
+                % (block_edge_id, block_u, block_v, str(seg_ovlp.shape))
+            )
+
+            reduced_nodes = np.unique(global2new_nodes[np.unique(seg_ovlp)])
+
+            # add nodes from the outer edges that go between these blocks
+            additional_edges = uv_ids[edges_between_blocks[block_edge_id]]
+            assert additional_edges.ndim == 2
+
+            additional_nodes = np.unique(additional_edges)
+            reduced_nodes = np.unique(
+                np.concatenate([reduced_nodes, additional_nodes])
+            )
+
+            # extract the subproblem
+            inner_edges, _, subgraph = reduced_graph.extractSubgraphFromNodes(reduced_nodes)
+            assert len(inner_edges) == subgraph.numberOfEdges
+
+            workflow_logger.debug(
+                "BlockwiseMulticutStitchingSolver: Extracted problem for block-edge %i has %i nodes and %i edges"
+                % (block_edge_id, subgraph.numberOfNodes, subgraph.numberOfEdges)
+            )
+            return subgraph, inner_edges
+
+        return [extract_subproblem(block_edge_id, block_uv) for block_edge_id, block_uv in enumerate(block_uv_ids)]
 
     def _solve_subproblems(self, sub_problems, reduced_costs):
 
@@ -356,17 +440,28 @@ class BlockwiseMulticutStitchingSolver(BlockwiseSolver):
             sub_results = [t.result() for t in tasks]
 
         edge_result = np.zeros(len(reduced_costs), dtype='uint8')
+        edge_is_covered = np.zeros(len(reduced_costs), dtype=bool)
 
         # combine the subproblem results into global edge vector
-        for problem_id in xrange(len(sub_problems)):
+        for problem_id, sub_prob in enumerate(sub_problems):
             node_result = sub_results[problem_id]
-            sub_uv_ids = sub_problems[problem_id][0].uvIds()
+            sub_uv_ids = sub_prob[0].uvIds()
 
             edge_sub_result = node_result[sub_uv_ids[:, 0]] != node_result[sub_uv_ids[:, 1]]
+            workflow_logger.debug(
+                "BlockwiseMulticutStitichingSolver: Number of cut edges for block-edge %i is %i / %i"
+                % (problem_id, np.sum(edge_sub_result), len(edge_sub_result))
+            )
 
-            edge_result[sub_problems[problem_id][1]] += edge_sub_result
+            edge_result[sub_prob[1]] += edge_sub_result
+            edge_is_covered[sub_prob[1]] = True
 
-        return edge_result
+        # the actual edge result, where all edges that were not covered in one of the sub-problems
+        # stay cut
+        real_edge_result = np.ones_like(edge_result, dtype='uint8')
+        real_edge_result[edge_is_covered] = edge_result[edge_is_covered]
+
+        return real_edge_result
 
     def _merge_blocks(self, reduced_graph, edge_result):
 
@@ -374,6 +469,10 @@ class BlockwiseMulticutStitchingSolver(BlockwiseSolver):
         uv_ids = reduced_graph.uvIds()
 
         merge_edges = uv_ids[edge_result == 0]
+        workflow_logger.info(
+            "BlockwiseMulticutStitichingSolver: Number of edges that will be merged: %i / %i"
+            % (len(merge_edges), len(uv_ids))
+        )
         ufd.merge(merge_edges)
         return ufd.elementLabeling()
 
@@ -388,7 +487,29 @@ class BlockwiseMulticutStitchingSolver(BlockwiseSolver):
         return HDF5DataTarget(save_path)
 
 
-# TODO debug !!!
+# don't stitch sub-results
+# for proper baseline
+class NoStitchingSolver(BlockwiseSolver):
+
+    def run(self):
+        problems = self.input()
+        reduced_problem = problems[-1]
+        n_nodes = reduced_problem.read('number_of_nodes')
+        reduced_node_result = np.arange(n_nodes, dtype='uint32')
+        node_result = self.map_node_result_to_global(problems, reduced_node_result)
+        self.output().write(node_result)
+
+    def output(self):
+        save_name = "NoStitchingSolver_L%i_%s_%s_%s.h5" % (
+            self.numberOfLevels,
+            '_'.join(map(str, PipelineParameter().multicutBlockShape)),
+            '_'.join(map(str, PipelineParameter().multicutBlockOverlap)),
+            "modified" if PipelineParameter().defectPipeline else "standard"
+        )
+        save_path = os.path.join(PipelineParameter().cache, save_name)
+        return HDF5DataTarget(save_path)
+
+
 # stitch blockwise sub-results by overlap
 class BlockwiseOverlapSolver(BlockwiseSolver):
 
@@ -540,9 +661,9 @@ class BlockwiseOverlapSolver(BlockwiseSolver):
                 with h5py.File(raw_path) as f_raw, \
                     h5py.File(oseg_path) as f_oseg:
                     global_bb = np.s_[
-                        ovlp_begin_u[0] - u_begin[0]:ovlp_end_u[0] - u_begin[0],
-                        ovlp_begin_u[1] - u_begin[1]:ovlp_end_u[1] - u_begin[1],
-                        ovlp_begin_u[2] - u_begin[2]:ovlp_end_u[2] - u_begin[2]
+                        ovlp_begin_u[0] + u_begin[0]:ovlp_end_u[0] + u_begin[0],
+                        ovlp_begin_u[1] + u_begin[1]:ovlp_end_u[1] + u_begin[1],
+                        ovlp_begin_u[2] + u_begin[2]:ovlp_end_u[2] + u_begin[2]
                     ]
                     raw = f_raw['data'][global_bb].astype('float32')
                     oseg = f_oseg['data'][global_bb]

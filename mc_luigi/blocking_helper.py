@@ -175,9 +175,6 @@ class EdgesBetweenBlocks(luigi.Task):
     blockOverlap = luigi.ListParameter()
     level        = luigi.Parameter()
 
-    # TODO try both combinations
-    outerEdgesOnly = luigi.Parameter(default=True)
-
     def requires(self):
         return {
             'block_graph': BlockGridGraph(self.pathToSeg, self.blockShape, self.blockOverlap),
@@ -194,16 +191,14 @@ class EdgesBetweenBlocks(luigi.Task):
         # graph of the current problem
         graph = nifty.graph.UndirectedGraph()
         graph.deserialize(inp['problem'].read('graph'))
+        uv_ids = graph.uvIds()
+        outer_edges = inp['problem'].read('outer_edges')
 
-        # outer edges
-        if self.outerEdgesOnly:
-            uv_ids = graph.uvIds()
-            outer_edges = inp['problem'].read('outer_edges')
-            outer_uvs = uv_ids[outer_edges]
-
-        # nodes to blocks and block_graph
+        # block graph
         block_graph = nifty.graph.UndirectedGraph()
-        block_graph.deserialize(inp['block_graph'].read())
+        block_graph.deserialize(inp['block_graph'].read('nearest_neighbors'))
+
+        # nodes to blocks
         nodes_to_blocks = inp['nodes_to_blocks'].read()
         assert len(nodes_to_blocks) == block_graph.numberOfNodes
 
@@ -218,21 +213,31 @@ class EdgesBetweenBlocks(luigi.Task):
         edges_between_blocks = []
         for block_u, block_v in block_graph.uvIds():
 
-            # get the nodes in both blocks
+            this_pair_outer_edges = []
+            # nodes for the given blocks
             nodes_u, nodes_v = nodes_to_blocks_new[block_u], nodes_to_blocks_new[block_v]
+            # outer edges for the given blocks
+            outer_u, outer_v = outer_edges[block_u], outer_edges[block_v]
+            outer_uv_u, outer_uv_v = uv_ids[outer_u], uv_ids[outer_v]
 
-            # find the intersection of the nodes with the graph edges
-            # by first constructing all potential edges (= all combinations of nodes in block u, v)
-            # then searching these edges in the graph
-            potential_edges = cartesian([nodes_u, nodes_v])
-            if self.outerEdgesOnly:
-                matches = find_matching_row_indices(outer_uvs, potential_edges)[:, 0]
-                bb_edges = outer_edges[matches]
-            else:
-                matches = graph.findEdges(potential_edges)
-                bb_edges = matches[matches != -1]
+            # find the outer edges connecting the given blocks
+            # by first finding the node NOT in block-u and then checking if
+            # it is in the nodes v
+            # and vice versa
+            mask_u = np.in1d(outer_uv_u, nodes_u).reshape(outer_uv_u.shape)
+            # we check that exactly one node is in the block for each uv id
+            assert (np.sum(mask_u, axis=1) == 1).all()
+            is_in_v = np.in1d(outer_uv_u[np.logical_not(mask_u)], nodes_v)
+            this_pair_outer_edges.append(outer_u[is_in_v])
 
-            edges_between_blocks.append(bb_edges)
+            mask_v = np.in1d(outer_uv_v, nodes_v).reshape(outer_uv_v.shape)
+            # we check that exactly one node is in the block for each uv id
+            assert (np.sum(mask_v, axis=1) == 1).all()
+            is_in_u = np.in1d(outer_uv_v[np.logical_not(mask_v)], nodes_u)
+            this_pair_outer_edges.append(outer_v[is_in_u])
+
+            this_pair_outer_edges = np.concatenate(this_pair_outer_edges)
+            edges_between_blocks.append(this_pair_outer_edges)
 
         out = self.output()
 
