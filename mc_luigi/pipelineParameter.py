@@ -40,13 +40,8 @@ class PipelineParameter(object):
         # histogram threshold for the defect slicce detection
         self.binThreshold = 2  # -> 0 means we don't detect any defects ! This needs to be tuned for every ds !
 
-        # flags to control workflow
-        self.predictAffinityMap = False   # predict affinity map if not pre-computed
-        self.runWatershed = False  # run watershed if not pre-computed
-
         # feature string
         # FIXME in the current form z-affnity are toxic for defects!
-
         # for non-affinity maps replace 'affinitiesXY/Z' with prob
         # self.features = ["raw","affinitiesXY","affinitiesZ","reg"]
         self.features = ["raw", "prob", "reg"]  # for non-affinity maps replace 'affinitiesXY/Z' with prob
@@ -157,13 +152,10 @@ class PipelineParameter(object):
 
                 # wsdt segmentation
                 seg_list.append(
-                    os.path.join(self.cache, '%s_wsdtsegmentation.h5' % raw_prefix)
+                    os.path.join(self.cache, 'WsdtSegmentation_%s_affinities_xy.h5' % raw_prefix)
                 )
 
             inp_dict['data'] = new_data_list
             inp_dict['seg'] = seg_list
-
-            self.predictAffinityMap = True
-            self.runWatershed = True
 
         self.inputs = inp_dict

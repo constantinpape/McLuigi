@@ -3,6 +3,7 @@
 
 import luigi
 from customTargets import HDF5VolumeTarget, StackedRagTarget
+from segmentationTasks import WsdtSegmentation
 
 from pipelineParameter import PipelineParameter
 from tools import config_logger, run_decorator
@@ -34,7 +35,26 @@ workflow_logger = logging.getLogger(__name__)
 config_logger(workflow_logger)
 
 
-# TODO adjust for predicting affinities
+# TODO implement this
+# first predict affinities with mala,
+# then reshape them properly (xy, z affinities)
+# TODO do reshaping in gunpowder output node already
+# TODO make sure the output has the correct name
+class AffinityPrediction(luigi.Task):
+
+    rawPath = luigi.Parameter()
+
+    def requires(self):
+        pass
+
+    @run_decorator
+    def run(self):
+        pass
+
+    def output(self):
+        pass
+
+
 class InputData(luigi.Task):
     """
     Task for loading external input data, e.g. raw data or probability maps.
@@ -45,6 +65,26 @@ class InputData(luigi.Task):
     key  = luigi.Parameter(default="data")
     # the dtype, should either be float32 or uint8
     dtype = luigi.Parameter(default="float32")
+
+    # if the input data is not existing, this is an affinity map task
+    # and we need to predict the affinities first
+    def requires(self):
+        if not os.path.exists(self.path):
+
+            # find the corresponding raw data from the inputs
+            raw_prefix = os.path.split(self.path)[1].split('_')[:-2]
+            raw_prefix = '_'.join(raw_prefix) + '.h5'
+            inputs = PipelineParameter().inputs['data']
+            found_raw = False
+            for in_path in inputs:
+                if os.path.split(in_path)[1] == raw_prefix:
+                    raw_path = in_path
+                    found_raw = True
+                    break
+            if not found_raw:
+                raise RuntimeError("Couldn't find raw path for requested affinity map: %s" % self.path)
+
+            return AffinityPrediction(raw_path)
 
     def run(self):
         pass
@@ -69,7 +109,6 @@ class InputData(luigi.Task):
         return HDF5VolumeTarget(self.path, self.dtype, self.key)
 
 
-# TODO adjust for making segmentation via running watershed
 class ExternalSegmentation(luigi.Task):
     """
     Task for loading external segmentation from HDF5.
@@ -80,6 +119,24 @@ class ExternalSegmentation(luigi.Task):
     key  = luigi.Parameter(default="data")
     # the dtype, should either be uint32 or uint64
     dtype = luigi.Parameter(default="uint32")
+
+    # if the path does not exist, run the watershed on distance transform segmentation
+    def requires(self):
+        if not os.path.exists(self.path):
+
+            # find the corresponding affinity maps from the inputs
+            aff_prefix = os.path.split(self.path)[1].split('_')[1:]
+            aff_prefix = '_'.join(aff_prefix)
+            inputs = PipelineParameter().inputs['data']
+            found_aff = False
+            for in_path in inputs:
+                if os.path.split(in_path)[1] == aff_prefix:
+                    aff_path = in_path
+                    found_aff = True
+                    break
+            if not found_aff:
+                raise RuntimeError("Couldn't find affinty path for requested wsdt segmentation: %s" % self.path)
+            return WsdtSegmentation(aff_path)
 
     def run(self):
         pass
