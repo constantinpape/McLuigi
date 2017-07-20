@@ -34,6 +34,7 @@ workflow_logger = logging.getLogger(__name__)
 config_logger(workflow_logger)
 
 
+# TODO adjust for predicting affinities
 class InputData(luigi.Task):
     """
     Task for loading external input data, e.g. raw data or probability maps.
@@ -68,6 +69,7 @@ class InputData(luigi.Task):
         return HDF5VolumeTarget(self.path, self.dtype, self.key)
 
 
+# TODO adjust for making segmentation via running watershed
 class ExternalSegmentation(luigi.Task):
     """
     Task for loading external segmentation from HDF5.

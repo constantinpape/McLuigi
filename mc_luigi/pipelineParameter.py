@@ -6,7 +6,7 @@
 
 import multiprocessing
 import logging
-# import os
+import os
 import json
 
 
@@ -39,6 +39,10 @@ class PipelineParameter(object):
         self.nBinsSliceStatistics = 16
         # histogram threshold for the defect slicce detection
         self.binThreshold = 2  # -> 0 means we don't detect any defects ! This needs to be tuned for every ds !
+
+        # flags to control workflow
+        self.predictAffinityMap = False   # predict affinity map if not pre-computed
+        self.runWatershed = False  # run watershed if not pre-computed
 
         # feature string
         # FIXME in the current form z-affnity are toxic for defects!
@@ -104,8 +108,62 @@ class PipelineParameter(object):
     # include meta fields to save experiment name and time of execution
     # hash everything and put into paramstr for being able to re-identify reliably
 
+    # read the inputs, depending of number and types of inputs
+    # decide the appropriate data tasks:
+    # no segmentation -> assume we don't have probabilities either
+    # and produce pmaps as well as segmentation
     def read_input_file(self, input_file):
         with open(input_file) as f:
             inp_dict = json.load(f)
-        self.inputs = inp_dict
+
         self.cache  = inp_dict['cache']
+        if not os.path.exists(self.cache):
+            os.mkdir(self.cache)
+
+        # check if we have an over-segmentation already
+        # if not we will schedule probability map prediction and watershed task
+        if not 'seg' in inp_dict:
+            data_list = inp_dict['data']
+            if isinstance(data_list, str):
+                n_inp = 1
+                data_list = [data_list]
+            else:
+                assert isinstance(data_list, list)
+                n_inp = len(data_list)
+
+            # append the affinity maps that will be predicted to inputs
+            new_data_list = []
+            # append the watersheds that will be produced to the inputs
+            seg_list = []
+            for inp in range(n_inp):
+
+                raw_path = data_list[n_inp]
+                new_data_list.append(raw_path)
+                raw_prefix = os.path.split(raw_path)[1][:-3]
+
+                affinity_folder = os.path.join(self.cache, '%s_affinities' % raw_prefix)
+                if not os.path.exists(affinity_folder):
+                    os.mkdir(affinity_folder)
+
+                # xy-affinities
+                new_data_list.append(
+                    os.path.join(affinity_folder, '%s_affinities_xy.h5' % raw_prefix)
+                )
+
+                # z-affinities
+                new_data_list.append(
+                    os.path.join(affinity_folder, '%s_affinities_z.h5' % raw_prefix)
+                )
+
+                # wsdt segmentation
+                seg_list.append(
+                    os.path.join(self.cache, '%s_wsdtsegmentation.h5' % raw_prefix)
+                )
+
+            inp_dict['data'] = new_data_list
+            inp_dict['seg'] = seg_list
+
+            self.predictAffinityMap = True
+            self.runWatershed = True
+
+        self.inputs = inp_dict
