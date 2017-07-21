@@ -132,7 +132,7 @@ class PipelineParameter(object):
             seg_list = []
             for inp in range(n_inp):
 
-                raw_path = data_list[n_inp]
+                raw_path = data_list[inp]
                 new_data_list.append(raw_path)
                 raw_prefix = os.path.split(raw_path)[1][:-3]
 

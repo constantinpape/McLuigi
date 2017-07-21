@@ -4,7 +4,6 @@ from workflowTasks import BlockwiseMulticutStitchingSegmentation, NoStitchingSeg
 
 from learningTasks import LearnClassifierFromGt, EdgeGroundtruth, EdgeProbabilities
 from pipelineParameter import PipelineParameter
-from segmentationTasks import WsdtSegmentation
 
 from tools import config_logger
 from blockwiseMulticutTasks import TestSubSolver
