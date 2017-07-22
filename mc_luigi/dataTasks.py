@@ -20,19 +20,16 @@ import subprocess
 
 # TODO make light and fast reimplementation of wsdt in-place
 # TODO benchmark alternative
-#from wsdt_impl import compute_wsdt_segmentation
+# from wsdt_impl import compute_wsdt_segmentation
 from wsdt import wsDtSegmentation as compute_wsdt_segmentation
 
 # import the proper nifty version
 try:
-    import nifty
     import nifty.graph.rag as nrag
 except ImportError:
     try:
-        import nifty_with_cplex as nifty
         import nifty_with_cplex.graph.rag as nrag
     except ImportError:
-        import nifty_with_gurobi as nifty
         import nifty_with_gurobi.graph.rag as nrag
 
 # init the workflow logger
@@ -48,6 +45,7 @@ config_logger(workflow_logger)
 # FIXME this won't work for larger data.
 # -> not everything is done out of core
 # -> affinity prediction is not parallelized yet
+# -> instead of cropping, should implement offsets in nifty.h5
 # TODO check plans of speeding up gunpowder predictions with Jan
 
 # TODO implement this
@@ -116,8 +114,7 @@ class AffinityPrediction(luigi.Task):
         raw_name = os.path.split(self.rawPath)[1]
 
         # crop the padding context from the raw data and save it!
-        with h5py.File(out_path) as f_aff, \
-            h5py.File(self.rawPath) as f_raw:
+        with h5py.File(out_path) as f_aff, h5py.File(self.rawPath) as f_raw:
 
             ds_aff = f_aff['volumes/predicted_affs']
             aff_shape = ds_aff.shape[1:]
@@ -126,15 +123,16 @@ class AffinityPrediction(luigi.Task):
             offset = np.array(list(raw_shape)) - np.array(list(aff_shape))
             offset /= 2
 
-            bb = np.s_[offset[0]:-offset[0],offset[1]:-offset[1],offset[2]:-offset[2]]
+            bb = np.s_[offset[0]:-offset[0], offset[1]:-offset[1], offset[2]:-offset[2]]
             raw_cropped = f_raw['data'][bb]
             assert raw_cropped.shape == aff_shape
             workflow_logger.info("AffinityPrediction: cropping cnn context %s from raw data" % str(offset))
 
+            # TODO instead of cropping, add offsets to nifty h5 array once implemented
             # save the cropped raw data
             raw_save = os.path.join(PipelineParameter().cache, '%s_cropped.h5' % raw_name[:-3])
             with h5py.File(raw_save) as f_save:
-                ds = f_save.create_dataset('data', data=raw_cropped, chunks=(1, 512, 512), dtype='uint8')  # TODO compress ?
+                f_save.create_dataset('data', data=raw_cropped, chunks=(1, 512, 512), dtype='uint8')  # TODO compress ?
             workflow_logger.info("AffinityPrediction: saving cropped raw data to %s" % raw_save)
 
             # change the input path in the input dict
@@ -151,19 +149,18 @@ class AffinityPrediction(luigi.Task):
             affinity_folder = self.output().path
             save_path_xy = os.path.join(affinity_folder, '%s_affinities_xy.h5' % raw_name[:-3])
             save_path_z  = os.path.join(affinity_folder, '%s_affinities_z.h5' % raw_name[:-3])
-            with h5py.File(save_path_xy) as f_xy, \
-                h5py.File(save_path_z) as f_z:
+            with h5py.File(save_path_xy) as f_xy, h5py.File(save_path_z) as f_z:
 
-                ds_xy = f_xy.create_dataset('data', shape=aff_shape, chunks=(1, 512, 512), dtype='float32')  # TODO compress ?, uint8 ?
-                ds_z = f_z.create_dataset('data', shape=aff_shape, chunks=(1, 512, 512), dtype='float32')  # TODO compress ?, uint8 ?
+                # TODO compress ?, uint8 ?
+                ds_xy = f_xy.create_dataset('data', shape=aff_shape, chunks=(1, 512, 512), dtype='float32')
+                ds_z = f_z.create_dataset('data', shape=aff_shape, chunks=(1, 512, 512), dtype='float32')
 
                 # TODO this could be parallelized and done in a out-of-core fashion !
-                ds_xy[:] = (ds_aff[1,:] + ds_aff[2,:]) / 2.
-                ds_z[:] = (ds_aff[0,:])
+                ds_xy[:] = (ds_aff[1, :] + ds_aff[2, :]) / 2.
+                ds_z[:] = (ds_aff[0, :])
 
         # remover the temp file
         os.remove(out_path)
-
 
     def output(self):
         raw_prefix = os.path.split(self.rawPath)[1][:-3]
@@ -399,7 +396,9 @@ class ExternalSegmentation(luigi.Task):
 
                 if np.dtype(self.dtype) != np.dtype(dset.dtype):
                     workflow_logger.debug("ExternalSegmentation: loading data from %s" % self.path)
-                    workflow_logger.debug("ExternalSegmentation: changing dtype from %s to %s" % (self.dtype, dset.dtype))
+                    workflow_logger.debug(
+                        "ExternalSegmentation: changing dtype from %s to %s" % (self.dtype, dset.dtype)
+                    )
                     self.dtype = dset.dtype
 
         return HDF5VolumeTarget(self.path, self.dtype, self.key, compression=PipelineParameter().compressionLevel)

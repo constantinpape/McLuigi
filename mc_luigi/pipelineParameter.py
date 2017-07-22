@@ -126,7 +126,7 @@ class PipelineParameter(object):
 
         # check if we have an over-segmentation already
         # if not we will schedule probability map prediction and watershed task
-        if not 'seg' in inp_dict:
+        if 'seg' not in inp_dict:
             data_list = inp_dict['data']
             if isinstance(data_list, str):
                 n_inp = 1
@@ -154,6 +154,7 @@ class PipelineParameter(object):
                 affinity_z_path = os.path.join(affinity_folder, '%s_affinities_z.h5' % raw_prefix)
                 new_data_list.append(affinity_z_path)
 
+                # TODO don't need to do this once offsets are implemented in nifty
                 # if the affinites have already been generated, we need to use the cropped raw data
                 # as input instead of the original raw data!
                 if os.path.exists(affinity_folder):
