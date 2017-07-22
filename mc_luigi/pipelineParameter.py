@@ -46,6 +46,15 @@ class PipelineParameter(object):
         # self.features = ["raw","affinitiesXY","affinitiesZ","reg"]
         self.features = ["raw", "prob", "reg"]  # for non-affinity maps replace 'affinitiesXY/Z' with prob
 
+        # path to neural network snapshots
+        self.netWeightsPath = ''
+        self.netArchitecturePath = ''
+        self.netGpuId = 0  # id of gpu to be used
+
+        # ignore label for edge groundtruth
+        self.haveIgnoreLabel = False
+        self.ignoreLabel = -1
+
         # number of threads
         self.nThreads = multiprocessing.cpu_count()
         # compression level
@@ -137,18 +146,23 @@ class PipelineParameter(object):
                 raw_prefix = os.path.split(raw_path)[1][:-3]
 
                 affinity_folder = os.path.join(self.cache, '%s_affinities' % raw_prefix)
-                if not os.path.exists(affinity_folder):
-                    os.mkdir(affinity_folder)
-
                 # xy-affinities
-                new_data_list.append(
-                    os.path.join(affinity_folder, '%s_affinities_xy.h5' % raw_prefix)
-                )
+                affinity_xy_path = os.path.join(affinity_folder, '%s_affinities_xy.h5' % raw_prefix)
+                new_data_list.append(affinity_xy_path)
 
                 # z-affinities
-                new_data_list.append(
-                    os.path.join(affinity_folder, '%s_affinities_z.h5' % raw_prefix)
-                )
+                affinity_z_path = os.path.join(affinity_folder, '%s_affinities_z.h5' % raw_prefix)
+                new_data_list.append(affinity_z_path)
+
+                # if the affinites have already been generated, we need to use the cropped raw data
+                # as input instead of the original raw data!
+                if os.path.exists(affinity_folder):
+                    assert os.path.exists(affinity_xy_path), affinity_xy_path
+                    assert os.path.exists(affinity_z_path), affinity_z_path
+                    # the new raw path for the cropped data
+                    new_raw_path = os.path.join(self.cache, '%s_cropped.h5' % raw_prefix)
+                    assert os.path.exists(new_raw_path), new_raw_path
+                    new_data_list[0] = new_raw_path
 
                 # wsdt segmentation
                 seg_list.append(

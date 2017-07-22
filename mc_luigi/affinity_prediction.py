@@ -1,10 +1,6 @@
 import os
 import argparse
 
-# TODO can we import local python files in the docker env?
-# if yes, do:
-# from pipelineParameter import PipelineParameter
-
 from gunpowder import *
 from gunpowder.caffe import *
 
@@ -13,13 +9,15 @@ def predict(
     out_folder,
     out_name,
     net_architecture,
-    net_weights
+    net_weights,
+    gpu_id
 ):
     assert os.path.exists(raw_path), raw_path
-    assert os.path.exists(net_folder), net_folder
-    assert os.path.exists(out_folder), out_folder
     assert os.path.exists(net_architecture), net_architecture
     assert os.path.exists(net_weights), net_weights
+
+    if not os.path.exists(out_folder):
+        os.mkdir(out_folder)
 
     # TODO this should not be hard coded here, should fetch it from somewhere instead
     input_size = Coordinate((84, 268, 268))
@@ -62,7 +60,7 @@ def predict(
             ZeroOutConstSections() +
 
             # do the actual prediction
-            Predict(prototxt, weights, use_gpu=0) +
+            Predict(net_architecture, net_weights, use_gpu=gpu_id) +
 
             PrintProfilingStats() +
 
@@ -94,14 +92,13 @@ def parse_input():
     parser.add_argument('out_path', type=str)
     parser.add_argument('net_architecture', type=str)
     parser.add_argument('net_weights', type=str)
+    parser.add_argument('gpu_id', type=int)
     args = parser.parse_args()
 
-    out_path = parser.out_path
+    out_path = args.out_path
     out_folder, out_name = os.path.split(out_path)
-    return args.raw_path, out_folder, out_name, args.net_architecture, args.net_weights
+    return args.raw_path, out_folder, out_name, args.net_architecture, args.net_weights, args.gpu_id
 
 
 if __name__ == "__main__":
-    # TODO if we have pipeline parameter, things would be nicer, because we don't have to pass
-    # as many parameters as arguments
     predict(*parse_input())

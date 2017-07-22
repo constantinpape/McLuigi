@@ -4,6 +4,7 @@ from workflowTasks import BlockwiseMulticutStitchingSegmentation, NoStitchingSeg
 
 from learningTasks import LearnClassifierFromGt, EdgeGroundtruth, EdgeProbabilities
 from pipelineParameter import PipelineParameter
+from dataTasks import ExternalSegmentation
 
 from tools import config_logger
 from blockwiseMulticutTasks import TestSubSolver
@@ -13,3 +14,4 @@ from featureTasks import RegionFeatures, EdgeFeatures
 from defectDetectionTasks import OversegmentationSliceStatistics, DefectSliceDetection
 from defectHandlingTasks import DefectsToNodes, ModifiedAdjacency, SkipEdgeLengths
 from multicutProblemTasks import MulticutProblem
+

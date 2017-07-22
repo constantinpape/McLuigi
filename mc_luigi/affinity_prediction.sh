@@ -5,14 +5,14 @@ export NAME=$(basename "$PWD")
 
 nvidia-docker rm -f $NAME
 
-NV_GPU=0 nvidia-docker run --rm \
+NV_GPU=$6 nvidia-docker run --rm \
     -u `id -u $USER` \
     -v $(pwd):/workspace \
-    -v /groups/saalfeld/home/papec:/groups/saalfeld/home/papec \
+    -v $HOME:$HOME \
     -w /workspace \
     --name $NAME \
     funkey/gunpowder:v0.2 \
-    python -u predict.py
+    python -u $1 $2 $3 $4 $5 $6
 
 
 # if want to use own gunpowder:
