@@ -45,15 +45,18 @@ class HDF5VolumeTarget(FileSystemTarget):
         self.dtype = dtype
         self.compression = compression
         self.arrays = {}
-        self.shapes = {}
-        self.chunk_shapes = {}
         self.opened = False
 
-    def openExisting(self):
+
+    def has_offsets(self, key='data'):
         with h5py.File(self.path) as f:
-            keys = f.keys()
-        for key in keys:
-            self.open(key=key)
+            ds = f[key]
+            if 'offset_front' in ds.attrs.keys():
+                assert 'offset_back' in ds.attrs.keys()
+                return True
+            else:
+                return False
+
 
     def open(self, shape=None, chunkShape=None, key='data'):
 
@@ -68,22 +71,16 @@ class HDF5VolumeTarget(FileSystemTarget):
                 self.h5_file = nh5.createFile(self.path)  # , cacheSettings)
             self.opened = True
 
-        newDataset = True
-        with h5py.File(self.path) as f:
-            if key in f.keys():
-                newDataset = False
-
         # open an existing dataset
-        if not newDataset:
-            assert shape is None
+        if shape is None:
             assert chunkShape is None
 
             self.arrays[key] = nh5.hdf5Array(self.dtype, self.h5_file, key)
 
             # check if any offsets were added to the array
-            with h5py.File(self.path) as f:
-                ds = f[key]
-                if 'offset_front' in ds.attrs.keys():
+            if self.has_offsets(key):
+                with h5py.File(self.path) as f:
+                    ds = f[key]
                     offset_front = ds.attrs.get('offset_front')
                     offset_back = ds.attrs.get('offset_back')
                     self.arrays[key].setOffsetFront(offset_front)
@@ -91,9 +88,7 @@ class HDF5VolumeTarget(FileSystemTarget):
 
         # create a new dataset
         else:
-
-            # shape and chunk shape
-            assert shape is not None, "HDF5VolumeTarget needs to be initialised with a shape, when creating a new file"
+            # if we no chunk chape was given, use default chunks
             if chunkShape is not None:
                 assert len(chunkShape) == len(shape), str(len(chunkShape)) + " , " + str(len(shape))
                 for dd in range(len(shape)):
@@ -104,9 +99,6 @@ class HDF5VolumeTarget(FileSystemTarget):
             self.arrays[key] = nh5.hdf5Array(
                 self.dtype, self.h5_file, key, shape, chunkShape, compression=self.compression
             )
-
-        self.shapes[key] = self.arrays[key].shape
-        self.chunk_shapes[key] = self.arrays[key].chunkShape
 
     # add offsets to the nh5 array
     def setOffsets(self, offset_front, offset_back, key='data'):
@@ -129,23 +121,37 @@ class HDF5VolumeTarget(FileSystemTarget):
     def write(self, start, data, key='data'):
         if key not in self.arrays:
             raise KeyError("Key does not name a valid dataset in H5 file.")
+        assert self.opened
         # to avoid errors in python glue code
         start = list(map(long, start))
-        try:
-            self.arrays[key].writeSubarray(start, data)
-        except AttributeError:
-            raise RuntimeError("You must call open once before calling read or write!")
+        self.arrays[key].writeSubarray(start, data)
 
     def read(self, start, stop, key='data'):
         if key not in self.arrays:
             raise KeyError("Key does not name a valid dataset in H5 file.")
+        assert self.opened
         # to avoid errors in python glue code
         start = list(map(long, start))
         stop = list(map(long, stop))
-        try:
-            return self.arrays[key].readSubarray(start, stop)
-        except AttributeError:
-            raise RuntimeError("You must call open once before calling read or write!")
+        return self.arrays[key].readSubarray(start, stop)
+
+    def get(self, key='data'):
+        if key not in self.arrays:
+            raise KeyError("Key does not name a valid dataset in H5 file.")
+        assert self.opened
+        return self.arrays[key]
+
+    def shape(self, key='data'):
+        if key not in self.arrays:
+            raise KeyError("Key does not name a valid dataset in H5 file.")
+        assert self.opened
+        return self.arrays[key].shape
+
+    def chunk_shape(self, key='data'):
+        if key not in self.arrays:
+            raise KeyError("Key does not name a valid dataset in H5 file.")
+        assert self.opened
+        return self.arrays[key].chunkShape
 
     # TODO not exposed in nifty right now
     # def writeLocked(self, start, data, key = 'data'):
@@ -168,21 +174,6 @@ class HDF5VolumeTarget(FileSystemTarget):
     #        return self.arrays[key].readSubarrayLocked(start, stop)
     #    except AttributeError:
     #        raise RuntimeError("You must call open once before calling read or write!")
-
-    def get(self, key='data'):
-        if key not in self.arrays:
-            raise KeyError("Key does not name a valid dataset in H5 file.")
-        return self.arrays[key]
-
-    def shape(self, key='data'):
-        if key not in self.arrays:
-            raise KeyError("Key does not name a valid dataset in H5 file.")
-        return self.shapes[key]
-
-    def chunk_shape(self, key='data'):
-        if key not in self.arrays:
-            raise KeyError("Key does not name a valid dataset in H5 file.")
-        return self.chunk_shapes[key]
 
 
 class HDF5DataTarget(FileSystemTarget):

@@ -45,14 +45,11 @@ config_logger(workflow_logger)
 # FIXME this won't work for larger data.
 # -> not everything is done out of core
 # -> affinity prediction is not parallelized yet
-# -> instead of cropping, should implement offsets in nifty.h5
 # TODO check plans of speeding up gunpowder predictions with Jan
 
-# TODO implement this
 # first predict affinities with mala,
 # then reshape them properly (xy, z affinities)
 # TODO do reshaping in gunpowder output node already
-# TODO make sure the output has the correct name
 class AffinityPrediction(luigi.Task):
 
     rawPath = luigi.Parameter()
@@ -118,38 +115,27 @@ class AffinityPrediction(luigi.Task):
 
             ds_aff = f_aff['volumes/predicted_affs']
             aff_shape = ds_aff.shape[1:]
-            raw_shape = f_raw['data'].shape
+
+            inp = self.input()
+            inp.open()
+
+            # if for some reason we already have offsets, they need to be over-written
+            if inp.has_offsets():
+                inp.setOffsets([0, 0, 0], [0, 0, 0])
+                workflow_logger.info("AffinityPrediction: overwriting old raw offsets")
+
+            raw_shape = inp.shape()
 
             offset = np.array(list(raw_shape)) - np.array(list(aff_shape))
             offset /= 2
 
-            #bb = np.s_[offset[0]:-offset[0], offset[1]:-offset[1], offset[2]:-offset[2]]
-            #raw_cropped = f_raw['data'][bb]
-            #assert raw_cropped.shape == aff_shape
-            #workflow_logger.info("AffinityPrediction: cropping cnn context %s from raw data" % str(offset))
-
-            ## TODO instead of cropping, add offsets to nifty h5 array once implemented
-            ## save the cropped raw data
-            #raw_save = os.path.join(PipelineParameter().cache, '%s_cropped.h5' % raw_name[:-3])
-            #with h5py.File(raw_save) as f_save:
-            #    f_save.create_dataset('data', data=raw_cropped, chunks=(1, 512, 512), dtype='uint8')  # TODO compress ?
-            #workflow_logger.info("AffinityPrediction: saving cropped raw data to %s" % raw_save)
-
-            ## change the input path in the input dict
-            #input_dict = PipelineParameter().inputs
-            #for ii, data_input in enumerate(input_dict['data']):
-            #    if data_input == self.rawPath:
-            #        input_dict['data'][ii] = raw_save
-            #        changed_path = data_input
-            #        break
-            #PipelineParameter().inputs = input_dict
-            #workflow_logger.info("AffinityPrediction: changing raw input path from %s to %s" % (changed_path, raw_save))
-
             # write the raw data offsets to the nifty h5 array
-            inp = self.input()
-            inp.open()
-            inp.setOffsests(offset.tolist(), offset.tolist())
+            inp.setOffsets(offset.tolist(), offset.tolist())
+            assert tuple(inp.shape()) == aff_shape, "%s, %s" % (str(inp.shape()), str(aff_shape))
             inp.close()
+            workflow_logger.info(
+                "AffinityPrediction: cropping cnn context %s from raw data" % str(offset)
+            )
 
             # save the xy-affinities and the z-affinities seperately
             affinity_folder = self.output().path
