@@ -18,8 +18,7 @@ import time
 from concurrent import futures
 import subprocess
 
-# TODO make light and fast reimplementation of wsdt in-place
-# TODO benchmark alternative
+# TODO benchmark and debug alternative impl
 # from wsdt_impl import compute_wsdt_segmentation
 from wsdt import wsDtSegmentation as compute_wsdt_segmentation
 
@@ -43,8 +42,8 @@ config_logger(workflow_logger)
 
 
 # FIXME this won't work for larger data.
-# -> not everything is done out of core
 # -> affinity prediction is not parallelized yet
+# -> not everything is done out of core (affinity reshaping)
 # TODO check plans of speeding up gunpowder predictions with Jan
 
 # first predict affinities with mala,
@@ -212,11 +211,11 @@ class WsdtSegmentation(luigi.Task):
             print "Slice", z, "/", shape[0]
             sliceStart = [z, 0, 0]
             sliceStop  = [z + 1, shape[1], shape[2]]
-            # TODO proper params from ppl. params
             pmap_z = pmap.read(sliceStart, sliceStop)
 
             if invert:
                 pmap_z = 1. - pmap_z
+
             seg, max_z = compute_wsdt_segmentation(
                 pmap_z.squeeze(),
                 threshold,
@@ -227,7 +226,6 @@ class WsdtSegmentation(luigi.Task):
             )
             if max_z == 0:  # this can happen for defected slices
                 max_z = 1
-            # FIXME change this in own impl
             else:
                 # default minval of wsdt segmentation is 1
                 seg -= 1
@@ -235,11 +233,24 @@ class WsdtSegmentation(luigi.Task):
             out.write(sliceStart, seg[None, :, :])
             return max_z
 
-        t_ws = time.time()
+        #  TODO use once lightweight is debugged
+        #def segment_slice(z):
 
-        # parallel
+        #    print "Slice", z, "/", shape[0]
+        #    sliceStart = [z, 0, 0]
+        #    sliceStop  = [z + 1, shape[1], shape[2]]
+        #    pmap_z = pmap.read(sliceStart, sliceStop).squeeze()
+
+        #    if invert:
+        #        pmap_z = 1. - pmap_z
+
+        #    seg, max_z = compute_wsdt_segmentation(pmap_z, threshold, sig_seeds, min_mem)
+        #    out.write(sliceStart, seg[None, :, :])
+        #    return max_z + 1
+
         n_workers = PipelineParameter().nThreads
-        # n_workers = 1
+
+        t_ws = time.time()
         with futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
             tasks = [executor.submit(segment_slice, z) for z in xrange(shape[0])]
             offsets = [future.result() for future in tasks]
@@ -255,7 +266,7 @@ class WsdtSegmentation(luigi.Task):
         if offsets[-1] >= 4294967295 and self.dtype == np.dtype('uint32'):
             print "WARNING: UINT32 overflow!"
             # we don't add the offset, but only save the non-offset file
-            return True
+            return False
 
         def add_offset(z, offset):
             sliceStart = [z, 0, 0]
@@ -263,14 +274,13 @@ class WsdtSegmentation(luigi.Task):
             seg = out.read(sliceStart, sliceStop)
             seg += offset
             out.write(sliceStart, seg)
-            return True
 
         t_off = time.time()
-        # parallel
         with futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
             tasks = [executor.submit(add_offset, z, offsets[z]) for z in xrange(shape[0])]
             [t.result() for t in tasks]
         workflow_logger.info("WsdtSegmentation: Adding offsets took %f s" % (time.time() - t_off))
+        return True
 
     # TODO if we integrate defects / 3d ws reflect this in the caching name
     def output(self):
@@ -504,11 +514,11 @@ class DenseGroundtruth(luigi.Task):
             keep_zeros=True
         )
 
-        gt.close()
-
         out = self.output()
         out.open(gt.shape())
         out.write([0, 0, 0], gt_labeled)
+
+        gt.close()
         out.close()
 
     def output(self):

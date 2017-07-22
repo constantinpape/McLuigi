@@ -399,7 +399,6 @@ class EdgeGroundtruth(luigi.Task):
         gt = inp["gt"]
         gt.open()
         rag = inp["rag"].read()
-        node_gt = nrag.gridRagAccumulateLabels(rag, gt.get())
 
         # check for defects and load the correspomding uv-ids
         has_defects = False
@@ -414,6 +413,18 @@ class EdgeGroundtruth(luigi.Task):
         else:
             uv_ids = rag.uvIds()
 
+        out = self.output()
+        u_gt, v_gt = self._compute_edge_gt(gt, rag, uv_ids, has_defects, out)
+
+        # check if we have an ignore label in the groundtruth and mask the labels accordingly
+        if PipelineParameter().haveIgnoreLabel:
+            self._compute_label_masks(u_gt, v_gt, rag, has_defects, inp, out)
+
+        gt.close()
+
+    def _compute_edge_gt(self, gt, rag, uv_ids, has_defects, out):
+
+        node_gt = nrag.gridRagAccumulateLabels(rag, gt.get())
         u_gt = node_gt[uv_ids[:, 0]]
         v_gt = node_gt[uv_ids[:, 1]]
         edge_gt = (u_gt != v_gt).astype('uint8')
@@ -421,47 +432,54 @@ class EdgeGroundtruth(luigi.Task):
         assert (np.unique(edge_gt) == np.array([0, 1])).all(), str(np.unique(edge_gt))
         assert edge_gt.shape[0] == uv_ids.shape[0]
 
-        out = self.output()
-        # check if we have an ignore label in the groundtruth and mask the labels accordingly
-        if PipelineParameter().haveIgnoreLabel:
-
-            ignore_label = PipelineParameter().ignoreLabel
-            label_mask = np.logical_not(
-                np.logical_or((u_gt == ignore_label), (v_gt == ignore_label))
-            )
-            edge_gt = edge_gt[label_mask]
-
-            # write the label masks for all edge types
-            edge_transition = rag.totalNumberOfInSliceEdges
-            label_mask_xy = label_mask[:edge_transition]
-            out.write(label_mask_xy, 'label_mask_xy')
-
-            if has_defects:
-
-                n_edges = inp["modified_adjacency"].read("n_edges_modified")
-                skip_transition = rag.numberOfEdges - inp["modified_adjacency"].read("delete_edges").shape[0]
-
-                label_mask_z = label_mask[edge_transition:skip_transition]
-                out.write(label_mask_z, 'label_mask_z')
-
-                label_mask_skip = label_mask[skip_transition:]
-                out.write(label_mask_skip, 'label_mask_skip')
-
-                out.write(label_mask[:skip_transition], 'label_mask')
-
-            else:
-                label_mask_z = label_mask[edge_transition:]
-                out.write(label_mask_z, 'label_mask_z')
-                out.write(label_mask, 'label_mask')
-
         # write the edge gts for all the different edge types
+        edge_transition = rag.totalNumberOfInSliceEdges
+
         out.write(edge_gt, 'edge_gt')
         out.write(edge_gt[:edge_transition], 'edge_gt_xy')
         if has_defects:
+            mod_adjacency = inp["modified_adjacency"]
+            n_edges = mod_adjacency.read("n_edges_modified")
+            skip_transition = rag.numberOfEdges - mod_adjacency.read("delete_edges").shape[0]
+
             out.write(edge_gt[edge_transition:skip_transition], 'edge_gt_z')
             out.write(edge_gt[skip_transition:], 'edge_gt_skip')
         else:
-            out.write(edge_gt[edge_transition], 'edge_gt_z')
+            out.write(edge_gt[edge_transition:], 'edge_gt_z')
+
+        return u_gt, v_gt
+
+    def _compute_label_masks(self, u_gt, v_gt, rag, has_defects, inp, out):
+
+        ignore_label = PipelineParameter().ignoreLabel
+        assert ignore_label != -1
+        label_mask = np.logical_not(
+            np.logical_or((u_gt == ignore_label), (v_gt == ignore_label))
+        )
+
+        # write the label masks for all edge types
+        edge_transition = rag.totalNumberOfInSliceEdges
+        label_mask_xy = label_mask[:edge_transition]
+        out.write(label_mask_xy, 'label_mask_xy')
+
+        if has_defects:
+
+            mod_adjacency = inp["modified_adjacency"]
+            n_edges = mod_adjacency.read("n_edges_modified")
+            skip_transition = rag.numberOfEdges - mod_adjacency.read("delete_edges").shape[0]
+
+            label_mask_z = label_mask[edge_transition:skip_transition]
+            out.write(label_mask_z, 'label_mask_z')
+
+            label_mask_skip = label_mask[skip_transition:]
+            out.write(label_mask_skip, 'label_mask_skip')
+
+            out.write(label_mask[:skip_transition], 'label_mask')
+
+        else:
+            label_mask_z = label_mask[edge_transition:]
+            out.write(label_mask_z, 'label_mask_z')
+            out.write(label_mask, 'label_mask')
 
     def output(self):
         segFile = os.path.split(self.pathToSeg)[1][:-3]
@@ -503,7 +521,6 @@ class LearnClassifierFromGt(luigi.Task):
         inp = self.input()
         gt = inp["gt"]
         feature_tasks = inp["features"]
-        rag = inp["rag"]
 
         n_inputs = len(self.pathsToSeg)
 
@@ -726,6 +743,8 @@ class LearnClassifierFromGt(luigi.Task):
 
             if PipelineParameter().haveIgnoreLabel:
                 mask = gt_i.read('label_mask_z')
+                assert len(mask) == len(features_i), "%s, %s" % (str(mask.shape), str(features_i.shape))
+                assert len(mask) == len(edge_gt), "%s, %s" % (str(mask.shape), str(edge_gt.shape))
                 features_i = features_i[mask]
                 edge_gt = edge_gt[mask]
 

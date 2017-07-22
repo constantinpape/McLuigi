@@ -23,7 +23,7 @@ def compute_wsdt_segmentation(
 ):
 
     # first, we compute the signed distance transform
-    dt = signed_distance_transform(probability_map, threshold)
+    dt = signed_distance_transform(probability_map, threshold, preserve_membrane)
 
     # next, get the seeds via maxima on the (smoothed) distance transform
     seeds = seeds_from_distance_transform(dt, sigma_seeds)
@@ -37,7 +37,7 @@ def compute_wsdt_segmentation(
 def signed_distance_transform(probability_map, threshold, preserve_membrane):
 
     # get the distance transform of the pmap
-    binary_membranes = (probability_map >= threshold).view('uint8')
+    binary_membranes = (probability_map >= threshold).astype('uint32')
     distance_to_membrane = vigra.filters.distanceTransform(binary_membranes)
 
     # Instead of computing a negative distance transform within the thresholded membrane areas,
