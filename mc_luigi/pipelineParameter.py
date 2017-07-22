@@ -154,16 +154,16 @@ class PipelineParameter(object):
                 affinity_z_path = os.path.join(affinity_folder, '%s_affinities_z.h5' % raw_prefix)
                 new_data_list.append(affinity_z_path)
 
-                # TODO don't need to do this once offsets are implemented in nifty
-                # if the affinites have already been generated, we need to use the cropped raw data
-                # as input instead of the original raw data!
-                if os.path.exists(affinity_folder):
-                    assert os.path.exists(affinity_xy_path), affinity_xy_path
-                    assert os.path.exists(affinity_z_path), affinity_z_path
-                    # the new raw path for the cropped data
-                    new_raw_path = os.path.join(self.cache, '%s_cropped.h5' % raw_prefix)
-                    assert os.path.exists(new_raw_path), new_raw_path
-                    new_data_list[0] = new_raw_path
+                ## TODO don't need to do this once offsets are implemented in nifty
+                ## if the affinites have already been generated, we need to use the cropped raw data
+                ## as input instead of the original raw data!
+                #if os.path.exists(affinity_folder):
+                #    assert os.path.exists(affinity_xy_path), affinity_xy_path
+                #    assert os.path.exists(affinity_z_path), affinity_z_path
+                #    # the new raw path for the cropped data
+                #    new_raw_path = os.path.join(self.cache, '%s_cropped.h5' % raw_prefix)
+                #    assert os.path.exists(new_raw_path), new_raw_path
+                #    new_data_list[0] = new_raw_path
 
                 # wsdt segmentation
                 seg_list.append(

@@ -78,22 +78,20 @@ class HDF5VolumeTarget(FileSystemTarget):
             assert shape is None
             assert chunkShape is None
 
-            # set the dtype #TODO (could we do this in a more elegant way?)
-            if np.dtype(self.dtype) == np.dtype("float32"):
-                self.arrays[key] = nh5.Hdf5ArrayFloat32(self.h5_file, key)
-            elif np.dtype(self.dtype) == np.dtype("float64"):
-                self.arrays[key] = nh5.Hdf5ArrayFloat64(self.h5_file, key)
-            elif np.dtype(self.dtype) == np.dtype("uint8"):
-                self.arrays[key] = nh5.Hdf5ArrayUInt8(self.h5_file, key)
-            elif np.dtype(self.dtype) == np.dtype("uint32"):
-                self.arrays[key] = nh5.Hdf5ArrayUInt32(self.h5_file, key)
-            elif np.dtype(self.dtype) == np.dtype("uint64"):
-                self.arrays[key] = nh5.Hdf5ArrayUInt64(self.h5_file, key)
-            else:
-                raise RuntimeError("Datatype %s not supported!" % (str(self.dtype),))
+            self.arrays[key] = nh5.hdf5Array(self.dtype, self.h5_file, key)
+
+            # check if any offsets were added to the array
+            with h5py.File(self.path) as f:
+                ds = f[key]
+                if 'offset_front' in ds.attrs.keys():
+                    offset_front = ds.attrs.get('offset_front')
+                    offset_back = ds.attrs.get('offset_back')
+                    self.arrays[key].setOffsetFront(offset_front)
+                    self.arrays[key].setOffsetBack(offset_back)
 
         # create a new dataset
         else:
+
             # shape and chunk shape
             assert shape is not None, "HDF5VolumeTarget needs to be initialised with a shape, when creating a new file"
             if chunkShape is not None:
@@ -103,30 +101,24 @@ class HDF5VolumeTarget(FileSystemTarget):
             else:
                 chunkShape = [1, min(shape[1], 512), min(shape[2], 512)]
 
-            if np.dtype(self.dtype) == np.dtype("float32"):
-                self.arrays[key] = nh5.Hdf5ArrayFloat32(
-                    self.h5_file, key, shape, chunkShape, compression=self.compression
-                )
-            elif np.dtype(self.dtype) == np.dtype("float64"):
-                self.arrays[key] = nh5.Hdf5ArrayFloat64(
-                    self.h5_file, key, shape, chunkShape, compression=self.compression
-                )
-            elif np.dtype(self.dtype) == np.dtype("uint8"):
-                self.arrays[key] = nh5.Hdf5ArrayUInt8(
-                    self.h5_file, key, shape, chunkShape, compression=self.compression
-                )
-            elif np.dtype(self.dtype) == np.dtype("uint32"):
-                self.arrays[key] = nh5.Hdf5ArrayUInt32(
-                    self.h5_file, key, shape, chunkShape, compression=self.compression
-                )
-            elif np.dtype(self.dtype) == np.dtype("uint64"):
-                self.arrays[key] = nh5.Hdf5ArrayUInt64(
-                    self.h5_file, key, shape, chunkShape, compression=self.compression
-                )
-            else:
-                raise RuntimeError("Datatype %s not supported!" % (str(self.dtype),))
+            self.arrays[key] = nh5.hdf5Array(
+                self.dtype, self.h5_file, key, shape, chunkShape, compression=self.compression
+            )
+
         self.shapes[key] = self.arrays[key].shape
         self.chunk_shapes[key] = self.arrays[key].chunkShape
+
+    # add offsets to the nh5 array
+    def setOffsets(self, offset_front, offset_back, key='data'):
+        if key not in self.arrays:
+            raise KeyError("Key does not name a valid dataset in H5 file.")
+        self.arrays[key].setOffsetFront(offset_front)
+        self.arrays[key].setOffsetBack(offset_back)
+        # serialize the offsets
+        with h5py.File(self.path) as f:
+            ds = f[key]
+            ds.attrs.create('offset_front', offset_front)
+            ds.attrs.create('offset_back', offset_back)
 
     def close(self):
         assert self.opened
