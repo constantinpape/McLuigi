@@ -19,8 +19,8 @@ from concurrent import futures
 import subprocess
 
 # TODO benchmark and debug alternative impl
-# from wsdt_impl import compute_wsdt_segmentation
-from wsdt import wsDtSegmentation as compute_wsdt_segmentation
+from wsdt_impl import compute_wsdt_segmentation
+# from wsdt import wsDtSegmentation as compute_wsdt_segmentation
 
 # import the proper nifty version
 try:
@@ -197,10 +197,8 @@ class WsdtSegmentation(luigi.Task):
         # read the wsdt settings from ppl params
         ppl_params = PipelineParameter()
         threshold   = ppl_params.wsdtThreshold
-        min_mem     = ppl_params.wsdtMinMem
         min_seg     = ppl_params.wsdtMinSeg
         sig_seeds   = ppl_params.wsdtSigSeeds
-        sig_weights = ppl_params.wsdtSigWeights
         invert      = ppl_params.wsdtInvert
         workflow_logger.info(
             "WsdtSegmentation: Running standard 2d dt watershed with threshold %f" % threshold
@@ -211,42 +209,14 @@ class WsdtSegmentation(luigi.Task):
             print "Slice", z, "/", shape[0]
             sliceStart = [z, 0, 0]
             sliceStop  = [z + 1, shape[1], shape[2]]
-            pmap_z = pmap.read(sliceStart, sliceStop)
+            pmap_z = pmap.read(sliceStart, sliceStop).squeeze()
 
             if invert:
                 pmap_z = 1. - pmap_z
 
-            seg, max_z = compute_wsdt_segmentation(
-                pmap_z.squeeze(),
-                threshold,
-                min_mem, min_seg,
-                sig_seeds, sig_weights,
-                # group seeds set to false for proper threading behaviour (everything should have gil lifted)
-                groupSeeds=False
-            )
-            if max_z == 0:  # this can happen for defected slices
-                max_z = 1
-            else:
-                # default minval of wsdt segmentation is 1
-                seg -= 1
-
+            seg, max_z = compute_wsdt_segmentation(pmap_z, threshold, sig_seeds, min_seg)
             out.write(sliceStart, seg[None, :, :])
-            return max_z
-
-        #  TODO use once lightweight is debugged
-        #def segment_slice(z):
-
-        #    print "Slice", z, "/", shape[0]
-        #    sliceStart = [z, 0, 0]
-        #    sliceStop  = [z + 1, shape[1], shape[2]]
-        #    pmap_z = pmap.read(sliceStart, sliceStop).squeeze()
-
-        #    if invert:
-        #        pmap_z = 1. - pmap_z
-
-        #    seg, max_z = compute_wsdt_segmentation(pmap_z, threshold, sig_seeds, min_mem)
-        #    out.write(sliceStart, seg[None, :, :])
-        #    return max_z + 1
+            return max_z + 1
 
         n_workers = PipelineParameter().nThreads
 

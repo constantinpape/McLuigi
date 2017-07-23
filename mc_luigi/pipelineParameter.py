@@ -93,10 +93,8 @@ class PipelineParameter(object):
 
         # parameters for segmentation tasks / wsdt
         self.wsdtThreshold = .2
-        self.wsdtMinMem    = 0
         self.wsdtMinSeg    = 75
         self.wsdtSigSeeds  = 2.6
-        self.wsdtSigWeights = 0.
         self.wsdtInvert    = False
 
         # for BlockWiseStitchingSolver

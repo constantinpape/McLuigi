@@ -414,7 +414,7 @@ class EdgeGroundtruth(luigi.Task):
             uv_ids = rag.uvIds()
 
         out = self.output()
-        u_gt, v_gt = self._compute_edge_gt(gt, rag, uv_ids, has_defects, out)
+        u_gt, v_gt = self._compute_edge_gt(gt, rag, uv_ids, has_defects, inp, out)
 
         # check if we have an ignore label in the groundtruth and mask the labels accordingly
         if PipelineParameter().haveIgnoreLabel:
@@ -422,7 +422,7 @@ class EdgeGroundtruth(luigi.Task):
 
         gt.close()
 
-    def _compute_edge_gt(self, gt, rag, uv_ids, has_defects, out):
+    def _compute_edge_gt(self, gt, rag, uv_ids, has_defects, inp, out):
 
         node_gt = nrag.gridRagAccumulateLabels(rag, gt.get())
         u_gt = node_gt[uv_ids[:, 0]]
@@ -439,7 +439,6 @@ class EdgeGroundtruth(luigi.Task):
         out.write(edge_gt[:edge_transition], 'edge_gt_xy')
         if has_defects:
             mod_adjacency = inp["modified_adjacency"]
-            n_edges = mod_adjacency.read("n_edges_modified")
             skip_transition = rag.numberOfEdges - mod_adjacency.read("delete_edges").shape[0]
 
             out.write(edge_gt[edge_transition:skip_transition], 'edge_gt_z')
@@ -465,7 +464,6 @@ class EdgeGroundtruth(luigi.Task):
         if has_defects:
 
             mod_adjacency = inp["modified_adjacency"]
-            n_edges = mod_adjacency.read("n_edges_modified")
             skip_transition = rag.numberOfEdges - mod_adjacency.read("delete_edges").shape[0]
 
             label_mask_z = label_mask[edge_transition:skip_transition]
@@ -542,7 +540,7 @@ class LearnClassifierFromGt(luigi.Task):
                 "LearnClassifierFromGt: learning classfier from single input for xy and z edges separately."
             )
             self._learn_classifier_from_single_input_xy(gt, feature_tasks)
-            self._learn_classifier_from_single_input_z( gt, feature_tasks)
+            self._learn_classifier_from_single_input_z(gt, feature_tasks)
 
         else:
             workflow_logger.info("LearnClassifierFromGt: learning classfier from single input for all edges.")
@@ -643,6 +641,7 @@ class LearnClassifierFromGt(luigi.Task):
         assert PipelineParameter().defectPipeline
         edge_gt = gt.read('edge_gt_skip')
 
+        features = []
         for feat_task in feature_tasks:
             feat_path = os.path.join(feat_task.path, 'features_skip.h5')
             with h5py.File(feat_path) as f:
