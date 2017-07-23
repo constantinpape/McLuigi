@@ -18,9 +18,10 @@ requirements:
         - h5py >=2.7
         - futures
         - luigi 2.1.1
-        - wsdt >=0.2.post9
         - vigra ==1.11.0.post222
-        - nifty-with-cplex ==0.4.post488
+        # we use nifty without cplex now TODO build conda package and specify version
+        #- nifty-with-cplex ==0.4.post488
+        - nifty
         - scikit-learn >=0.18.2
 
 test:

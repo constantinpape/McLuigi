@@ -4,8 +4,6 @@ import numpy as np
 
 from scipy.ndimage.morphology import distance_transform_edt
 
-import time
-
 
 # wrap vigra local maxima properly
 def local_maxima(image, *args, **kwargs):
@@ -43,9 +41,6 @@ def signed_distance_transform(probability_map, threshold, preserve_membrane):
 
     # get the distance transform of the pmap
     binary_membranes = (probability_map >= threshold)
-
-    # TODO vigra dt shows weird behauviour... check if scipy dt lifts gil properly
-    # distance_to_membrane = vigra.filters.distanceTransform(binary_membranes)
     distance_to_membrane = distance_transform_edt(binary_membranes)
 
     # Instead of computing a negative distance transform within the thresholded membrane areas,
@@ -107,6 +102,7 @@ if __name__ == '__main__':
     # from volumina_viewer import volumina_n_layer
     from wsdt import wsDtSegmentation
     from concurrent import futures
+    import time
 
     pmap_path = '/home/consti/Work/data_neuro/cache/cremi/sample_A_train/inp1.h5'
     pmap = vigra.readHDF5(pmap_path, 'data')
