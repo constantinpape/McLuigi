@@ -146,11 +146,6 @@ class PipelineParameter(object):
 
                 affinity_folder = os.path.join(self.cache, '%s_affinities' % raw_prefix)
 
-                # FIXME if we don't use affinity, but only prob features, this will mess up the feature inputs !!!
-                # TODO check feature string and append affinities accordingly !
-                # this is not terribly nice though, because it depends on setting the correct features before loading inputs
-                # cleanest solution: nest the input data one more level, but this also needs some refactoring in featureTasks
-
                 # xy-affinities
                 affinity_xy_path = os.path.join(affinity_folder, '%s_affinities_xy.h5' % raw_prefix)
                 new_data_list.append(affinity_xy_path)
