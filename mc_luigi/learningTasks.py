@@ -230,17 +230,20 @@ class EdgeProbabilities(luigi.Task):
         for feat in feature_tasks:
 
             xy_path = os.path.join(feat.path, 'features_xy.h5')
-            with h5py.File(xy_path) as f:
-                n_feats_xy += f['data'].shape[1]
+            if os.path.exists(xy_path):
+                with h5py.File(xy_path) as f:
+                    n_feats_xy += f['data'].shape[1]
 
             z_path = os.path.join(feat.path, 'features_z.h5')
-            with h5py.File(z_path) as f:
-                n_feats_z += f['data'].shape[1]
+            if os.path.exists(z_path):
+                with h5py.File(z_path) as f:
+                    n_feats_z += f['data'].shape[1]
 
             if has_defects:
                 skip_path = os.path.join(feat.path, 'features_skip.h5')
-                with h5py.File(skip_path) as f:
-                    n_feats_skip += f['data'].shape[1]
+                if os.path.exists(skip_path):
+                    with h5py.File(skip_path) as f:
+                        n_feats_skip += f['data'].shape[1]
 
         feat_types = ['features_xy', 'features_z']
         classifier_types = feat_types if PipelineParameter().separateEdgeClassification else 2 * ['features_joined']
@@ -317,10 +320,11 @@ class EdgeProbabilities(luigi.Task):
 
         for ii, feat in enumerate(feature_tasks):
             feat_path = os.path.join(feat.path, '%s.h5' % feat_type)
-            with h5py.File(feat_path) as f:
-                this_feats = f['data'][:]
-                features[:, offset:offset + this_feats.shape[1]] = this_feats
-                offset += this_feats.shape[1]
+            if os.path.exists(feat_path):
+                with h5py.File(feat_path) as f:
+                    this_feats = f['data'][:]
+                    features[:, offset:offset + this_feats.shape[1]] = this_feats
+                    offset += this_feats.shape[1]
 
         probs = classifier.predict_probabilities(features, PipelineParameter().nThreads)[:, 1]
         out.write([long(start)], probs)
@@ -349,8 +353,9 @@ class EdgeProbabilities(luigi.Task):
             sub_feats = []
             for feat in feature_tasks:
                 feat_path = os.path.join(feat.path, '%s.h5' % feat_type)
-                with h5py.File(feat_path) as f:
-                    sub_feats.append(f['data'][start_index:end_index, 0:f['data'].shape[1]])
+                if os.path.exists(feat_path):
+                    with h5py.File(feat_path) as f:
+                        sub_feats.append(f['data'][start_index:end_index, 0:f['data'].shape[1]])
             sub_feats = np.concatenate(sub_feats, axis=1)
 
             read_start = long(start_index + start)
@@ -551,10 +556,12 @@ class LearnClassifierFromGt(luigi.Task):
                 this_feats = []
 
                 feat_path_xy = os.path.join(feat.path, 'features_xy')
+                assert os.path.exists(feat_path_xy)
                 with h5py.File(feat_path_xy) as f:
                     this_feats.append(f['data'][:])
 
                 feat_path_z = os.path.join(feat.path, 'features_z')
+                assert os.path.exists(feat_path_z)
                 with h5py.File(feat_path_z) as f:
                     this_feats.append(f['data'][:])
 
@@ -592,8 +599,9 @@ class LearnClassifierFromGt(luigi.Task):
         features = []
         for feat_task in feature_tasks:
             feat_path = os.path.join(feat_task.path, 'features_xy.h5')
-            with h5py.File(feat_path) as f:
-                features.append(f['data'][:])
+            if os.path.exists(feat_path):
+                with h5py.File(feat_path) as f:
+                    features.append(f['data'][:])
         features = np.concatenate(features, axis=1)
 
         if PipelineParameter().haveIgnoreLabel:
@@ -617,8 +625,9 @@ class LearnClassifierFromGt(luigi.Task):
         features = []
         for feat_task in feature_tasks:
             feat_path = os.path.join(feat_task.path, 'features_z.h5')
-            with h5py.File(feat_path) as f:
-                features.append(f['data'][:])
+            if os.path.exists(feat_path):
+                with h5py.File(feat_path) as f:
+                    features.append(f['data'][:])
         features = np.concatenate(features, axis=1)
 
         if PipelineParameter().haveIgnoreLabel:
@@ -644,8 +653,9 @@ class LearnClassifierFromGt(luigi.Task):
         features = []
         for feat_task in feature_tasks:
             feat_path = os.path.join(feat_task.path, 'features_skip.h5')
-            with h5py.File(feat_path) as f:
-                features.append(f['data'][:])
+            if os.path.exists(feat_path):
+                with h5py.File(feat_path) as f:
+                    features.append(f['data'][:])
         features = np.concatenate(features, axis=1)
 
         if PipelineParameter().haveIgnoreLabel:
@@ -698,8 +708,9 @@ class LearnClassifierFromGt(luigi.Task):
             features_i = []
             for feat_task in feat_tasks_i:
                 feat_path = os.path.join(feat_task.path, 'features_xy.h5')
-                with h5py.File(feat_path) as f:
-                    features_i.append(f['data'][:])
+                if os.path.exists(feat_path):
+                    with h5py.File(feat_path) as f:
+                        features_i.append(f['data'][:])
             features_i = np.concatenate(features_i, axis=1)
 
             if PipelineParameter().haveIgnoreLabel:
@@ -736,8 +747,9 @@ class LearnClassifierFromGt(luigi.Task):
             features_i = []
             for feat_task in feat_tasks_i:
                 feat_path = os.path.join(feat_task.path, 'features_z.h5')
-                with h5py.File(feat_path) as f:
-                    features_i.append(f['data'][:])
+                if os.path.exists(feat_path):
+                    with h5py.File(feat_path) as f:
+                        features_i.append(f['data'][:])
             features_i = np.concatenate(features_i, axis=1)
 
             if PipelineParameter().haveIgnoreLabel:
@@ -777,10 +789,12 @@ class LearnClassifierFromGt(luigi.Task):
 
                 this_feats = []
                 feat_path_xy = os.path.join(feat_task.path, 'features_xy.h5')
+                assert os.path.exists(feat_path_xy)
                 with h5py.File(feat_path_xy) as f:
                     this_feats.append(f['data'][:])
 
                 feat_path_z = os.path.join(feat_task.path, 'features_z.h5')
+                assert os.path.exists(feat_path_z)
                 with h5py.File(feat_path_z) as f:
                     this_feats.append(f['data'][:])
 
@@ -827,8 +841,9 @@ class LearnClassifierFromGt(luigi.Task):
             features_i = []
             for feat_task in feat_tasks_i:
                 feat_path = os.path.join(feat_task.path, 'features_skip.h5')
-                with h5py.File(feat_path) as f:
-                    features_i.append(f['data'][:])
+                if os.path.exists(feat_path):
+                    with h5py.File(feat_path) as f:
+                        features_i.append(f['data'][:])
             features_i = np.concatenate(features_i, axis=1)
 
             if PipelineParameter().haveIgnoreLabel:

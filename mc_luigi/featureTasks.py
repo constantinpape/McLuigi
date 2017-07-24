@@ -322,8 +322,12 @@ class EdgeFeatures(luigi.Task):
     pathToInput = luigi.Parameter()
     # current oversegmentation
     pathToSeg = luigi.Parameter()
+
+    # optional parameters
     keepOnlyXY = luigi.BoolParameter(default=False)
     keepOnlyZ = luigi.BoolParameter(default=False)
+    simpleFeatures = luigi.BoolParameter(default=False)
+    zDirection = luigi.Parameter(default=0)
 
     # For now we can't set these any more, needs to be passed to C++ somehow
     # filterNames = luigi.ListParameter(
@@ -377,14 +381,23 @@ class EdgeFeatures(luigi.Task):
         if has_defects:
             self._postprocess_modified_output(out)
 
+        # if we only compute features for one of the edge-types, remove the features of the other type
+        if self.keepOnlyXY:
+            os.remove(os.path.join(out.path, 'features_z.h5'))
+        if self.keepOnlyZ:
+            os.remove(os.path.join(out.path, 'features_xy.h5'))
+
     def _compute_standard_feats(self, data, rag, out):
 
         workflow_logger.info("EdgeFeatures: _compute_standard_feats called.")
         n_edges_xy = rag.totalNumberOfInSliceEdges if not self.keepOnlyZ else 0
         n_edges_z  = rag.totalNumberOfInBetweenSliceEdges if not self.keepOnlyXY else 0
 
-        # 9 * 12 = number of features per edge / would be nice not to hard code this here...
-        n_feats = 9 * 12
+        # number of features:
+        # 9 * 12 for features from filter accumulation
+        # 9 for simple features
+        # TODO would be nice not to hard code this here...
+        n_feats = 9 if self.simpleFeatures else 9 * 12
         out_shape_xy    = [n_edges_xy, n_feats]
         chunk_shape_xy  = [min(2500, n_edges_xy), n_feats]
         out_shape_z    = [n_edges_z, n_feats]
@@ -399,19 +412,33 @@ class EdgeFeatures(luigi.Task):
         z_file = nh5.createFile(os.path.join(out.path, 'features_z.h5'))
         out_z = nh5.Hdf5ArrayFloat32(z_file, 'data', out_shape_z, chunk_shape_z)
 
-        nrag.accumulateEdgeFeaturesFromFilters(
-            rag,
-            data,
-            out_xy,
-            out_z,
-            self.keepOnlyXY,
-            self.keepOnlyZ,
-            PipelineParameter().nThreads
-        )
+        if self.simpleFeatures:
+            nrag.accumulateEdgeStandardFeatures(
+                rag,
+                data,
+                out_xy,
+                out_z,
+                self.keepOnlyXY,
+                self.keepOnlyZ,
+                self.zDirection,
+                PipelineParameter().nThreads
+            )
+        else:
+            nrag.accumulateEdgeFeaturesFromFilters(
+                rag,
+                data,
+                out_xy,
+                out_z,
+                self.keepOnlyXY,
+                self.keepOnlyZ,
+                self.zDirection,
+                PipelineParameter().nThreads
+            )
 
         workflow_logger.info("EdgeFeatures: _compute_standard_feats done.")
         return xy_file, z_file
 
+    # TODO implement simpler feature computation in nifty
     def _compute_modified_feats(self, data, rag, modified_adjacency, out):
 
         workflow_logger.info("EdgeFeatures: _compute_modified_feats called.")
@@ -533,15 +560,18 @@ class EdgeFeatures(luigi.Task):
     def output(self):
         seg_file = os.path.split(self.pathToSeg)[1][:-3]
         inp_file = os.path.split(self.pathToInput)[1][:-3]
-        save_path = os.path.join(PipelineParameter().cache, "EdgeFeatures_%s_%s" % (seg_file, inp_file))
-        if PipelineParameter().defectPipeline:
-            save_path += '_modified'
-        else:
-            save_path += '_standard'
+        save_path = os.path.join(
+            PipelineParameter().cache,
+            "EdgeFeatures_%s_%s_%s" % (seg_file, inp_file, 'modified' if PipelineParameter().defectPipeline else 'standard')
+        )
         if self.keepOnlyXY:
             save_path += '_xy'
         if self.keepOnlyZ:
             save_path += '_z'
+        if self.simpleFeatures:
+            save_path += '_simple'
+        if self.zDirection != 0:
+            save_path += '_zDir%i' % self.zDirection
         return FolderTarget(save_path)
 
 

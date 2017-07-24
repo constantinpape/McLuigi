@@ -43,8 +43,9 @@ class PipelineParameter(object):
         # feature string
         # FIXME in the current form z-affnity are toxic for defects!
         # for non-affinity maps replace 'affinitiesXY/Z' with prob
-        # self.features = ["raw","affinitiesXY","affinitiesZ","reg"]
-        self.features = ["raw", "prob", "reg"]  # for non-affinity maps replace 'affinitiesXY/Z' with prob
+        # self.features = ["raw", "affinitiesXY", "affinitiesZ", "reg"]
+        self.features = ["raw", "prob", "reg"]
+        self.zAffinityDirection = 2 # encoding of z-affinities: 1 -> slice z has affinties to z+1, 2 -> z+1 has affinities to z
 
         # path to neural network snapshots
         self.netWeightsPath = ''
@@ -144,6 +145,12 @@ class PipelineParameter(object):
                 raw_prefix = os.path.split(raw_path)[1][:-3]
 
                 affinity_folder = os.path.join(self.cache, '%s_affinities' % raw_prefix)
+
+                # FIXME if we don't use affinity, but only prob features, this will mess up the feature inputs !!!
+                # TODO check feature string and append affinities accordingly !
+                # this is not terribly nice though, because it depends on setting the correct features before loading inputs
+                # cleanest solution: nest the input data one more level, but this also needs some refactoring in featureTasks
+
                 # xy-affinities
                 affinity_xy_path = os.path.join(affinity_folder, '%s_affinities_xy.h5' % raw_prefix)
                 new_data_list.append(affinity_xy_path)

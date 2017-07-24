@@ -45,6 +45,7 @@ def get_local_features():
         feature_tasks.append(EdgeFeatures(input_data[0], seg))
         workflow_logger.debug("get_local_features: calculating Edge Features from raw input: " + input_data[0])
 
+    # TODO enable simple feature calculation for prob, affinitiesXY and affinitiesZ
     if "prob" in features:
         # by convention we assume that the membrane probs are given as 1st
         feature_tasks.append(EdgeFeatures(input_data[1], seg))
@@ -57,7 +58,7 @@ def get_local_features():
 
     if "affinitiesZ" in features:  # specific Z - features -> we keep only these
         # by convention we assume that the z - affinity channel is given as 2nd input
-        feature_tasks.append(EdgeFeatures(input_data[2], seg, keepOnlyZ=True))
+        feature_tasks.append(EdgeFeatures(input_data[2], seg, keepOnlyZ=True, zDirection=PipelineParameter().zAffinityDirection))
         workflow_logger.debug("get_local_features: calculating Edge Features from z affinity maps: " + input_data[2])
 
     if "reg" in features:
