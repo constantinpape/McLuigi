@@ -75,7 +75,7 @@ class McSolverFusionMoves(luigi.Task):
         )
 
         factory = string_to_factory(obj, solver_type, solver_params)
-        ret, mc_energy, t_inf = run_nifty_solver(obj, factory, verbose=0)
+        ret, mc_energy, t_inf = run_nifty_solver(obj, factory, verbose=True)
         mc_energy = mc_energy[-1]
         t_inf = t_inf[-1]
 
@@ -114,7 +114,7 @@ class McSolverExact(luigi.Task):
         obj = nifty.graph.multicut.multicutObjective(g, edgeCosts)
 
         factory = nifty_ilp_factory(obj)
-        ret, mc_energy, t_inf = run_nifty_solver(obj, factory, verbose=1)
+        ret, mc_energy, t_inf = run_nifty_solver(obj, factory, verbose=True)
         mc_energy = mc_energy[-1]
         t_inf = t_inf[-1]
 

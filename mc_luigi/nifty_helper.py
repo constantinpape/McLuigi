@@ -24,38 +24,11 @@ def available_factorys():
     return available
 
 
-# def run_nifty_solver(
-#     obj,
-#     factory,
-#     verbose=False,
-#     time_limit=None
-# ):
-#
-#     solver = factory.create(obj)
-#     with_visitor = False
-#     if verbose or time_limit is not None:
-#         with_visitor = True
-#         visit_nth = 1 if verbose else int(1000000000)
-#         if time_limit is not None:
-#             visitor = obj.verboseVisitor(visit_nth, time_limit)
-#         else:
-#             visitor = obj.verboseVisitor(visit_nth)
-#
-#     t_inf = time.time()
-#     if with_visitor:
-#         ret = solver.optimize(visitor)
-#     else:
-#         ret = solver.optimize()
-#     t_inf = time.time() - t_inf
-#     mc_energy = obj.evalNodeLabels(ret)
-#     return ret, mc_energy, t_inf
-
-
 def run_nifty_solver(
     obj,
     factory,
-    verbose=0,
-    time_limit=None,
+    verbose=True,
+    time_limit=float('inf'),
     visit_nth=1
 ):
     solver = factory.create(obj)

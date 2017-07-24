@@ -80,7 +80,7 @@ class RandomForest(object):
         self = self('__will_deserialize__', None, None, None)
         if use_sklearn:
             save_path = os.path.join(file_path, "%s.pkl" % key)
-            assert os.path.exists(save_path)
+            assert os.path.exists(save_path), save_path
             with open(save_path) as f:
                 rf = pickle.load(f)
             self.n_trees = rf.n_estimators
