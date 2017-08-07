@@ -41,7 +41,7 @@ def signed_distance_transform(probability_map, threshold, preserve_membrane):
 
     # get the distance transform of the pmap
     binary_membranes = (probability_map >= threshold)
-    distance_to_membrane = distance_transform_edt(binary_membranes)
+    distance_to_membrane = distance_transform_edt(np.logical_not(binary_membranes))
 
     # Instead of computing a negative distance transform within the thresholded membrane areas,
     # Use the original probabilities (but inverted)
@@ -50,7 +50,7 @@ def signed_distance_transform(probability_map, threshold, preserve_membrane):
 
     # Compute the negative distance transform and substract it from the distance transform
     else:
-        distance_to_nonmembrane = vigra.filters.distanceTransform(binary_membranes, background=False)
+        distance_to_nonmembrane = vigra.filters.distanceTransform(binary_membranes)
 
         # Combine the inner/outer distance transforms
         distance_to_nonmembrane[distance_to_nonmembrane > 0] -= 1
