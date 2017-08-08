@@ -831,13 +831,13 @@ class LearnClassifierFromGt(luigi.Task):
         for i in xrange(len(gt)):
             feat_tasks_i = feature_tasks[i]
             gt_i = gt[i]
-            edge_gt = gt_i.read('edge_gt_skip')
 
             # if we learn with defects, we only keep the z edges that are not skip edges
             mod_i = self.input()["modified_adjacency"][i]
             if not mod_i.read("has_defects"):
                 continue
 
+            edge_gt = gt_i.read('edge_gt_skip')
             features_i = []
             for feat_task in feat_tasks_i:
                 feat_path = os.path.join(feat_task.path, 'features_skip.h5')
