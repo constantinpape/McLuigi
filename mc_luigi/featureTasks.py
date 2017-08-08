@@ -378,7 +378,7 @@ class EdgeFeatures(luigi.Task):
 
         data_file.close()
 
-        if has_defects:
+        if has_defects and not self.keepOnlyXY:
             self._postprocess_modified_output(out)
 
         # if we only compute features for one of the edge-types, remove the features of the other type
@@ -390,8 +390,8 @@ class EdgeFeatures(luigi.Task):
     def _compute_standard_feats(self, data, rag, out):
 
         workflow_logger.info("EdgeFeatures: _compute_standard_feats called.")
-        n_edges_xy = rag.totalNumberOfInSliceEdges if not self.keepOnlyZ else 0
-        n_edges_z  = rag.totalNumberOfInBetweenSliceEdges if not self.keepOnlyXY else 0
+        n_edges_xy = rag.totalNumberOfInSliceEdges if not self.keepOnlyZ else 1
+        n_edges_z  = rag.totalNumberOfInBetweenSliceEdges if not self.keepOnlyXY else 1
 
         # number of features:
         # 9 * 12 for features from filter accumulation
@@ -515,7 +515,7 @@ class EdgeFeatures(luigi.Task):
         assert skip_starts.shape[0] == skip_edges.shape[0]
 
         # modify the features only if we have skip edges
-        if skip_edges.size:
+        if skip_edges.size and not self.keepOnlyXY:
 
             # TODO i/o in nifty to speed up calculation
             skip_feats = nrag.accumulateSkipEdgeFeaturesFromFilters(
@@ -525,6 +525,7 @@ class EdgeFeatures(luigi.Task):
                 [(int(skip_e[0]), int(skip_e[1])) for skip_e in skip_edges],
                 list(skip_ranges),
                 list(skip_starts),
+                self.zDirection,
                 PipelineParameter().nThreads
             )
 
@@ -532,21 +533,26 @@ class EdgeFeatures(luigi.Task):
             assert skip_feats.shape[1] == n_feats
 
             # open file for the skip edges
-            skip_file = nh5.createFile(os.path.join(out.path, 'features_skip.h5'))
-            out_skip = nh5.Hdf5ArrayFloat32(
-                skip_file,
-                'data',
-                skip_feats.shape,
-                [min(2500L, skip_feats.shape[0]), skip_feats.shape[1]]
+            #skip_file = nh5.createFile(os.path.join(out.path, 'features_skip.h5'))
+            vigra.writeHDF5(
+                skip_feats,
+                os.path.join(out.path, 'features_skip.h5'), 'data',
+                chunks=(min(2500L, skip_feats.shape[0]), skip_feats.shape[1])
             )
-            out_skip.writeSubarray([0L, 0L], skip_feats)
+            #out_skip = nh5.Hdf5ArrayFloat32(
+            #    skip_file,
+            #    'data',
+            #    skip_feats.shape,
+            #    [min(2500L, skip_feats.shape[0]), skip_feats.shape[1]]
+            #)
+            #out_skip.writeSubarray([0L, 0L], skip_feats)
 
         # return the file handles to close the files properly once the arrays are out of scope
         files = [z_file]
         if has_delete_edges:
             files.append(z_file_new)
-        if skip_edges.size:
-            files.append(skip_file)
+        #if skip_edges.size and not self.keepOnlyXY:
+        #    files.append(skip_file)
         return files
 
     # we delete the old features_z and then rename the keep features
