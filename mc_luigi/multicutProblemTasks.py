@@ -61,7 +61,7 @@ class MulticutProblem(luigi.Task):
         len_costs = edge_cost_file.shape()[0]
         workflow_logger.info("MulticutProblem: loaded edge costs of len %i" % len_costs)
 
-        edge_costs = edge_cost_file.read([0L], [long(len_costs)])
+        edge_costs = edge_cost_file.read([0], [len_costs])
 
         if PipelineParameter().defectPipeline:
             workflow_logger.info("MulticutProblem: computing MulticutProblem for defect correction pipeline.")

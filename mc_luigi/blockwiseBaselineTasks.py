@@ -138,8 +138,8 @@ class SubblockSegmentations(BlockwiseSolver):
                 rag,
                 sub_result,
                 out_array,
-                map(long, block_begins[block_id]),
-                map(long, block_ends[block_id])
+                block_begins[block_id],
+                block_ends[block_id]
             )
 
             # if we have defected slices in this sub-block, replace them by an adjacent slice
@@ -161,8 +161,8 @@ class SubblockSegmentations(BlockwiseSolver):
                             % (block_id, z, replace_z)
                         )
                         out_array.writeSubarray(
-                            [z, 0L, 0L],
-                            out_array.readSubarray([replace_z, 0L, 0L], [replace_z + 1, block_shape[1], block_shape[2]])
+                            [z, 0, 0],
+                            out_array.readSubarray([replace_z, 0, 0], [replace_z + 1, block_shape[1], block_shape[2]])
                         )
 
             nh5.closeFile(res_file)
@@ -337,7 +337,7 @@ class BlockwiseMulticutStitchingSolver(BlockwiseSolver):
         block_factor  = max(1, (self.numberOfLevels - 1) * 2)
         block_shape = list(map(lambda x: x * block_factor, initial_shape))
         blocking = nifty.tools.blocking(
-            roiBegin=[0L, 0L, 0L],
+            roiBegin=[0, 0, 0],
             roiEnd=seg.shape(),
             blockShape=block_shape
         )
@@ -620,7 +620,7 @@ class BlockwiseOverlapSolver(BlockwiseSolver):
         block_factor  = max(1, (self.numberOfLevels - 1) * 2)
         block_shape = list(map(lambda x: x * block_factor, initial_shape))
         blocking = nifty.tools.blocking(
-            roiBegin=[0L, 0L, 0L],
+            roiBegin=[0, 0, 0],
             roiEnd=shape,
             blockShape=block_shape
         )

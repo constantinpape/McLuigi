@@ -45,15 +45,15 @@ class OversegmentationPatchStatistics(luigi.Task):
         seg = self.input()
         seg.open()
 
-        ny = long(seg.shape[1])
-        nx = long(seg.shape[2])
+        ny = seg.shape[1]
+        nx = seg.shape[2]
 
         patch_shape = [self.patchSize, self.patchSize]
 
         def extract_patch_statistics_slice(z):
             # 2d blocking representing the patches
-            seg_z = seg.read([long(z), 0, 0], [z + 1, ny, nx])
-            patches = nifty.tools.blocking(roiBegin=[0L, 0L], roiEnd=[ny, nx], blockShape=patch_shape)
+            seg_z = seg.read([z, 0, 0], [z + 1, ny, nx])
+            patches = nifty.tools.blocking(roiBegin=[0, 0], roiEnd=[ny, nx], blockShape=patch_shape)
             # get number of segments for patches in this slice
             n_segs_z = []
             for patch_id in range(patches.numberOfBlocks):
@@ -106,12 +106,12 @@ class OversegmentationSliceStatistics(luigi.Task):
         seg = self.input()
         seg.open()
 
-        ny = long(seg.shape()[1])
-        nx = long(seg.shape()[2])
+        ny = seg.shape()[1]
+        nx = seg.shape()[2]
 
         def extract_segs_in_slice(z):
             # 2d blocking representing the patches
-            seg_z = seg.read([long(z), 0, 0], [z + 1, ny, nx])
+            seg_z = seg.read([z, 0, 0], [z + 1, ny, nx])
             return np.unique(seg_z).shape[0]
 
         # parallel
@@ -169,15 +169,15 @@ class DefectPatchDetection(luigi.Task):
         out = self.output()
         out.open(seg.shape)
 
-        ny = long(seg.shape[1])
-        nx = long(seg.shape[2])
+        ny = seg.shape[1]
+        nx = seg.shape[2]
 
         patch_shape = [self.patchSize, self.patchSize]
-        patch_overlap = [long(self.patchOverlap), long(self.patchOverlap)]
+        patch_overlap = [self.patchOverlap, self.patchOverlap]
 
         def detect_patches_z(z):
-            seg_z = seg.read([long(z), 0L, 0L], [z + 1, ny, nx])
-            patches = nifty.tools.blocking(roiBegin=[0L, 0L], roiEnd=[ny, nx], blockShape=patch_shape)
+            seg_z = seg.read([z, 0, 0], [z + 1, ny, nx])
+            patches = nifty.tools.blocking(roiBegin=[0, 0], roiEnd=[ny, nx], blockShape=patch_shape)
             # get number of segments for patches in this slice
             n_defected = 0
             for patch_id in range(patches.numberOfBlocks):
@@ -192,7 +192,7 @@ class DefectPatchDetection(luigi.Task):
                 if n_segments < self.defectThreshold * mean_num_segs:
                     this_shape = (1,) + tuple(map(lambda x, y: x - y, patch_end, patch_begin))
                     this_patch = np.ones(this_shape, dtype="uint8")
-                    this_begin = [long(z)] + patch_begin
+                    this_begin = [z] + patch_begin
                     out.write(this_begin, this_patch)
                     n_defected += 1
             return n_defected
@@ -240,15 +240,15 @@ class DefectSliceDetection(luigi.Task):
         out = self.output()
         out.open(seg.shape())
 
-        ny = long(seg.shape()[1])
-        nx = long(seg.shape()[2])
+        ny = seg.shape()[1]
+        nx = seg.shape()[2]
 
-        slice_shape = (1L, ny, nx)
+        slice_shape = (1, ny, nx)
         defect_mask = np.ones(slice_shape, dtype="uint8")
         non_defect_mask = np.zeros(slice_shape, dtype="uint8")
 
         def detect_defected_slice(z):
-            slice_begin = [long(z), 0L, 0L]
+            slice_begin = [z, 0, 0]
             seg_z = seg.read(slice_begin, [z + 1, ny, nx])
             # get number of segments for patches in this slice
             n_segs = np.unique(seg_z).shape[0]

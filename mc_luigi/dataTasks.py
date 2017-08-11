@@ -20,7 +20,7 @@ from concurrent import futures
 import subprocess
 
 # TODO benchmark and debug alternative impl
-from wsdt_impl import compute_wsdt_segmentation
+from .wsdt_impl import compute_wsdt_segmentation
 # from wsdt import wsDtSegmentation as compute_wsdt_segmentation
 
 # import the proper nifty version
@@ -185,6 +185,7 @@ class WsdtSegmentation(luigi.Task):
         pmap = self.input()
         pmap.open()
         shape = pmap.shape()
+        print(shape)
         out  = self.output()
         out.open(shape, pmap.chunk_shape())
 

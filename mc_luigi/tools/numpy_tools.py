@@ -1,4 +1,4 @@
-from __future__ import print_funtion, division
+from __future__ import print_function, division
 
 # wrapping some helpful numpy functionality
 import numpy as np

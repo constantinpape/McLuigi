@@ -5,7 +5,7 @@ from luigi.file import LocalFileSystem
 
 import os
 import numpy as np
-import cPickle as pickle
+import pickle
 
 import vigra
 import h5py
@@ -81,12 +81,17 @@ class HDF5VolumeTarget(FileSystemTarget):
 
             # check if any offsets were added to the array
             if self.has_offsets(key):
+                print("Loading with offsets")
                 with h5py.File(self.path) as f:
                     ds = f[key]
                     offset_front = ds.attrs.get('offset_front')
                     offset_back = ds.attrs.get('offset_back')
+                    print(offset_front)
+                    print(offset_back)
                     self.arrays[key].setOffsetFront(offset_front)
                     self.arrays[key].setOffsetBack(offset_back)
+            else:
+                print('No offsets :(')
 
         # create a new dataset
         else:
@@ -125,7 +130,7 @@ class HDF5VolumeTarget(FileSystemTarget):
             raise KeyError("Key does not name a valid dataset in H5 file.")
         assert self.opened
         # to avoid errors in python glue code
-        start = list(map(long, start))
+        start = list(start)
         self.arrays[key].writeSubarray(start, data)
 
     def read(self, start, stop, key='data'):
@@ -133,8 +138,8 @@ class HDF5VolumeTarget(FileSystemTarget):
             raise KeyError("Key does not name a valid dataset in H5 file.")
         assert self.opened
         # to avoid errors in python glue code
-        start = list(map(long, start))
-        stop = list(map(long, stop))
+        start = list(start)
+        stop = list(stop)
         return self.arrays[key].readSubarray(start, stop)
 
     def get(self, key='data'):

@@ -40,7 +40,7 @@ config_logger(workflow_logger)
 try:
     from sklearn.ensemble import RandomForestClassifier as RFType
     use_sklearn = True
-    import cPickle as pickle
+    import pickle
     workflow_logger.info("Using sklearn random forest")
 except ImportError:
     RFType = vigra.learning.RandomForest3
@@ -328,7 +328,7 @@ class EdgeProbabilities(luigi.Task):
                     offset += this_feats.shape[1]
 
         probs = classifier.predict_probabilities(features, PipelineParameter().nThreads)[:, 1]
-        out.write([long(start)], probs)
+        out.write([start], probs)
 
     # Out of core prediction for edge type
     def _predict_out_of_core(
@@ -359,7 +359,7 @@ class EdgeProbabilities(luigi.Task):
                         sub_feats.append(f['data'][start_index:end_index, 0:f['data'].shape[1]])
             sub_feats = np.concatenate(sub_feats, axis=1)
 
-            read_start = long(start_index + start)
+            read_start = start_index + start
 
             probs = classifier.predict_probabilities(sub_feats, 1)[:, 1]
             out.write([read_start], probs)

@@ -15,8 +15,8 @@ from .customTargets import HDF5VolumeTarget
 from .defectDetectionTasks import DefectSliceDetection
 #from .skeletonTasks import ResolveCandidates
 
-from pipelineParameter import PipelineParameter
-from tools import config_logger, run_decorator, get_replace_slices
+from .pipelineParameter import PipelineParameter
+from .tools import config_logger, run_decorator, get_replace_slices
 
 import logging
 import os
@@ -104,8 +104,8 @@ class SegmentationWorkflow(luigi.Task):
             replace_z = replace_slice[z]
             workflow_logger.info("SegmentationWorkflow: replacing defected slice %i by %i" % (z, replace_z))
             out.write(
-                [z, 0L, 0L],
-                out.read([replace_z, 0L, 0L], [replace_z + 1, shape[1], shape[2]])
+                [z, 0, 0],
+                out.read([replace_z, 0, 0], [replace_z + 1, shape[1], shape[2]])
             )
 
 

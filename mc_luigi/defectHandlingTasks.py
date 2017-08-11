@@ -54,12 +54,12 @@ class DefectsToNodes(luigi.Task):
 
         assert seg.shape() == defects.shape()
 
-        ny = long(seg.shape()[1])
-        nx = long(seg.shape()[2])
+        ny = seg.shape()[1]
+        nx = seg.shape()[2]
 
         def defects_to_nodes_z(z):
-            slice_begin = [long(z), 0L, 0L]
-            slice_end   = [long(z + 1), ny, nx]
+            slice_begin = [z, 0, 0]
+            slice_end   = [z + 1, ny, nx]
             defect_mask = defects.read(slice_begin, slice_end)
             if 1 in defect_mask:
                 print(z)

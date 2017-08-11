@@ -33,11 +33,12 @@ def run_decorator(function):
     def wrapper(*args, **kwargs):
         self = args[0]
         name = self.__class__.__name__
+        param_names = self.get_param_names()
+        param_values = [getattr(self, param_name) for param_name in param_names]
+
         # for some reason this can get called multiple times
         # (though the actual run function is always only executed once)
         # that's why we have to make sure that this is only logged once to not clutter the log
-        param_names = self.get_param_names()
-        param_values = [eval("self.%s" % param_name) for param_name in param_names]
         hash_str = "".join([name] + param_names + [str(param_val) for param_val in param_values])
         hash_str = hashlib.md5(hash_str.encode())
         hash_str = hash_str.hexdigest()
@@ -46,6 +47,7 @@ def run_decorator(function):
             for i, param_name in enumerate(param_names):
                 workflow_logger.info("%s: %s: %s" % (name, param_name, str(param_values[i])))
             decorator_call_list.append(hash_str)
+
         t_run = time.time()
         ret = function(*args, **kwargs)
         workflow_logger.info("%s: run finished in %f s" % (name, time.time() - t_run))

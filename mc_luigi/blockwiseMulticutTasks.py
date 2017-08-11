@@ -384,7 +384,7 @@ class BlockwiseSubSolver(luigi.Task):
         initial_block_shape = PipelineParameter().multicutBlockShape
         initial_overlap = list(PipelineParameter().multicutBlockOverlap)
         initial_blocking = nifty.tools.blocking(
-            roiBegin=[0L, 0L, 0L],
+            roiBegin=[0, 0, 0],
             roiEnd=seg.shape(),
             blockShape=initial_block_shape
         )
@@ -406,7 +406,7 @@ class BlockwiseSubSolver(luigi.Task):
             return np.array(inner_edges), np.array(outer_edges), subgraph, node_list
 
         block_overlap = list(self.blockOverlap)
-        blocking = nifty.tools.blocking(roiBegin=[0L, 0L, 0L], roiEnd=seg.shape(), blockShape=self.blockShape)
+        blocking = nifty.tools.blocking(roiBegin=[0, 0, 0], roiEnd=seg.shape(), blockShape=self.blockShape)
         number_of_blocks = blocking.numberOfBlocks
 
         workflow_logger.info(
@@ -610,7 +610,7 @@ class TestSubSolver(luigi.Task):
             inner_edges, outer_edges, subgraph = graph.extractSubgraphFromNodes(node_list.tolist())
             return np.array(inner_edges), np.array(outer_edges), subgraph
 
-        blocking = nifty.tools.blocking(roiBegin=[0L, 0L, 0L], roiEnd=seg.shape(), blockShape=self.blockShape)
+        blocking = nifty.tools.blocking(roiBegin=[0, 0, 0], roiEnd=seg.shape(), blockShape=self.blockShape)
         number_of_blocks = blocking.numberOfBlocks
         # sample block-ids corresponding to the number of threads
         n_threads = PipelineParameter().nThreads

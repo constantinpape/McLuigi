@@ -57,7 +57,7 @@ class NodesToBlocks(luigi.Task):
         else:
             defect_slices = []
 
-        blocking = nifty.tools.blocking(roiBegin=[0L, 0L, 0L], roiEnd=seg.shape(), blockShape=self.blockShape)
+        blocking = nifty.tools.blocking(roiBegin=[0, 0, 0], roiEnd=seg.shape(), blockShape=self.blockShape)
         number_of_blocks = blocking.numberOfBlocks
         block_overlap = list(self.blockOverlap)
 
@@ -102,9 +102,9 @@ class BlockGridGraph(luigi.Task):
 
         # construct the blocking
         blocking = nifty.tools.blocking(
-            roiBegin=[0L, 0L, 0L],
+            roiBegin=[0, 0, 0],
             roiEnd=shape,
-            blockShape=list(map(long, self.blockShape))
+            blockShape=list(self.blockShape)
         )
         n_blocks = blocking.numberOfBlocks
 
