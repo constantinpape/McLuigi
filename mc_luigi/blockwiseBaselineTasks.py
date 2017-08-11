@@ -5,15 +5,15 @@
 
 import luigi
 
-from pipelineParameter import PipelineParameter
-from dataTasks import ExternalSegmentation, StackedRegionAdjacencyGraph
-from customTargets import HDF5DataTarget, FolderTarget
-from defectDetectionTasks import DefectSliceDetection
-from blocking_helper import EdgesBetweenBlocks, BlockGridGraph
-from blockwiseMulticutTasks import BlockwiseSolver, BlockwiseSubSolver
+from .pipelineParameter import PipelineParameter
+from .dataTasks import ExternalSegmentation, StackedRegionAdjacencyGraph
+from .customTargets import HDF5DataTarget, FolderTarget
+from .defectDetectionTasks import DefectSliceDetection
+from .blocking_helper import EdgesBetweenBlocks, BlockGridGraph
+from .blockwiseMulticutTasks import BlockwiseSolver, BlockwiseSubSolver
 
-from nifty_helper import run_nifty_solver, string_to_factory
-from tools import config_logger, run_decorator, get_replace_slices, replace_from_dict
+from .nifty_helper import run_nifty_solver, string_to_factory
+from .tools import config_logger, run_decorator, get_replace_slices, replace_from_dict
 
 import os
 import logging
@@ -105,10 +105,10 @@ class SubblockSegmentations(BlockwiseSolver):
             os.mkdir(out_path)
 
         # iterate over the blocks and serialize the sub-block result
-        # for block_id in xrange(1):
-        for block_id in xrange(len(sub_results)):
+        # for block_id in range(1):
+        for block_id in range(len(sub_results)):
             sub_result = {sub_nodes[block_id][i]: sub_results[block_id][i]
-                          for i in xrange(len(sub_nodes[block_id]))}
+                          for i in range(len(sub_nodes[block_id]))}
 
             print("Saving Block-Result for block %i / %i" % (block_id, len(sub_results)))
             block_begin = block_begins[block_id]
@@ -426,7 +426,7 @@ class BlockwiseMulticutStitchingSolver(BlockwiseSolver):
         workflow_logger.info("BlockwiseMulticutStitichingSolver: Solving sub-problems with solver %s" % sub_solver_type)
         workflow_logger.info(
             "BlockwiseMulticutStitichingSolver: With Params %s" % ' '.join(
-                ['%s, %s,' % (str(k), str(v)) for k, v in solver_params.iteritems()]
+                ['%s, %s,' % (str(k), str(v)) for k, v in solver_params.items()]
             )
         )
 
@@ -750,7 +750,7 @@ class BlockwiseOverlapSolver(BlockwiseSolver):
             # iterate over the nodes in overlap(u) and merge with nodes in overlap(v)
             # according to the overlaps
             # we only merge with the max overlap node, if the relative overlap is bigger then the threshold
-            for node_u_id, node_ovlp in this_node_overlaps.iteritems():
+            for node_u_id, node_ovlp in this_node_overlaps.items():
                 # nodes are sorted in ascending order of their relative overlap
                 relative_ovlp = node_ovlp[1][-1]
                 if relative_ovlp > PipelineParameter().overlapThreshold:
@@ -766,7 +766,7 @@ class BlockwiseOverlapSolver(BlockwiseSolver):
         reduced_node_result = np.zeros(reduced_graph.numberOfNodes, dtype='uint32')
         sub_nodes = sub_solver.read('sub_nodes')
 
-        for block_id in xrange(n_blocks):
+        for block_id in range(n_blocks):
 
             # first find the result for the nodes in this block
             block_result = node_result[block_offsets[block_id]:block_offsets[block_id + 1]] \

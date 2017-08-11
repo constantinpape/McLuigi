@@ -1,3 +1,5 @@
+from __future__ import print_funtion, division
+
 # wrapping some helpful numpy functionality
 import numpy as np
 
@@ -95,11 +97,11 @@ def cartesian(arrays, out=None):
     if out is None:
         out = np.zeros([n, len(arrays)], dtype=dtype)
 
-    m = n / arrays[0].size
+    m = n // arrays[0].size
     out[:,0] = np.repeat(arrays[0], m)
     if arrays[1:]:
         cartesian(arrays[1:], out=out[0:m,1:])
-        for j in xrange(1, arrays[0].size):
+        for j in range(1, arrays[0].size):
             out[j*m:(j+1)*m,1:] = out[0:m,1:]
     return out
 
@@ -107,4 +109,4 @@ def cartesian(arrays, out=None):
 if __name__ == '__main__':
     x = np.array([0,1,2,3])
     y = np.array([5,6])
-    print cartesian([x, y])
+    print(cartesian([x, y]))

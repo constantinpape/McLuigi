@@ -5,15 +5,14 @@ from __future__ import division, print_function
 
 import luigi
 
-from pipelineParameter import PipelineParameter
-from dataTasks import ExternalSegmentation, StackedRegionAdjacencyGraph
-from customTargets import HDF5DataTarget, FolderTarget
-from defectDetectionTasks import DefectSliceDetection
-from multicutProblemTasks import MulticutProblem
-from blocking_helper import NodesToBlocks
-
-from tools import config_logger, run_decorator
-from nifty_helper import run_nifty_solver, string_to_factory, available_factorys
+from .pipelineParameter import PipelineParameter
+from .dataTasks import ExternalSegmentation, StackedRegionAdjacencyGraph
+from .customTargets import HDF5DataTarget, FolderTarget
+from .defectDetectionTasks import DefectSliceDetection
+from .multicutProblemTasks import MulticutProblem
+from .blocking_helper import NodesToBlocks
+from .tools import config_logger, run_decorator
+from .nifty_helper import run_nifty_solver, string_to_factory, available_factorys
 
 import os
 import logging
@@ -54,7 +53,7 @@ class BlockwiseSolver(luigi.Task):
         problems = [self.globalProblem]
         block_factor = 1
 
-        for l in xrange(self.numberOfLevels):
+        for l in range(self.numberOfLevels):
             block_shape = map(lambda x: x * block_factor, initialBlockShape)
 
             # TODO check that we don't get larger than the actual shape here
@@ -121,7 +120,7 @@ class BlockwiseMulticutSolver(BlockwiseSolver):
         workflow_logger.info("BlockwiseMulticutSolver: Solving problems with solver %s" % solver_type)
         workflow_logger.info(
             "BlockwiseMulticutSolver: With Params %s" % ' '.join(
-                ['%s, %s,' % (str(k), str(v)) for k, v in inf_params.iteritems()]
+                ['%s, %s,' % (str(k), str(v)) for k, v in inf_params.items()]
             )
         )
 
@@ -152,7 +151,7 @@ class BlockwiseMulticutSolver(BlockwiseSolver):
             workflow_logger.info(
                 "BlockwiseMulticutSolver: logging energy during inference:"
             )
-            for ii in xrange(len(energy)):
+            for ii in range(len(energy)):
                 workflow_logger.info(
                     "BlockwiseMulticutSolver: t: %f s energy: %f" % (t_inf[ii], energy[ii])
                 )
@@ -295,7 +294,7 @@ class ReducedProblem(luigi.Task):
             new2global = []
 
             # TODO vectorize
-            for newNode in xrange(number_of_new_nodes):
+            for newNode in range(number_of_new_nodes):
                 oldNodes = new2old_nodes[newNode]
                 globalNodes = np.concatenate(new2global_last[oldNodes])
                 global2new[globalNodes] = newNode
@@ -419,7 +418,7 @@ class BlockwiseSubSolver(luigi.Task):
         # parallel
         with futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
             tasks = []
-            for block_id in xrange(number_of_blocks):
+            for block_id in range(number_of_blocks):
 
                 # get the current block with additional overlap
                 block = blocking.getBlockWithHalo(block_id, block_overlap).outerBlock
@@ -449,7 +448,7 @@ class BlockwiseSubSolver(luigi.Task):
             out.write(
                 np.concatenate([
                     np.array(blocking.getBlockWithHalo(block_id, block_overlap).outerBlock.begin)[None, :]
-                    for block_id in xrange(number_of_blocks)],
+                    for block_id in range(number_of_blocks)],
                     axis=0
                 ),
                 'block_begins'
@@ -457,7 +456,7 @@ class BlockwiseSubSolver(luigi.Task):
             out.write(
                 np.concatenate([
                     np.array(blocking.getBlockWithHalo(block_id, block_overlap).outerBlock.end)[None, :]
-                    for block_id in xrange(number_of_blocks)],
+                    for block_id in range(number_of_blocks)],
                     axis=0
                 ),
                 'block_ends'
@@ -488,7 +487,7 @@ class BlockwiseSubSolver(luigi.Task):
         workflow_logger.info("BlockwiseSubSolver: Solving sub-problems with solver %s" % sub_solver_type)
         workflow_logger.info(
             "BlockwiseSubSolver: With Params %s" % ' '.join(
-                ['%s, %s,' % (str(k), str(v)) for k, v in solver_params.iteritems()]
+                ['%s, %s,' % (str(k), str(v)) for k, v in solver_params.items()]
             )
         )
 
@@ -528,7 +527,7 @@ class BlockwiseSubSolver(luigi.Task):
 
         assert len(sub_results) == len(sub_problems), str(len(sub_results)) + " , " + str(len(sub_problems))
 
-        for block_id in xrange(len(sub_problems)):
+        for block_id in range(len(sub_problems)):
 
             # get the cut edges from the subproblem
             node_result = sub_results[block_id]

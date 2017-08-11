@@ -3,9 +3,9 @@ from __future__ import division, print_function
 # Multicut Pipeline implemented with luigi
 # Selecting appropriate feature tasks for several high-level pipeline options
 
-from featureTasks import EdgeFeatures, RegionFeatures
-from pipelineParameter import PipelineParameter
-from tools import config_logger
+from .featureTasks import EdgeFeatures, RegionFeatures
+from .pipelineParameter import PipelineParameter
+from .tools import config_logger
 
 import logging
 
@@ -103,7 +103,7 @@ def get_local_features_for_multiinp():
     nInpPerSeg = len(input_data) / len(segs)
 
     feature_tasks = []
-    for i in xrange(len(segs)):
+    for i in range(len(segs)):
         inp0 = nInpPerSeg * i
         inp1 = nInpPerSeg * i + 1
         inp2 = nInpPerSeg * i + 2

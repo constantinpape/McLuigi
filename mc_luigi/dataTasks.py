@@ -3,10 +3,10 @@ from __future__ import print_function, division
 # Tasks for providing the input data
 
 import luigi
-from customTargets import HDF5VolumeTarget, StackedRagTarget, FolderTarget
 
-from pipelineParameter import PipelineParameter
-from tools import config_logger, run_decorator
+from .customTargets import HDF5VolumeTarget, StackedRagTarget, FolderTarget
+from .pipelineParameter import PipelineParameter
+from .tools import config_logger, run_decorator
 
 import logging
 
@@ -223,7 +223,7 @@ class WsdtSegmentation(luigi.Task):
 
         t_ws = time.time()
         with futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
-            tasks = [executor.submit(segment_slice, z) for z in xrange(shape[0])]
+            tasks = [executor.submit(segment_slice, z) for z in range(shape[0])]
             offsets = [future.result() for future in tasks]
         workflow_logger.info(
             "WsdtSegmentation: Running watershed took: %f s" % (time.time() - t_ws)
@@ -248,7 +248,7 @@ class WsdtSegmentation(luigi.Task):
 
         t_off = time.time()
         with futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
-            tasks = [executor.submit(add_offset, z, offsets[z]) for z in xrange(shape[0])]
+            tasks = [executor.submit(add_offset, z, offsets[z]) for z in range(shape[0])]
             [t.result() for t in tasks]
         workflow_logger.info("WsdtSegmentation: Adding offsets took %f s" % (time.time() - t_off))
         return True
@@ -415,7 +415,7 @@ class ExternalSegmentationLabeled(luigi.Task):
         n_workers = min(shape[0], PipelineParameter().nThreads)
         # n_workers = 1
         with futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
-            tasks = [executor.submit(label_slice, z) for z in xrange(shape[0])]
+            tasks = [executor.submit(label_slice, z) for z in range(shape[0])]
 
         # calculate the offsets for every slice
         offsets = np.array([task.result() for task in tasks], dtype='uint32')
@@ -433,7 +433,7 @@ class ExternalSegmentationLabeled(luigi.Task):
             return True
 
         with futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
-            tasks = [executor.submit(addOffset, offsets[z], z) for z in xrange(shape[0])]
+            tasks = [executor.submit(addOffset, offsets[z], z) for z in range(shape[0])]
         [task.result() for task in tasks]
 
     def output(self):

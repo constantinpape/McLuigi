@@ -5,13 +5,12 @@ from __future__ import print_function, division
 
 import luigi
 
-from taskSelection import get_local_features, get_local_features_for_multiinp
-from customTargets import HDF5DataTarget, HDF5VolumeTarget, FolderTarget
-from dataTasks import DenseGroundtruth, StackedRegionAdjacencyGraph
-from defectHandlingTasks import ModifiedAdjacency
-
-from pipelineParameter import PipelineParameter
-from tools import config_logger, run_decorator
+from .taskSelection import get_local_features, get_local_features_for_multiinp
+from .customTargets import HDF5DataTarget, HDF5VolumeTarget, FolderTarget
+from .dataTasks import DenseGroundtruth, StackedRegionAdjacencyGraph
+from .defectHandlingTasks import ModifiedAdjacency
+from .pipelineParameter import PipelineParameter
+from .tools import config_logger, run_decorator
 
 import logging
 
@@ -369,7 +368,7 @@ class EdgeProbabilities(luigi.Task):
         n_workers = PipelineParameter().nThreads
         # n_workers = 1
         with futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
-            tasks = [executor.submit(predict_subfeats, sub_feat_id) for sub_feat_id in xrange(n_sub_feats)]
+            tasks = [executor.submit(predict_subfeats, sub_feat_id) for sub_feat_id in range(n_sub_feats)]
             [t.result() for t in tasks]
 
     def output(self):
@@ -514,11 +513,11 @@ class LearnClassifierFromGt(luigi.Task):
             feature_tasks = get_local_features_for_multiinp()
             assert len(feature_tasks) == n_inputs
             return_tasks = {
-                "gt": [EdgeGroundtruth(self.pathsToSeg[i], self.pathsToGt[i]) for i in xrange(n_inputs)],
+                "gt": [EdgeGroundtruth(self.pathsToSeg[i], self.pathsToGt[i]) for i in range(n_inputs)],
                 "features": feature_tasks
             }
         if PipelineParameter().defectPipeline:
-            return_tasks['modified_adjacency'] = [ModifiedAdjacency(self.pathsToSeg[i]) for i in xrange(n_inputs)]
+            return_tasks['modified_adjacency'] = [ModifiedAdjacency(self.pathsToSeg[i]) for i in range(n_inputs)]
         return return_tasks
 
     @run_decorator
@@ -701,7 +700,7 @@ class LearnClassifierFromGt(luigi.Task):
         features = []
         gts = []
 
-        for i in xrange(len(gt)):
+        for i in range(len(gt)):
             feat_tasks_i = feature_tasks[i]
             gt_i = gt[i]
 
@@ -741,7 +740,7 @@ class LearnClassifierFromGt(luigi.Task):
         features = []
         gts = []
 
-        for i in xrange(len(gt)):
+        for i in range(len(gt)):
             feat_tasks_i = feature_tasks[i]
             gt_i = gt[i]
             edge_gt = gt_i.read('edge_gt_z')
@@ -781,7 +780,7 @@ class LearnClassifierFromGt(luigi.Task):
         features = []
         gts = []
 
-        for i in xrange(len(gt)):
+        for i in range(len(gt)):
 
             gt_i = gt[i]
             edge_gt = gt_i.read('edge_gt')
@@ -830,7 +829,7 @@ class LearnClassifierFromGt(luigi.Task):
         features = []
         gts = []
 
-        for i in xrange(len(gt)):
+        for i in range(len(gt)):
             feat_tasks_i = feature_tasks[i]
             gt_i = gt[i]
 

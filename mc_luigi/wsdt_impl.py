@@ -122,7 +122,7 @@ if __name__ == '__main__':
             seg[z] = seg_z
 
         with futures.ThreadPoolExecutor(max_workers=8) as tp:
-            tasks = [tp.submit(seg_z, z) for z in xrange(seg.shape[0])]
+            tasks = [tp.submit(seg_z, z) for z in range(seg.shape[0])]
             [t.result() for t in tasks]
 
         return seg

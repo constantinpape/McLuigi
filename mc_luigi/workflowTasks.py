@@ -5,16 +5,15 @@ from __future__ import division, print_function
 
 import luigi
 
-from multicutProblemTasks import MulticutProblem
-
-from multicutSolverTasks import McSolverFusionMoves  # ,McSolverExact
-from blockwiseMulticutTasks import BlockwiseMulticutSolver
-from blockwiseBaselineTasks import SubblockSegmentations, BlockwiseOverlapSolver
-from blockwiseBaselineTasks import BlockwiseStitchingSolver, BlockwiseMulticutStitchingSolver, NoStitchingSolver
-from dataTasks import StackedRegionAdjacencyGraph, ExternalSegmentation
-from customTargets import HDF5VolumeTarget
-from defectDetectionTasks import DefectSliceDetection
-from skeletonTasks import ResolveCandidates
+from .multicutProblemTasks import MulticutProblem
+from .multicutSolverTasks import McSolverFusionMoves  # ,McSolverExact
+from .blockwiseMulticutTasks import BlockwiseMulticutSolver
+from .blockwiseBaselineTasks import SubblockSegmentations, BlockwiseOverlapSolver
+from .blockwiseBaselineTasks import BlockwiseStitchingSolver, BlockwiseMulticutStitchingSolver, NoStitchingSolver
+from .dataTasks import StackedRegionAdjacencyGraph, ExternalSegmentation
+from .customTargets import HDF5VolumeTarget
+from .defectDetectionTasks import DefectSliceDetection
+#from .skeletonTasks import ResolveCandidates
 
 from pipelineParameter import PipelineParameter
 from tools import config_logger, run_decorator, get_replace_slices

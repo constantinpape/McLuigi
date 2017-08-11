@@ -7,13 +7,12 @@ import luigi
 
 import os
 
-from dataTasks import StackedRegionAdjacencyGraph
-from learningTasks import EdgeProbabilities
-from customTargets import HDF5DataTarget
-from defectHandlingTasks import ModifiedAdjacency, SkipEdgeLengths
-
-from pipelineParameter import PipelineParameter
-from tools import config_logger, run_decorator
+from .dataTasks import StackedRegionAdjacencyGraph
+from .learningTasks import EdgeProbabilities
+from .customTargets import HDF5DataTarget
+from .defectHandlingTasks import ModifiedAdjacency, SkipEdgeLengths
+from .pipelineParameter import PipelineParameter
+from .tools import config_logger, run_decorator
 
 import logging
 

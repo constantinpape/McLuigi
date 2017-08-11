@@ -1,12 +1,12 @@
 from __future__ import division, print_function
 
 import luigi
-from tools import run_decorator, config_logger, cartesian
-from customTargets import HDF5DataTarget
-from dataTasks import ExternalSegmentation
-from pipelineParameter import PipelineParameter
-from defectDetectionTasks import DefectSliceDetection
-from tools import find_matching_row_indices
+from .customTargets import HDF5DataTarget
+from .dataTasks import ExternalSegmentation
+from .pipelineParameter import PipelineParameter
+from .defectDetectionTasks import DefectSliceDetection
+from .tools import find_matching_row_indices
+from .tools import run_decorator, config_logger, cartesian
 
 import numpy as np
 import os
@@ -115,7 +115,7 @@ class BlockGridGraph(luigi.Task):
         block_graph_nn = nifty.graph.UndirectedGraph(n_blocks)
 
         # construct the graph by iterating over the blocks and for each block finding blocks with overlap
-        for block_id in xrange(n_blocks):
+        for block_id in range(n_blocks):
             block = blocking.getBlockWithHalo(block_id, overlap).outerBlock
 
             # find adjacent blocks via all blocks in the bounding box and excluding the current block id
@@ -207,7 +207,7 @@ class EdgesBetweenBlocks(luigi.Task):
         # we need to project the node ids to the reduced node ids in the current level
         to_new_nodes = inp['problem'].read('global2new')
         nodes_to_blocks_new = [
-            np.unique(to_new_nodes[nodes_to_blocks[block_id]]) for block_id in xrange(len(nodes_to_blocks))
+            np.unique(to_new_nodes[nodes_to_blocks[block_id]]) for block_id in range(len(nodes_to_blocks))
         ]
 
         # TODO this seems to be quite expensive and could probably be parallelized

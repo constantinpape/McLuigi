@@ -5,12 +5,11 @@ from __future__ import division, print_function
 
 import luigi
 
-from customTargets import FolderTarget, HDF5VolumeTarget
-from dataTasks import InputData, StackedRegionAdjacencyGraph, ExternalSegmentation
-from defectHandlingTasks import ModifiedAdjacency
-
-from pipelineParameter import PipelineParameter
-from tools import config_logger, run_decorator
+from .customTargets import FolderTarget, HDF5VolumeTarget
+from .dataTasks import InputData, StackedRegionAdjacencyGraph, ExternalSegmentation
+from .defectHandlingTasks import ModifiedAdjacency
+from .pipelineParameter import PipelineParameter
+from .tools import config_logger, run_decorator
 
 import logging
 import os
@@ -114,7 +113,7 @@ class RegionNodeFeatures(luigi.Task):
         # n_workers = 1
         with futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
             tasks = []
-            for z in xrange(shape[0]):
+            for z in range(shape[0]):
                 start = [z, 0, 0]
                 end   = [z + 1, shape[1], shape[2]]
                 tasks.append(executor.submit(extract_stats_slice, start, end, z))
@@ -226,7 +225,7 @@ class RegionFeatures(luigi.Task):
         n_splits = 500
         with futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
             tasks = []
-            for ii in xrange(n_splits):
+            for ii in range(n_splits):
                 edge_start = int(float(ii) / n_splits * n_edges)
                 edge_stop  = n_edges if ii == n_splits - 1 else int(float(ii + 1) / n_splits  * n_edges)
                 tasks.append(executor.submit(
@@ -488,7 +487,7 @@ class EdgeFeatures(luigi.Task):
 
             keep_edge_intervals.extend(
                 [[consecutive_deletes[i][-1] + 1, consecutive_deletes[i + 1][0]]
-                 for i in xrange(len(consecutive_deletes) - 1)]
+                 for i in range(len(consecutive_deletes) - 1)]
             )
 
             if consecutive_deletes[-1][-1] != standard_feat_shape[0] - 1:

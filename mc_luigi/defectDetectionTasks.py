@@ -4,11 +4,10 @@ from __future__ import division, print_function
 # Taksks for defect detection
 import luigi
 
-from customTargets import HDF5DataTarget, HDF5VolumeTarget
-from dataTasks import ExternalSegmentation
-
-from pipelineParameter import PipelineParameter
-from tools import config_logger, run_decorator
+from .customTargets import HDF5DataTarget, HDF5VolumeTarget
+from .dataTasks import ExternalSegmentation
+from .pipelineParameter import PipelineParameter
+from .tools import config_logger, run_decorator
 
 import logging
 
@@ -57,7 +56,7 @@ class OversegmentationPatchStatistics(luigi.Task):
             patches = nifty.tools.blocking(roiBegin=[0L, 0L], roiEnd=[ny, nx], blockShape=patch_shape)
             # get number of segments for patches in this slice
             n_segs_z = []
-            for patch_id in xrange(patches.numberOfBlocks):
+            for patch_id in range(patches.numberOfBlocks):
                 patch = patches.getBlock(patch_id)
                 patch_begin, patch_end = patch.begin, patch.end
                 patch_slicing = np.s_[patch_begin[0]:patch_end[0], patch_begin[1]:patch_end[1]]
@@ -67,7 +66,7 @@ class OversegmentationPatchStatistics(luigi.Task):
         # parallel
         with futures.ThreadPoolExecutor(max_workers=PipelineParameter().nThreads) as executor:
             tasks = []
-            for z in xrange(seg.shape[0]):
+            for z in range(seg.shape[0]):
                 tasks.append(executor.submit(extract_patch_statistics_slice, z))
             segs_per_patch = []
             for fut in tasks:
@@ -79,7 +78,7 @@ class OversegmentationPatchStatistics(luigi.Task):
         # calculate histogram to have a closer look at the stats
         n_bins = 16
         histo, bin_edges = np.histogram(segs_per_patch, bins=n_bins)
-        bins = np.array([(bin_edges[b] + bin_edges[b + 1]) / 2 for b in xrange(n_bins)])
+        bins = np.array([(bin_edges[b] + bin_edges[b + 1]) / 2 for b in range(n_bins)])
 
         stats = np.zeros([2 * n_bins + 2])
         stats[0] = mean
@@ -118,7 +117,7 @@ class OversegmentationSliceStatistics(luigi.Task):
         # parallel
         with futures.ThreadPoolExecutor(max_workers=PipelineParameter().nThreads) as executor:
             tasks = []
-            for z in xrange(seg.shape()[0]):
+            for z in range(seg.shape()[0]):
                 tasks.append(executor.submit(extract_segs_in_slice, z))
             segs_per_slice = [fut.result() for fut in tasks]
 
@@ -128,7 +127,7 @@ class OversegmentationSliceStatistics(luigi.Task):
         # calculate histogram to have a closer look at the stats
         nBins = PipelineParameter().nBinsSliceStatistics
         histo, bin_edges = np.histogram(segs_per_slice, bins=nBins)
-        # bins = np.array([(bin_edges[b] + bin_edges[b+1]) / 2 for b in xrange(n_bins)])
+        # bins = np.array([(bin_edges[b] + bin_edges[b+1]) / 2 for b in range(n_bins)])
 
         out = self.output()
         out.write(mean, 'mean')
@@ -181,7 +180,7 @@ class DefectPatchDetection(luigi.Task):
             patches = nifty.tools.blocking(roiBegin=[0L, 0L], roiEnd=[ny, nx], blockShape=patch_shape)
             # get number of segments for patches in this slice
             n_defected = 0
-            for patch_id in xrange(patches.numberOfBlocks):
+            for patch_id in range(patches.numberOfBlocks):
                 patch = patches.getBlockWithHalo(patch_id, patch_overlap).outerBlock
                 patch_begin, patch_end = patch.begin, patch.end
                 patch_slicing = np.s_[patch_begin[0]:patch_end[0], patch_begin[1]:patch_end[1]]
@@ -200,13 +199,13 @@ class DefectPatchDetection(luigi.Task):
 
         with futures.ThreadPoolExecutor(max_workers=PipelineParameter().nThreads) as executor:
             tasks = []
-            for z in xrange(seg.shape[0]):
+            for z in range(seg.shape[0]):
                 tasks.append(executor.submit(detect_patches_z, z))
             defects_per_slice = [fut.result() for fut in tasks]
 
         # log the defects
         workflow_logger.info("DefectPatchDetection: total number of defected patches: %i" % np.sum(defects_per_slice))
-        for z in xrange(seg.shape[0]):
+        for z in range(seg.shape[0]):
             if defects_per_slice[z] > 0:
                 workflow_logger.info(
                     "DefectPatchDetection slice %i has %i defected patches." % (z, defects_per_slice[z])
@@ -264,13 +263,13 @@ class DefectSliceDetection(luigi.Task):
                 return False
 
         with futures.ThreadPoolExecutor(max_workers=PipelineParameter().nThreads) as executor:
-            tasks = [executor.submit(detect_defected_slice, z) for z in xrange(seg.shape()[0])]
+            tasks = [executor.submit(detect_defected_slice, z) for z in range(seg.shape()[0])]
             defect_indications = [fut.result() for fut in tasks]
 
         # log the defects
         workflow_logger.info("DefectSliceDetection: total number of defected slices: %i" % np.sum(defect_indications))
         defect_slices = []
-        for z in xrange(seg.shape()[0]):
+        for z in range(seg.shape()[0]):
             if defect_indications[z]:
                 defect_slices.append(z)
                 workflow_logger.info("DefectSliceDetection: slice %i is defected." % (z,))

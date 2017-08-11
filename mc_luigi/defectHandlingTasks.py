@@ -4,12 +4,11 @@ from __future__ import print_function, division
 # Taksks for defect and handling
 import luigi
 
-from customTargets import HDF5DataTarget
-from dataTasks import ExternalSegmentation, StackedRegionAdjacencyGraph
-from defectDetectionTasks import DefectSliceDetection
-
-from pipelineParameter import PipelineParameter
-from tools import config_logger, run_decorator, get_unique_rows
+from .customTargets import HDF5DataTarget
+from .dataTasks import ExternalSegmentation, StackedRegionAdjacencyGraph
+from .defectDetectionTasks import DefectSliceDetection
+from .pipelineParameter import PipelineParameter
+from .tools import config_logger, run_decorator, get_unique_rows
 
 import logging
 
@@ -74,13 +73,13 @@ class DefectsToNodes(luigi.Task):
         # non-parallel for debugging
         # defect_nodes = []
         # nodes_z = []
-        # for z in xrange(seg.shape[0]):
+        # for z in range(seg.shape[0]):
         #    res = defects_to_nodes_z(z)
         #    defect_nodes.extend(res[0])
         #    nodes_z.extend(res[1])
 
         with futures.ThreadPoolExecutor(max_workers=PipelineParameter().nThreads) as executor:
-            tasks = [executor.submit(defects_to_nodes_z, z) for z in xrange(seg.shape()[0])]
+            tasks = [executor.submit(defects_to_nodes_z, z) for z in range(seg.shape()[0])]
             defect_nodes = []
             nodes_z      = []
             for fut in tasks:
