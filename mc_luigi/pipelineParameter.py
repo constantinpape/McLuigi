@@ -1,3 +1,5 @@
+from __future__ import print_function, division
+
 # implementing most pipeline parameters as they inherit from luigi.Parameter
 # Pipeline Parameter are implemetned as Singleton
 
@@ -20,8 +22,9 @@ class Singleton(type):
         return cls._instances[cls]
 
 
-class PipelineParameter(object):
-    __metaclass__ = Singleton
+# FIXME this is not python 2 compatible
+class PipelineParameter(object, metaclass=Singleton):
+    #__metaclass__ = Singleton
 
     def __init__(self):
 

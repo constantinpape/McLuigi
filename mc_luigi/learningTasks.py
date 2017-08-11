@@ -1,3 +1,5 @@
+from __future__ import print_function, division
+
 # Multicut Pipeline implemented with luigi
 # Tasks for learning and predicting random forests
 
@@ -344,7 +346,7 @@ class EdgeProbabilities(luigi.Task):
         assert n_sub_feats > 1, str(n_sub_feats)
 
         def predict_subfeats(sub_feat_id):
-            print sub_feat_id, '/', n_sub_feats
+            print(sub_feat_id, '/', n_sub_feats)
             start_index = int(float(sub_feat_id) / n_sub_feats * n_edges)
             end_index   = int(float(sub_feat_id + 1) / n_sub_feats * n_edges)
             if sub_feat_id == n_sub_feats:

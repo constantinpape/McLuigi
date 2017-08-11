@@ -1,3 +1,5 @@
+from __future__ import division, print_function
+
 # Multicut Pipeline implemented with luigi
 # Workflow Tasks
 
@@ -106,6 +108,11 @@ class SegmentationWorkflow(luigi.Task):
                 [z, 0L, 0L],
                 out.read([replace_z, 0L, 0L], [replace_z + 1, shape[1], shape[2]])
             )
+
+
+    # TODO expand the segmentation by offset !
+    def _expand_offset(self):
+        pass
 
     def output(self):
         raise AttributeError(

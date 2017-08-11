@@ -1,3 +1,5 @@
+from __future__ import division, print_function
+
 import vigra
 import fastfilters
 import numpy as np
@@ -134,7 +136,7 @@ if __name__ == '__main__':
     )
     t0 = time.time()
     seg0 = process_parallel(ws0)
-    print "T0:", time.time() - t0, 's'
+    print("T0:", time.time() - t0, 's')
 
     ws1 = partial(
         wsDtSegmentation,
@@ -149,9 +151,9 @@ if __name__ == '__main__':
     )
     t1 = time.time()
     seg1 = process_parallel(ws1)
-    print "T1:", time.time() - t1, 's'
+    print("T1:", time.time() - t1, 's')
 
     assert seg0.shape == seg1.shape
-    print seg0.shape
+    print(seg0.shape)
 
     # volumina_n_layer([pm, seg0])

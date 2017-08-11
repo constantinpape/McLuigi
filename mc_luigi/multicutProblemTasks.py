@@ -1,3 +1,5 @@
+from __future__ import division, print_function
+
 # Multicut Pipeline implemented with luigi
 # Multicut Problem Tasks
 

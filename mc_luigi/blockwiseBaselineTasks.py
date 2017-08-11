@@ -1,3 +1,5 @@
+
+
 # Multicut Pipeline implemented with luigi
 # Blockwise solver tasks
 
@@ -108,7 +110,7 @@ class SubblockSegmentations(BlockwiseSolver):
             sub_result = {sub_nodes[block_id][i]: sub_results[block_id][i]
                           for i in xrange(len(sub_nodes[block_id]))}
 
-            print "Saving Block-Result for block %i / %i" % (block_id, len(sub_results))
+            print("Saving Block-Result for block %i / %i" % (block_id, len(sub_results)))
             block_begin = block_begins[block_id]
             block_end = block_ends[block_id]
 

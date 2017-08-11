@@ -1,3 +1,5 @@
+from __future__ import print_function, division
+
 import os
 import argparse
 
@@ -24,7 +26,7 @@ def predict(
     output_size = Coordinate((56, 56, 56))
 
     # the size of the receptive field of the network
-    context = (input_size - output_size) / 2
+    context = (input_size - output_size) // 2
 
     # a chunk request that matches the dimensions of the network, will be used
     # to chunk the whole volume into batches of this size

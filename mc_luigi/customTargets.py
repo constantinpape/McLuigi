@@ -1,3 +1,5 @@
+from __future__ import division, print_function
+
 from luigi.target import FileSystemTarget
 from luigi.file import LocalFileSystem
 
@@ -328,6 +330,6 @@ class StackedRagTarget(FileSystemTarget):
     def readKey(self, key):
         with h5py.File(self.path, 'r') as f:
             if key not in f.keys():
-                print "The key", key, "is not in", f.keys()
+                print("The key", key, "is not in", f.keys())
                 raise KeyError("Key not found!")
         return vigra.readHDF5(self.path, key)

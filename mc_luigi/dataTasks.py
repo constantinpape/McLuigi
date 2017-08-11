@@ -1,3 +1,4 @@
+from __future__ import print_function, division
 # Multicut Pipeline implemented with luigi
 # Tasks for providing the input data
 
@@ -126,7 +127,7 @@ class AffinityPrediction(luigi.Task):
             raw_shape = inp.shape()
 
             offset = np.array(list(raw_shape)) - np.array(list(aff_shape))
-            offset /= 2
+            offset //= 2
 
             # write the raw data offsets to the nifty h5 array
             inp.setOffsets(offset.tolist(), offset.tolist())
@@ -206,7 +207,7 @@ class WsdtSegmentation(luigi.Task):
 
         def segment_slice(z):
 
-            print "Slice", z, "/", shape[0]
+            print("Slice", z, "/", shape[0])
             sliceStart = [z, 0, 0]
             sliceStop  = [z + 1, shape[1], shape[2]]
             pmap_z = pmap.read(sliceStart, sliceStop).squeeze()
@@ -234,7 +235,7 @@ class WsdtSegmentation(luigi.Task):
         offsets = np.cumsum(offsets)
 
         if offsets[-1] >= 4294967295 and self.dtype == np.dtype('uint32'):
-            print "WARNING: UINT32 overflow!"
+            print("WARNING: UINT32 overflow!")
             # we don't add the offset, but only save the non-offset file
             return False
 
