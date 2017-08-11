@@ -135,7 +135,7 @@ def get_local_features_for_multiinp():
         if "affinitiesZ" in features:
             assert nInpPerSeg == 3
             # by convention we assume that the z - affinity channel is given as 2nd input
-            feature_tasks[i].append(EdgeFeatures(input_data[inp2], segs[i], keepOnlyZ=True))
+            feature_tasks[i].append(EdgeFeatures(input_data[inp2], segs[i], keepOnlyZ=True, zDirection=PipelineParameter().zAffinityDirection))
             workflow_logger.debug(
                 "get_local_features_for_multiinp: calculating Edge Features from z affinity maps: " + input_data[inp2]
             )
