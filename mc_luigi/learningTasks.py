@@ -154,6 +154,11 @@ class RandomForest(object):
             save_path = file_path + ".h5"
             self.rf.writeHDF5(file_path, key)
 
+    # TODO for vigra
+    @property
+    def n_features(self):
+        return self.rf.n_features_
+
 
 class EdgeProbabilities(luigi.Task):
 
@@ -326,6 +331,8 @@ class EdgeProbabilities(luigi.Task):
                     features[:, offset:offset + this_feats.shape[1]] = this_feats
                     offset += this_feats.shape[1]
 
+        assert features.shape[1] == classifier.n_features, \
+            "Number of input and rf features do not match for %s: %i, %i" % (feat_type ,features.shape[1], classifier.n_features)
         probs = classifier.predict_probabilities(features, PipelineParameter().nThreads)[:, 1]
         out.write([long(start)], probs)
 
