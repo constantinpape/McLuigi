@@ -40,25 +40,28 @@ def get_local_features():
         assert len(seg) == 1, str(seg)
         seg = seg[0]
 
+    simpleFeats = PipelineParameter().useSimpleFeatures
+    zDir = PipelineParameter().zAffinityDirection
+
     if "raw" in features:
         # by convention we assume that the raw data is given as 0th
-        feature_tasks.append(EdgeFeatures(input_data[0], seg))
+        feature_tasks.append(EdgeFeatures(input_data[0], seg, simpleFeatures=simpleFeats))
         workflow_logger.debug("get_local_features: calculating Edge Features from raw input: " + input_data[0])
 
     # TODO enable simple feature calculation for prob, affinitiesXY and affinitiesZ
     if "prob" in features:
         # by convention we assume that the membrane probs are given as 1st
-        feature_tasks.append(EdgeFeatures(input_data[1], seg))
+        feature_tasks.append(EdgeFeatures(input_data[1], seg, simpleFeatures=simpleFeats))
         workflow_logger.debug("get_local_features: calculating Edge Features from probability maps: " + input_data[1])
 
     if "affinitiesXY" in features:  # specific XY - features -> we keep only these
         # by convention we assume that the xy - affinity channel is given as 1st input
-        feature_tasks.append(EdgeFeatures(input_data[1], seg, keepOnlyXY=True))
+        feature_tasks.append(EdgeFeatures(input_data[1], seg, keepOnlyXY=True, simpleFeatures=simpleFeats))
         workflow_logger.debug("get_local_features: calculating Edge Features from xy affinity maps: " + input_data[1])
 
     if "affinitiesZ" in features:  # specific Z - features -> we keep only these
         # by convention we assume that the z - affinity channel is given as 2nd input
-        feature_tasks.append(EdgeFeatures(input_data[2], seg, keepOnlyZ=True, zDirection=PipelineParameter().zAffinityDirection))
+        feature_tasks.append(EdgeFeatures(input_data[2], seg, keepOnlyZ=True, zDirection=zDir, simpleFeatures=simpleFeats))
         workflow_logger.debug("get_local_features: calculating Edge Features from z affinity maps: " + input_data[2])
 
     if "reg" in features:
@@ -97,8 +100,10 @@ def get_local_features_for_multiinp():
         input_data = [input_data]
 
     segs = inputs["seg"]
-
     nInpPerSeg = len(input_data) / len(segs)
+
+    simpleFeats = PipelineParameter().useSimpleFeatures
+    zDir = PipelineParameter().zAffinityDirection
 
     feature_tasks = []
     for i in xrange(len(segs)):
@@ -110,14 +115,14 @@ def get_local_features_for_multiinp():
 
         if "raw" in features:
             # by convention we assume that the raw data is given as 0th
-            feature_tasks[i].append(EdgeFeatures(input_data[inp0], segs[i]))
+            feature_tasks[i].append(EdgeFeatures(input_data[inp0], segs[i], simpleFeatures=simpleFeats))
             workflow_logger.debug(
                 "get_local_features_for_multiinp: calculating Edge Features from raw input: " + input_data[inp0]
             )
 
         if "prob" in features:
             # by convention we assume that the membrane probs are given as 1st
-            feature_tasks[i].append(EdgeFeatures(input_data[inp1], segs[i]))
+            feature_tasks[i].append(EdgeFeatures(input_data[inp1], segs[i], simpleFeatures=simpleFeats))
             workflow_logger.debug(
                 "get_local_features_for_multiinp: calculating Edge Features from probability maps: " + input_data[inp1]
             )
@@ -125,7 +130,7 @@ def get_local_features_for_multiinp():
         if "affinitiesXY" in features:
             assert nInpPerSeg == 3
             # by convention we assume that the xy - affinity channel is given as 1st input
-            feature_tasks[i].append(EdgeFeatures(input_data[inp1], segs[i], keepOnlyXY=True))
+            feature_tasks[i].append(EdgeFeatures(input_data[inp1], segs[i], keepOnlyXY=True, simpleFeatures=simpleFeats))
             workflow_logger.debug(
                 "get_local_features_for_multiinp: calculating Edge Features from xy affinity maps: " + input_data[inp1]
             )
@@ -133,7 +138,7 @@ def get_local_features_for_multiinp():
         if "affinitiesZ" in features:
             assert nInpPerSeg == 3
             # by convention we assume that the z - affinity channel is given as 2nd input
-            feature_tasks[i].append(EdgeFeatures(input_data[inp2], segs[i], keepOnlyZ=True, zDirection=PipelineParameter().zAffinityDirection))
+            feature_tasks[i].append(EdgeFeatures(input_data[inp2], segs[i], keepOnlyZ=True, zDirection=zDir, simpleFeatures=simpleFeats))
             workflow_logger.debug(
                 "get_local_features_for_multiinp: calculating Edge Features from z affinity maps: " + input_data[inp2]
             )

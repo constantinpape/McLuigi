@@ -517,6 +517,7 @@ class EdgeFeatures(luigi.Task):
         # modify the features only if we have skip edges
         if skip_edges.size and not self.keepOnlyXY:
 
+            # TODO simple feats for skip features
             # TODO i/o in nifty to speed up calculation
             skip_feats = nrag.accumulateSkipEdgeFeaturesFromFilters(
                 rag,
@@ -530,7 +531,8 @@ class EdgeFeatures(luigi.Task):
             )
 
             assert skip_feats.shape[0] == skip_edges.shape[0]
-            assert skip_feats.shape[1] == n_feats
+            # TODO reactivate check once we have simple skip feats
+            #assert skip_feats.shape[1] == n_feats, "%i, %i" % (skip_feats.shape[1], n_feats)
 
             # open file for the skip edges
             #skip_file = nh5.createFile(os.path.join(out.path, 'features_skip.h5'))

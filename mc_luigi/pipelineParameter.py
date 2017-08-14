@@ -46,6 +46,7 @@ class PipelineParameter(object):
         # self.features = ["raw", "affinitiesXY", "affinitiesZ", "reg"]
         self.features = ["raw", "prob", "reg"]
         self.zAffinityDirection = 2 # encoding of z-affinities: 1 -> slice z has affinties to z+1, 2 -> z+1 has affinities to z
+        self.useSimpleFeatures = False
 
         # path to neural network snapshots
         self.netWeightsPath = ''
