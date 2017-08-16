@@ -60,14 +60,11 @@ class SegmentationWorkflow(luigi.Task):
 
         seg.open()
         shape = seg.shape()
-        out = self.output()
-        out.open(shape)
-
-        ## TODO: this is only temporary for the sampleD experiments
-        ## where we don't need the segmentation (and writing it takes quite long....)
-        #seg.close()
-        #out.close()
-        #quit()
+        if PipelineParameter().haveOffsets:
+            out = self._expand_shape(shape)
+        else:
+            out = self.output()
+            out.open(shape)
 
         workflow_logger.info("SegmentationWorkflow: Projecting node result to segmentation.")
         self._project_result_to_segmentation(rag, mc_nodes, out)
@@ -108,10 +105,17 @@ class SegmentationWorkflow(luigi.Task):
                 out.read([replace_z, 0, 0], [replace_z + 1, shape[1], shape[2]])
             )
 
-
-    # TODO expand the segmentation by offset !
-    def _expand_offset(self):
-        pass
+    # expand the segmentation by offset !
+    def _expand_shape(self, seg_shape):
+        out = self.output()
+        offset_front = PipelineParameter().offsetFront
+        assert offset_front is not None
+        offset_back = PipelineParameter().offsetBack
+        assert offset_back is not None
+        shape = (np.array(offset_front) + np.array(offset_back) + np.array(seg_shape)).tolist()
+        out.open(shape)
+        out.setOffsets(offset_front, offset_back)
+        return out
 
     def output(self):
         raise AttributeError(

@@ -90,8 +90,6 @@ class HDF5VolumeTarget(FileSystemTarget):
                     print(offset_back)
                     self.arrays[key].setOffsetFront(offset_front)
                     self.arrays[key].setOffsetBack(offset_back)
-            else:
-                print('No offsets :(')
 
         # create a new dataset
         else:

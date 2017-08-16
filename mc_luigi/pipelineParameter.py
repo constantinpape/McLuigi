@@ -105,6 +105,11 @@ class PipelineParameter(object, metaclass=Singleton):
         # for BlockWiseStitchingSolver
         self.overlapThreshold = .5
 
+        # shape offsets for the segmentation result
+        haveOffsets = False
+        offsetFront = None
+        offsetBack = None
+
     # TODO range and type cheks via @property and setproperty
 
     # TODO don't allow setting a field that does not already exist to avoid setting incorrect parameter

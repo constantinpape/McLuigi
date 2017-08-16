@@ -41,11 +41,11 @@ try:
     from sklearn.ensemble import RandomForestClassifier as RFType
     use_sklearn = True
     import pickle
-    workflow_logger.info("Using sklearn random forest")
+    workflow_logger.debug("Using sklearn random forest")
 except ImportError:
     RFType = vigra.learning.RandomForest3
     use_sklearn = False
-    workflow_logger.info("Using vigra random forest 3")
+    workflow_logger.debug("Using vigra random forest 3")
 
 
 # wrapper for sklearn / random forest

@@ -54,7 +54,8 @@ class BlockwiseSolver(luigi.Task):
         block_factor = 1
 
         for l in range(self.numberOfLevels):
-            block_shape = map(lambda x: x * block_factor, initialBlockShape)
+            block_shape = list(map(lambda x: x * block_factor, initialBlockShape))
+
 
             # TODO check that we don't get larger than the actual shape here
             problems.append(
