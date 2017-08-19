@@ -82,7 +82,7 @@ class RandomForest(object):
         if use_sklearn:
             save_path = os.path.join(file_path, "%s.pkl" % key)
             assert os.path.exists(save_path), save_path
-            with open(save_path) as f:
+            with open(save_path, 'rb') as f:
                 rf = pickle.load(f)
             self.n_trees = rf.n_estimators
         else:
@@ -149,7 +149,7 @@ class RandomForest(object):
             if not os.path.exists(file_path):
                 os.mkdir(file_path)
             save_path = os.path.join(file_path, "%s.pkl" % (key))
-            with open(save_path, 'w') as f:
+            with open(save_path, 'wb') as f:
                 pickle.dump(self.rf, f)
         else:
             save_path = file_path + ".h5"
