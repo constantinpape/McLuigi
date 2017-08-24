@@ -106,12 +106,16 @@ class HDF5VolumeTarget(FileSystemTarget):
             )
 
     # add offsets to the nh5 array
-    def setOffsets(self, offset_front, offset_back, key='data'):
+    def set_offsets(self, offset_front, offset_back, key='data', serialize_offsets=True):
         if key not in self.arrays:
             raise KeyError("Key does not name a valid dataset in H5 file.")
         self.arrays[key].setOffsetFront(offset_front)
         self.arrays[key].setOffsetBack(offset_back)
         # serialize the offsets
+        if serialize_offsets:
+            self.serialize_offsets(offset_front, offset_back, key)
+
+    def serialize_offsets(self, offset_front, offset_back, key='data'):
         with h5py.File(self.path) as f:
             ds = f[key]
             ds.attrs.create('offset_front', offset_front)

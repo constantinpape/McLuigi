@@ -74,6 +74,9 @@ class SegmentationWorkflow(luigi.Task):
             self._postprocess_defected_slices(inp, out)
 
         out.close()
+        if PipelineParameter().haveOffsets:
+            self._serialize_offsets(out)
+
         seg.close()
 
     def _project_result_to_segmentation(self, rag, mc_nodes, out):
@@ -82,7 +85,7 @@ class SegmentationWorkflow(luigi.Task):
         mc_nodes, _, _ = vigra.analysis.relabelConsecutive(mc_nodes, start_label=0, keep_zeros=False)
         if np.dtype(self.dtype) != np.dtype(mc_nodes.dtype):
             self.dtype = mc_nodes.dtype
-        nrag.projectScalarNodeDataToPixels(rag, mc_nodes, out.get(), 5)  # TODO investigate number of threads here
+        nrag.projectScalarNodeDataToPixels(rag, mc_nodes, out.get(), PipelineParameter().nThreads)
 
     def _postprocess_defected_slices(self, inp, out):
 
@@ -114,8 +117,13 @@ class SegmentationWorkflow(luigi.Task):
         assert offset_back is not None
         shape = (np.array(offset_front) + np.array(offset_back) + np.array(seg_shape)).tolist()
         out.open(shape)
-        out.setOffsets(offset_front, offset_back)
+        out.set_offsets(offset_front, offset_back, serialize_offsets=False)
         return out
+
+    def _serialize_offsets(self, out):
+        offset_front = PipelineParameter().offsetFront
+        offset_back = PipelineParameter().offsetBack
+        out.serialize_offsets(offset_front, offset_back)
 
     def output(self):
         raise AttributeError(

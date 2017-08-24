@@ -146,7 +146,7 @@ class ModifiedAdjacency(luigi.Task):
 
         # get the original rag adjacency
         uv_ids = rag.uvIds()
-        n_nodes = uv_ids.max() + 1
+        n_nodes = rag.numberOfNodes
 
         defect_slices = np.unique(nodes_z)
 
@@ -246,6 +246,7 @@ class ModifiedAdjacency(luigi.Task):
             workflow_logger.info(
                 "ModifiedAdjacency: Total number of edges in modified adjacency: %i" % n_edges_modified
             )
+
             modified_adjacency = modified_adjacency.serialize()
             out = self.output()
             out.write(True, "has_defects")
