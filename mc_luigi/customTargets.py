@@ -116,7 +116,7 @@ class HDF5VolumeTarget(FileSystemTarget):
             self.serialize_offsets(offset_front, offset_back, key)
 
     def serialize_offsets(self, offset_front, offset_back, key='data'):
-        with h5py.File(self.path) as f:
+        with h5py.File(self.path, 'r') as f:
             ds = f[key]
             ds.attrs.create('offset_front', offset_front)
             ds.attrs.create('offset_back', offset_back)

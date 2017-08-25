@@ -60,6 +60,7 @@ class SegmentationWorkflow(luigi.Task):
 
         seg.open()
         shape = seg.shape()
+
         if PipelineParameter().haveOffsets:
             out = self._expand_shape(shape)
         else:
@@ -74,8 +75,9 @@ class SegmentationWorkflow(luigi.Task):
             self._postprocess_defected_slices(inp, out)
 
         out.close()
-        if PipelineParameter().haveOffsets:
-            self._serialize_offsets(out)
+        # FIXME this does not work for some reason
+        #if PipelineParameter().haveOffsets:
+        #    self._serialize_offsets(out)
 
         seg.close()
 
