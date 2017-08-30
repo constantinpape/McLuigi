@@ -14,4 +14,3 @@ from .featureTasks import RegionFeatures, EdgeFeatures
 from .defectDetectionTasks import OversegmentationSliceStatistics, DefectSliceDetection
 from .defectHandlingTasks import DefectsToNodes, ModifiedAdjacency, SkipEdgeLengths
 from .multicutProblemTasks import MulticutProblem
-

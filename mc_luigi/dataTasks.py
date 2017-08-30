@@ -175,11 +175,7 @@ class WsdtSegmentation(luigi.Task):
         return InputData(self.pathToProbabilities)
 
     # TODO enable 3d wsdt for isotropic ppl
-    # TODO we could integrate the (statistics based) defect detection directly in here
-    # TODO parallelisation is really weird / slow, investigate !
-    # -> check if same strange behaviour on sirherny
-    # if not, probably nifty-package is responsible -> hdf5 parallel read/write ?! (libhdf5-serial ?)
-    # -> if this is true, also other applications should be horribly slow
+    # TODO zarr fir input / output to speed up parallelisation
     @run_decorator
     def run(self):
         pmap = self.input()
@@ -189,13 +185,14 @@ class WsdtSegmentation(luigi.Task):
         out  = self.output()
         out.open(shape, pmap.chunk_shape())
 
+        # TODO need to benchmark this for larger data
         self._run_wsdt2d_standard(pmap, out, shape)
+        # self._run_wsdt2d_lessio(pmap, out, shape)
 
         out.close()
         pmap.close()
 
-    def _run_wsdt2d_standard(self, pmap, out, shape):
-
+    def _run_wsdt2d_lessio(self, pmap, out, shape):
         # read the wsdt settings from ppl params
         ppl_params = PipelineParameter()
         threshold   = ppl_params.wsdtThreshold
@@ -203,7 +200,7 @@ class WsdtSegmentation(luigi.Task):
         sig_seeds   = ppl_params.wsdtSigSeeds
         invert      = ppl_params.wsdtInvert
         workflow_logger.info(
-            "WsdtSegmentation: Running standard 2d dt watershed with threshold %f" % threshold
+            "WsdtSegmentation: Running lessio 2d dt watershed with threshold %f" % threshold
         )
 
         offsets = -1 * np.ones(shape[0], dtype='int64')
@@ -234,7 +231,7 @@ class WsdtSegmentation(luigi.Task):
                 offset = offsets[z - 1]
                 while offset == -1:
                     time.sleep(1)
-                    offset = offset[z - 1]
+                    offset = offsets[z - 1]
 
                 # add the offset
                 seg += offset
@@ -243,7 +240,8 @@ class WsdtSegmentation(luigi.Task):
                 return z, max_z + 1
 
         n_workers = PipelineParameter().nThreads
-        # callback to
+
+        # callback to write out offset
         def done_cb(fn):
             if fn.cancelled():
                 raise RuntimeError('Future was cancelled - this should not happen!')
@@ -252,42 +250,81 @@ class WsdtSegmentation(luigi.Task):
                 if error:
                     raise error
                 else:
-                    off, max_z = fn.result()
+                    z, off = fn.result()
                     offsets[z] = off
 
         t_ws = time.time()
         with futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
-            tasks = [
-                executor.submit(segment_slice, z).add_done_callback(done_cb) for z in range(shape[0])
-            ]
+            [executor.submit(segment_slice, z).add_done_callback(done_cb) for z in range(shape[0])]
+        workflow_logger.info(
+            "WsdtSegmentation: Running watershed took: %f s" % (time.time() - t_ws)
+        )
+
+        if offsets[-1] >= 4294967295 and self.dtype == np.dtype('uint32'):
+            print("WARNING: UINT32 overflow!")
+            return False
+
+        return True
+
+    def _run_wsdt2d_standard(self, pmap, out, shape):
+
+        # read the wsdt settings from ppl params
+        ppl_params = PipelineParameter()
+        threshold   = ppl_params.wsdtThreshold
+        min_seg     = ppl_params.wsdtMinSeg
+        sig_seeds   = ppl_params.wsdtSigSeeds
+        invert      = ppl_params.wsdtInvert
+        workflow_logger.info(
+            "WsdtSegmentation: Running standard 2d dt watershed with threshold %f" % threshold
+        )
+
+        def segment_slice(z):
+
+            print("Slice", z, "/", shape[0])
+            sliceStart = [z, 0, 0]
+            sliceStop  = [z + 1, shape[1], shape[2]]
+            pmap_z = pmap.read(sliceStart, sliceStop).squeeze()
+
+            if invert:
+                pmap_z = 1. - pmap_z
+
+            seg, max_z = compute_wsdt_segmentation(pmap_z, threshold, sig_seeds, min_seg)
+            out.write(sliceStart, seg[None, :, :])
+            return max_z + 1
+
+        n_workers = PipelineParameter().nThreads
+
+        t_ws = time.time()
+        with futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
+            tasks = [executor.submit(segment_slice, z) for z in range(shape[0])]
             offsets = [future.result() for future in tasks]
         workflow_logger.info(
             "WsdtSegmentation: Running watershed took: %f s" % (time.time() - t_ws)
         )
 
-        ## accumulate the offsets for each slice
-        #offsets = np.roll(offsets, 1)
-        #offsets[0] = 0
-        #offsets = np.cumsum(offsets)
+        # accumulate the offsets for each slice
+        offsets = np.roll(offsets, 1)
+        offsets[0] = 0
+        offsets = np.cumsum(offsets)
 
-        #if offsets[-1] >= 4294967295 and self.dtype == np.dtype('uint32'):
-        #    print("WARNING: UINT32 overflow!")
-        #    # we don't add the offset, but only save the non-offset file
-        #    return False
+        if offsets[-1] >= 4294967295 and self.dtype == np.dtype('uint32'):
+            print("WARNING: UINT32 overflow!")
+            # we don't add the offset, but only save the non-offset file
+            return False
 
-        #def add_offset(z, offset):
-        #    sliceStart = [z, 0, 0]
-        #    sliceStop  = [z + 1, shape[1], shape[2]]
-        #    seg = out.read(sliceStart, sliceStop)
-        #    seg += offset
-        #    out.write(sliceStart, seg)
+        def add_offset(z, offset):
+            sliceStart = [z, 0, 0]
+            sliceStop  = [z + 1, shape[1], shape[2]]
+            seg = out.read(sliceStart, sliceStop)
+            seg += offset
+            out.write(sliceStart, seg)
 
-        #t_off = time.time()
-        #with futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
-        #    tasks = [executor.submit(add_offset, z, offsets[z]) for z in range(shape[0])]
-        #    [t.result() for t in tasks]
-        #workflow_logger.info("WsdtSegmentation: Adding offsets took %f s" % (time.time() - t_off))
-        #return True
+        t_off = time.time()
+        with futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
+            tasks = [executor.submit(add_offset, z, offsets[z]) for z in range(shape[0])]
+            [t.result() for t in tasks]
+        workflow_logger.info("WsdtSegmentation: Adding offsets took %f s" % (time.time() - t_off))
+        return True
 
     # TODO if we integrate defects / 3d ws reflect this in the caching name
     def output(self):
@@ -517,8 +554,7 @@ class DenseGroundtruth(luigi.Task):
 
         gt_labeled, _, _ = vigra.analysis.relabelConsecutive(
             gt.read([0, 0, 0], gt.shape()),
-            start_label=1,
-            keep_zeros=True
+            start_label=0
         )
 
         out = self.output()
