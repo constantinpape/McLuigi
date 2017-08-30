@@ -2,7 +2,7 @@ from .workflowTasks import MulticutSegmentation, BlockwiseMulticutSegmentation, 
 from .workflowTasks import SubblockSegmentationWorkflow, BlockwiseOverlapSegmentation
 from .workflowTasks import BlockwiseMulticutStitchingSegmentation, NoStitchingSegmentation
 
-from .learningTasks import LearnClassifierFromGt, EdgeGroundtruth, EdgeProbabilities
+from .learningTasks import LearnClassifierFromGt
 from .pipelineParameter import PipelineParameter
 from .dataTasks import ExternalSegmentation, WsdtSegmentation, StackedRegionAdjacencyGraph
 

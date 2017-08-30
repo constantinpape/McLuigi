@@ -333,7 +333,8 @@ class EdgeProbabilities(luigi.Task):
                     offset += this_feats.shape[1]
 
         assert features.shape[1] == classifier.n_features, \
-            "Number of input and rf features do not match for %s: %i, %i" % (feat_type ,features.shape[1], classifier.n_features)
+            "Number of input and rf features do not match for %s: %i, %i" % (
+                feat_type, features.shape[1], classifier.n_features)
         probs = classifier.predict_probabilities(features, PipelineParameter().nThreads)[:, 1]
         out.write([start], probs)
 
@@ -643,7 +644,7 @@ class LearnClassifierFromGt(luigi.Task):
             features = features[mask]
             edge_gt = edge_gt[mask]
 
-        assert features.shape[0] == gt.shape[0], str(features.shape[0]) + " , " + str(gt.shape[0])
+        assert features.shape[0] == edge_gt.shape[0], "%i , %i" % (features.shape[0], edge_gt.shape[0])
         classifier = RandomForest(
             features,
             edge_gt,

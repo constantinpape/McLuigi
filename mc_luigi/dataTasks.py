@@ -230,6 +230,7 @@ class WsdtSegmentation(luigi.Task):
                 # we wait for and get the offset from the previous slice
                 offset = offsets[z - 1]
                 while offset == -1:
+                    # FIXME Does this lock the GIL ? -> should get rid of it and use something else
                     time.sleep(1)
                     offset = offsets[z - 1]
 
@@ -553,7 +554,7 @@ class DenseGroundtruth(luigi.Task):
         # and allow to keep arbitrary values fixed
 
         gt_labeled, _, _ = vigra.analysis.relabelConsecutive(
-            gt.read([0, 0, 0], gt.shape()),
+            gt.read([0, 0, 0], gt.shape()).astype('uint32'),
             start_label=0
         )
 
