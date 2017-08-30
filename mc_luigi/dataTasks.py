@@ -206,6 +206,11 @@ class WsdtSegmentation(luigi.Task):
             "WsdtSegmentation: Running standard 2d dt watershed with threshold %f" % threshold
         )
 
+        offsets = -1 * np.ones(shape[0], dtype='int64')
+
+        # TODO this logic could be changed:
+        # we wait until the offsets are there and then add them directly
+        # this should speed up everything significantly
         def segment_slice(z):
 
             print("Slice", z, "/", shape[0])
@@ -217,42 +222,72 @@ class WsdtSegmentation(luigi.Task):
                 pmap_z = 1. - pmap_z
 
             seg, max_z = compute_wsdt_segmentation(pmap_z, threshold, sig_seeds, min_seg)
-            out.write(sliceStart, seg[None, :, :])
-            return max_z + 1
+
+            # if we are in the lowest slice, we simply return the max-seg-id
+            if z == 0:
+                out.write(sliceStart, seg[None, :, :])
+                return z, max_z + 1
+
+            # otherwise, we wait for the previous thread to finish and add it's result
+            else:
+                # we wait for and get the offset from the previous slice
+                offset = offsets[z - 1]
+                while offset == -1:
+                    time.sleep(1)
+                    offset = offset[z - 1]
+
+                # add the offset
+                seg += offset
+                max_z += offset
+                out.write(sliceStart, seg[None, :, :])
+                return z, max_z + 1
 
         n_workers = PipelineParameter().nThreads
+        # callback to
+        def done_cb(fn):
+            if fn.cancelled():
+                raise RuntimeError('Future was cancelled - this should not happen!')
+            elif fn.done():
+                error = fn.exception()
+                if error:
+                    raise error
+                else:
+                    off, max_z = fn.result()
+                    offsets[z] = off
 
         t_ws = time.time()
         with futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
-            tasks = [executor.submit(segment_slice, z) for z in range(shape[0])]
+            tasks = [
+                executor.submit(segment_slice, z).add_done_callback(done_cb) for z in range(shape[0])
+            ]
             offsets = [future.result() for future in tasks]
         workflow_logger.info(
             "WsdtSegmentation: Running watershed took: %f s" % (time.time() - t_ws)
         )
 
-        # accumulate the offsets for each slice
-        offsets = np.roll(offsets, 1)
-        offsets[0] = 0
-        offsets = np.cumsum(offsets)
+        ## accumulate the offsets for each slice
+        #offsets = np.roll(offsets, 1)
+        #offsets[0] = 0
+        #offsets = np.cumsum(offsets)
 
-        if offsets[-1] >= 4294967295 and self.dtype == np.dtype('uint32'):
-            print("WARNING: UINT32 overflow!")
-            # we don't add the offset, but only save the non-offset file
-            return False
+        #if offsets[-1] >= 4294967295 and self.dtype == np.dtype('uint32'):
+        #    print("WARNING: UINT32 overflow!")
+        #    # we don't add the offset, but only save the non-offset file
+        #    return False
 
-        def add_offset(z, offset):
-            sliceStart = [z, 0, 0]
-            sliceStop  = [z + 1, shape[1], shape[2]]
-            seg = out.read(sliceStart, sliceStop)
-            seg += offset
-            out.write(sliceStart, seg)
+        #def add_offset(z, offset):
+        #    sliceStart = [z, 0, 0]
+        #    sliceStop  = [z + 1, shape[1], shape[2]]
+        #    seg = out.read(sliceStart, sliceStop)
+        #    seg += offset
+        #    out.write(sliceStart, seg)
 
-        t_off = time.time()
-        with futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
-            tasks = [executor.submit(add_offset, z, offsets[z]) for z in range(shape[0])]
-            [t.result() for t in tasks]
-        workflow_logger.info("WsdtSegmentation: Adding offsets took %f s" % (time.time() - t_off))
-        return True
+        #t_off = time.time()
+        #with futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
+        #    tasks = [executor.submit(add_offset, z, offsets[z]) for z in range(shape[0])]
+        #    [t.result() for t in tasks]
+        #workflow_logger.info("WsdtSegmentation: Adding offsets took %f s" % (time.time() - t_off))
+        #return True
 
     # TODO if we integrate defects / 3d ws reflect this in the caching name
     def output(self):
