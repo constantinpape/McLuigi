@@ -8,6 +8,8 @@ from .customTargets import HDF5DataTarget
 from .dataTasks import ExternalSegmentation, StackedRegionAdjacencyGraph
 from .defectDetectionTasks import DefectSliceDetection
 from .pipelineParameter import PipelineParameter
+from .featureTasks import RegionNodeFeatures
+from .learningTasks import RandomForest
 from .tools import config_logger, run_decorator, get_unique_rows
 
 import logging
@@ -39,13 +41,110 @@ config_logger(workflow_logger)
 class DefectsToNodes(luigi.Task):
 
     pathToSeg = luigi.Parameter()
+    # threshold for node prediction - node will be
+    # considered as defected if prediction is above this
+    # TODO better default value from experiments
+    nodeThreshold = luigi.Parameter(default=.5)
+    # threshold for slice - slices will be considered as completely defected if
+    # more nodes in slice than threshold are defected
+    # TODO better default value from experiments
+    sliceThreshold = luigi.Parameter(default=.5)
 
     def requires(self):
-        return {'seg': ExternalSegmentation(self.pathToSeg),
-                'defects': DefectSliceDetection(self.pathToSeg)}
+        # if we have a path to the classifier, we use the rf to detect defects
+        if PipelineParameter().defectsFromRf:
+            assert os.path.exists(PipelineParameter().defectRfPath), self.pathToClassifier
+            inputs = PipelineParameter().inputs
+            # FIXME this won't work for multiple input datasets
+            raw_path = inputs['data'][0]
+            required_tasks = {
+                'feats': RegionNodeFeatures(raw_path, self.pathToSeg),
+                'rag': StackedRegionAdjacencyGraph(self.pathToSeg)
+            }
+        # otherwise, we use fragment statistics
+        else:
+            required_tasks = {
+                'seg': ExternalSegmentation(self.pathToSeg),
+                'defects': DefectSliceDetection(self.pathToSeg),
+                'rag': StackedRegionAdjacencyGraph(self.pathToSeg)
+            }
+        return required_tasks
 
     @run_decorator
     def run(self):
+
+        rag = self.input()['rag']
+        min_max_node = rag.readKey('minMaxLabelPerSlice').astype('uint32')
+
+        if PipelineParameter().defectsFromRf != '':
+            workflow_logger.info("DefectsToNodes: detecting defected nodes with random forest")
+            defected_nodes, nodes_z = self._defects_from_rf(min_max_node)
+        else:
+            workflow_logger.info("DefectsToNodes: detecting defected nodes with heuristics")
+            defected_nodes, nodes_z = self._defects_from_heuristics()
+
+        # get fully defected slices based on count of defected nodes in the slices
+        unique_z = np.unique(np.concatenate(nodes_z))
+        defected_slices = [
+            len(nodes_z[i]) == (min_max_node[z, 1] - min_max_node[z, 0] + 1)
+            for i, z in enumerate(unique_z)
+        ]
+        defected_slices = np.where(defected_slices)[0]
+        workflow_logger.info("DefectsToNodes: found %i defected slices" % (len(defected_slices)))
+
+        # condatenate the z coordinates
+        nodes_z = np.concatenate(nodes_z).astype('uint32')
+
+        # concatenate the defected nodes into a single array
+        defected_nodes = np.concatenate(defected_nodes).astype('uint32')
+        workflow_logger.info("DefectsToNodes: found %i defected nodes" % (len(defected_nodes)))
+
+        out = self.output()
+        out.write(defected_nodes)
+        out.write(defected_slices, 'defect_slices')
+        out.write(nodes_z, 'nodes_z')
+
+    def _defects_from_rf(self, min_max_node):
+        inp = self.input()
+        feats = inp['feats']
+        feats.open()
+
+        rf = RandomForest.load_from_file(PipelineParameter().defectRfPath, 'rf')
+
+        n_feats = feats.shape()[1]
+        n_slices = len(min_max_node)
+
+        def predict_slice(z):
+            min_node, max_node = min_max_node[z]
+            feats_z = feats.read([min_node, 0], [max_node, n_feats])
+            pred_z = rf.predict_probabilities(feats_z)[:, 1]
+            defected_nodes_z = np.where(pred_z > self.nodeThreshold)[0]
+            defected_nodes_z += min_node
+            # check if this slice should be marked as fully-defected
+            # -> percentage of defected nodes in this slice > sliceThreshold
+            percentage_defected = len(defected_nodes_z) / (max_node - min_node + 1)
+            # if this is the case, all nodes will be marked as defected
+            if percentage_defected > self.sliceThreshold:
+                defected_nodes_z = np.arange(min_node, max_node + 1, dtype='uint32')
+            if defected_nodes_z.size:
+                return defected_nodes_z.tolist(), len(defected_nodes_z) * [z]
+            else:
+                return [], []
+
+        n_threads = PipelineParameter().nThreads
+        with futures.ThreadPoolExecutor(max_workers=n_threads) as tp:
+            tasks = [tp.submit(predict_slice, z) for z in range(n_slices)]
+            defected_nodes = []
+            nodes_z = []
+            for t in tasks:
+                nodes, this_z = t.result()
+                if nodes:
+                    defected_nodes.append(nodes)
+                    nodes_z.append(this_z)
+
+        return defected_nodes, nodes_z
+
+    def _defects_from_heuristics(self):
         inp = self.input()
         seg = inp['seg']
         seg.open()
@@ -62,7 +161,6 @@ class DefectsToNodes(luigi.Task):
             slice_end   = [z + 1, ny, nx]
             defect_mask = defects.read(slice_begin, slice_end)
             if 1 in defect_mask:
-                print(z)
                 seg_z = seg.read(slice_begin, slice_end)
                 where_defect = defect_mask == 1
                 defect_nodes_slice = np.unique(seg_z[where_defect])
@@ -70,41 +168,35 @@ class DefectsToNodes(luigi.Task):
             else:
                 return [], []
 
-        # non-parallel for debugging
-        # defect_nodes = []
-        # nodes_z = []
-        # for z in range(seg.shape[0]):
-        #    res = defects_to_nodes_z(z)
-        #    defect_nodes.extend(res[0])
-        #    nodes_z.extend(res[1])
-
         with futures.ThreadPoolExecutor(max_workers=PipelineParameter().nThreads) as executor:
             tasks = [executor.submit(defects_to_nodes_z, z) for z in range(seg.shape()[0])]
-            defect_nodes = []
-            nodes_z      = []
+            defected_nodes = []
+            nodes_z = []
             for fut in tasks:
-                nodes, zz = fut.result()
+                nodes, this_z = fut.result()
                 if nodes:
-                    defect_nodes.extend(nodes)
-                    nodes_z.extend(zz)
+                    defected_nodes.extend(nodes)
+                    nodes_z.appned(this_z)
 
-        assert len(defect_nodes) == len(nodes_z)
-
-        workflow_logger.info("DefectsToNodes: found %i defected nodes" % (len(defect_nodes)))
-
-        self.output().write(np.array(defect_nodes, dtype='uint32'), 'defect_nodes')
-        self.output().write(np.array(nodes_z, dtype='uint32'), 'nodes_z')
+        return defected_nodes, nodes_z
 
     def output(self):
-        segFile = os.path.split(self.pathToSeg)[1][:-3]
-        save_path = os.path.join(
-            PipelineParameter().cache,
-            "DefectsToNodes_%s_nBins%i_binThreshold%i.h5" % (
-                segFile,
-                PipelineParameter().nBinsSliceStatistics,
-                PipelineParameter().binThreshold
+        seg_file = os.path.split(self.pathToSeg)[1][:-3]
+        if PipelineParameter().defectsFromRf:
+            save_path = os.path.join(
+                PipelineParameter().cache,
+                "DefectToNodes_%s_%f_%f.h5" %
+                (seg_file, self.nodeThreshold, self.sliceThreshold)
             )
-        )
+        else:
+            save_path = os.path.join(
+                PipelineParameter().cache,
+                "DefectsToNodes_%s_nBins%i_binThreshold%i.h5" % (
+                    seg_file,
+                    PipelineParameter().nBinsSliceStatistics,
+                    PipelineParameter().binThreshold
+                )
+            )
         return HDF5DataTarget(save_path)
 
 
@@ -170,18 +262,6 @@ class ModifiedAdjacency(luigi.Task):
             )
             print('Finished processing slice', z, ':', i, '/', len(defect_slices))
             return z, delete_edges_z, ignore_edges_z, skip_edges_z, skip_ranges_z
-
-        # non-parallel for debugging
-        # for i, z in enumerate(defect_slices):
-        #    z, delete_edges_z, ignore_edges_z, skip_edges_z, skip_ranges_z = get_skip_edges_from_nifty(z,i)
-
-        #    delete_edges.extend(delete_edges_z)
-        #    ignore_edges.extend(ignore_edges_z)
-
-        #    assert len(skip_edges_z) == len(skip_ranges_z)
-        #    skip_edges.extend(skip_edges_z)
-        #    skip_ranges.extend(skip_ranges_z)
-        #    skip_starts.extend(len(skip_edges_z) * [z-1])
 
         # parallel
         with futures.ThreadPoolExecutor(max_workers=PipelineParameter().nThreads) as executor:

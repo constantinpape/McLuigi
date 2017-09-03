@@ -42,6 +42,9 @@ class PipelineParameter(object, metaclass=Singleton):
         self.nBinsSliceStatistics = 16
         # histogram threshold for the defect slicce detection
         self.binThreshold = 2  # -> 0 means we don't detect any defects ! This needs to be tuned for every ds !
+        # flag to indicate if defects are detected with heuristics or random forest
+        self.defectsFromRf = False
+        self.defectRfPath = ''
 
         # feature string
         # FIXME in the current form z-affnity are toxic for defects!

@@ -8,7 +8,7 @@ import luigi
 from .pipelineParameter import PipelineParameter
 from .dataTasks import ExternalSegmentation, StackedRegionAdjacencyGraph
 from .customTargets import HDF5DataTarget, FolderTarget
-from .defectDetectionTasks import DefectSliceDetection
+from .defectHandlingTasks import DefectsToNodes
 from .blocking_helper import EdgesBetweenBlocks, BlockGridGraph
 from .blockwiseMulticutTasks import BlockwiseSolver, BlockwiseSubSolver
 
@@ -76,7 +76,7 @@ class SubblockSegmentations(BlockwiseSolver):
         }
 
         if PipelineParameter().defectPipeline:
-            return_tasks["defect_slices"] = DefectSliceDetection(self.pathToSeg)
+            return_tasks["defect_slices"] = DefectsToNodes(self.pathToSeg)
 
         return return_tasks
 

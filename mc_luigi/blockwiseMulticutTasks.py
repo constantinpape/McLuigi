@@ -6,9 +6,8 @@ from __future__ import division, print_function
 import luigi
 
 from .pipelineParameter import PipelineParameter
-from .dataTasks import ExternalSegmentation, StackedRegionAdjacencyGraph
-from .customTargets import HDF5DataTarget, FolderTarget
-from .defectDetectionTasks import DefectSliceDetection
+from .dataTasks import ExternalSegmentation
+from .customTargets import HDF5DataTarget
 from .multicutProblemTasks import MulticutProblem
 from .blocking_helper import NodesToBlocks
 from .tools import config_logger, run_decorator
@@ -17,10 +16,8 @@ from .nifty_helper import run_nifty_solver, string_to_factory, available_factory
 import os
 import logging
 import time
-import h5py
 
 import numpy as np
-import vigra
 from concurrent import futures
 
 # import the proper nifty version
@@ -55,7 +52,6 @@ class BlockwiseSolver(luigi.Task):
 
         for l in range(self.numberOfLevels):
             block_shape = list(map(lambda x: x * block_factor, initialBlockShape))
-
 
             # TODO check that we don't get larger than the actual shape here
             problems.append(

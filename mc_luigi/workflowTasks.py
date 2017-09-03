@@ -12,8 +12,8 @@ from .blockwiseBaselineTasks import SubblockSegmentations, BlockwiseOverlapSolve
 from .blockwiseBaselineTasks import BlockwiseStitchingSolver, BlockwiseMulticutStitchingSolver, NoStitchingSolver
 from .dataTasks import StackedRegionAdjacencyGraph, ExternalSegmentation
 from .customTargets import HDF5VolumeTarget
-from .defectDetectionTasks import DefectSliceDetection
-#from .skeletonTasks import ResolveCandidates
+from .defectHandlingTasks import DefectsToNodes
+# from .skeletonTasks import ResolveCandidates
 
 from .pipelineParameter import PipelineParameter
 from .tools import config_logger, run_decorator, get_replace_slices
@@ -76,8 +76,8 @@ class SegmentationWorkflow(luigi.Task):
 
         out.close()
         # FIXME this does not work for some reason
-        #if PipelineParameter().haveOffsets:
-        #    self._serialize_offsets(out)
+        # if PipelineParameter().haveOffsets:
+        #     self._serialize_offsets(out)
 
         seg.close()
 
@@ -143,7 +143,7 @@ class MulticutSegmentation(SegmentationWorkflow):
             "seg": ExternalSegmentation(self.pathToSeg)
         }
         if PipelineParameter().defectPipeline:
-            return_tasks["defect_slices"] = DefectSliceDetection(self.pathToSeg)
+            return_tasks["defect_slices"] = DefectsToNodes(self.pathToSeg)
         return return_tasks
 
     def output(self):
@@ -171,7 +171,7 @@ class BlockwiseMulticutSegmentation(SegmentationWorkflow):
             "seg": ExternalSegmentation(self.pathToSeg)
         }
         if PipelineParameter().defectPipeline:
-            return_tasks["defect_slices"] = DefectSliceDetection(self.pathToSeg)
+            return_tasks["defect_slices"] = DefectsToNodes(self.pathToSeg)
         return return_tasks
 
     def output(self):
@@ -204,7 +204,7 @@ class BlockwiseStitchingSegmentation(SegmentationWorkflow):
             "seg": ExternalSegmentation(self.pathToSeg)
         }
         if PipelineParameter().defectPipeline:
-            return_tasks["defect_slices"] = DefectSliceDetection(self.pathToSeg)
+            return_tasks["defect_slices"] = DefectsToNodes(self.pathToSeg)
         return return_tasks
 
     def output(self):
@@ -236,7 +236,7 @@ class BlockwiseMulticutStitchingSegmentation(SegmentationWorkflow):
             "seg": ExternalSegmentation(self.pathToSeg)
         }
         if PipelineParameter().defectPipeline:
-            return_tasks["defect_slices"] = DefectSliceDetection(self.pathToSeg)
+            return_tasks["defect_slices"] = DefectsToNodes(self.pathToSeg)
         return return_tasks
 
     def output(self):
@@ -267,7 +267,7 @@ class BlockwiseOverlapSegmentation(SegmentationWorkflow):
             "seg": ExternalSegmentation(self.pathToSeg)
         }
         if PipelineParameter().defectPipeline:
-            return_tasks["defect_slices"] = DefectSliceDetection(self.pathToSeg)
+            return_tasks["defect_slices"] = DefectsToNodes(self.pathToSeg)
         return return_tasks
 
     def output(self):
@@ -299,7 +299,7 @@ class NoStitchingSegmentation(SegmentationWorkflow):
             "seg": ExternalSegmentation(self.pathToSeg)
         }
         if PipelineParameter().defectPipeline:
-            return_tasks["defect_slices"] = DefectSliceDetection(self.pathToSeg)
+            return_tasks["defect_slices"] = DefectsToNodes(self.pathToSeg)
         return return_tasks
 
     def output(self):
@@ -317,35 +317,35 @@ class NoStitchingSegmentation(SegmentationWorkflow):
 
 # TODO
 # -> make different skeleton methods accessible
-class ResolvedSegmentation(SegmentationWorkflow):
-
-    fragmentationPath = luigi.Parameter()
-    segmentationPath = luigi.Parameter()
-    fragmentClassifierPath = luigi.Parameter()
-    weight = luigi.Parameter(default=1.)
-    numberOfLevels = luigi.Parameter(default=1)
-
-    def requires(self):
-        return {
-            "mc_nodes": ResolveCandidates(
-                self.fragmentationPath,
-                self.segmentationPath,
-                self.fragmentClassifierPath,
-                self.weight,
-                self.numberOfLevels
-            ),
-            "rag": StackedRegionAdjacencyGraph(self.fragmentationPath),
-            "seg": ExternalSegmentation(self.fragmentationPath)
-        }
-
-    def output(self):
-        save_path = os.path.join(
-            PipelineParameter().cache,
-            "ResolvedSegmentation_%s.h5" % (
-                "modified" if PipelineParameter().defectPipeline else "standard",
-            )
-        )
-        return HDF5VolumeTarget(save_path, self.dtype, compression=PipelineParameter().compressionLevel)
+# class ResolvedSegmentation(SegmentationWorkflow):
+#
+#     fragmentationPath = luigi.Parameter()
+#     segmentationPath = luigi.Parameter()
+#     fragmentClassifierPath = luigi.Parameter()
+#     weight = luigi.Parameter(default=1.)
+#     numberOfLevels = luigi.Parameter(default=1)
+#
+#     def requires(self):
+#         return {
+#             "mc_nodes": ResolveCandidates(
+#                 self.fragmentationPath,
+#                 self.segmentationPath,
+#                 self.fragmentClassifierPath,
+#                 self.weight,
+#                 self.numberOfLevels
+#             ),
+#             "rag": StackedRegionAdjacencyGraph(self.fragmentationPath),
+#             "seg": ExternalSegmentation(self.fragmentationPath)
+#         }
+#
+#     def output(self):
+#         save_path = os.path.join(
+#             PipelineParameter().cache,
+#             "ResolvedSegmentation_%s.h5" % (
+#                 "modified" if PipelineParameter().defectPipeline else "standard",
+#             )
+#         )
+#         return HDF5VolumeTarget(save_path, self.dtype, compression=PipelineParameter().compressionLevel)
 
 
 class SubblockSegmentationWorkflow(luigi.Task):

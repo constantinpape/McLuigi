@@ -69,6 +69,7 @@ class RegionNodeFeatures(luigi.Task):
 
         # list of the region statistics, that we want to extract
         # drop te Histogram, because it blows up the feature space...
+        # TODO also use Mean and add Histogram if needed
         statistics = [
             "Count", "Kurtosis",  # Histogram
             "Maximum", "Minimum", "Quantiles",
@@ -533,29 +534,29 @@ class EdgeFeatures(luigi.Task):
 
             assert skip_feats.shape[0] == skip_edges.shape[0]
             # TODO reactivate check once we have simple skip feats
-            #assert skip_feats.shape[1] == n_feats, "%i, %i" % (skip_feats.shape[1], n_feats)
+            # assert skip_feats.shape[1] == n_feats, "%i, %i" % (skip_feats.shape[1], n_feats)
 
             # open file for the skip edges
-            #skip_file = nh5.createFile(os.path.join(out.path, 'features_skip.h5'))
+            # skip_file = nh5.createFile(os.path.join(out.path, 'features_skip.h5'))
             vigra.writeHDF5(
                 skip_feats,
                 os.path.join(out.path, 'features_skip.h5'), 'data',
                 chunks=(min(2500, skip_feats.shape[0]), skip_feats.shape[1])
             )
-            #out_skip = nh5.Hdf5ArrayFloat32(
-            #    skip_file,
-            #    'data',
-            #    skip_feats.shape,
-            #    [min(2500, skip_feats.shape[0]), skip_feats.shape[1]]
-            #)
-            #out_skip.writeSubarray([0, 0], skip_feats)
+            # out_skip = nh5.Hdf5ArrayFloat32(
+            #     skip_file,
+            #     'data',
+            #     skip_feats.shape,
+            #     [min(2500, skip_feats.shape[0]), skip_feats.shape[1]]
+            # )
+            # out_skip.writeSubarray([0, 0], skip_feats)
 
         # return the file handles to close the files properly once the arrays are out of scope
         files = [z_file]
         if has_delete_edges:
             files.append(z_file_new)
-        #if skip_edges.size and not self.keepOnlyXY:
-        #    files.append(skip_file)
+        # if skip_edges.size and not self.keepOnlyXY:
+        #     files.append(skip_file)
         return files
 
     # we delete the old features_z and then rename the keep features
@@ -571,7 +572,8 @@ class EdgeFeatures(luigi.Task):
         inp_file = os.path.split(self.pathToInput)[1][:-3]
         save_path = os.path.join(
             PipelineParameter().cache,
-            "EdgeFeatures_%s_%s_%s" % (seg_file, inp_file, 'modified' if PipelineParameter().defectPipeline else 'standard')
+            "EdgeFeatures_%s_%s_%s" %
+            (seg_file, inp_file, 'modified' if PipelineParameter().defectPipeline else 'standard')
         )
         if self.keepOnlyXY:
             save_path += '_xy'

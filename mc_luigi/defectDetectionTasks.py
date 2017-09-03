@@ -298,7 +298,3 @@ class DefectSliceDetection(luigi.Task):
             )
         )
         return HDF5VolumeTarget(save_path, dtype='uint8', compression=PipelineParameter().compressionLevel)
-
-
-# TODO detection with svm, potentially followed by object detection
-# TODO combination of svm and ws-stat detectios

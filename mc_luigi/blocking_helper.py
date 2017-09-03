@@ -4,7 +4,7 @@ import luigi
 from .customTargets import HDF5DataTarget
 from .dataTasks import ExternalSegmentation
 from .pipelineParameter import PipelineParameter
-from .defectDetectionTasks import DefectSliceDetection
+from .defectHandlingTasks import DefectsToNodes
 from .tools import run_decorator, config_logger
 
 import numpy as np
@@ -37,7 +37,7 @@ class NodesToBlocks(luigi.Task):
     def requires(self):
         if PipelineParameter().defectPipeline:
             return {"seg": ExternalSegmentation(self.pathToSeg),
-                    "defect_slices": DefectSliceDetection(self.pathToSeg)}
+                    "defect_slices": DefectsToNodes(self.pathToSeg)}
         else:
             return {"seg": ExternalSegmentation(self.pathToSeg)}
 
