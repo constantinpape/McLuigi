@@ -175,7 +175,7 @@ class WsdtSegmentation(luigi.Task):
         return InputData(self.pathToProbabilities)
 
     # TODO enable 3d wsdt for isotropic ppl
-    # TODO zarr fir input / output to speed up parallelisation
+    # TODO zarr for input / output to speed up parallelisation
     @run_decorator
     def run(self):
         pmap = self.input()

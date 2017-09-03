@@ -84,7 +84,7 @@ class SegmentationWorkflow(luigi.Task):
     def _project_result_to_segmentation(self, rag, mc_nodes, out):
         assert mc_nodes.shape[0] == rag.numberOfNodes
         # get rid of 0 because we don't want it as segment label because it is reserved for the ignore label
-        mc_nodes, _, _ = vigra.analysis.relabelConsecutive(mc_nodes, start_label=0)
+        mc_nodes, _, _ = vigra.analysis.relabelConsecutive(mc_nodes, start_label=1)
         if np.dtype(self.dtype) != np.dtype(mc_nodes.dtype):
             self.dtype = mc_nodes.dtype
         nrag.projectScalarNodeDataToPixels(rag, mc_nodes, out.get(), PipelineParameter().nThreads)
