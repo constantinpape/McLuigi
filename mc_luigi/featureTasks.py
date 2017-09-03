@@ -1,14 +1,15 @@
+from __future__ import division, print_function
+
 # Multicut Pipeline implemented with luigi
 # Taksks for Feature Calculation
 
 import luigi
 
-from customTargets import FolderTarget, HDF5VolumeTarget
-from dataTasks import InputData, StackedRegionAdjacencyGraph, ExternalSegmentation
-from defectHandlingTasks import ModifiedAdjacency
-
-from pipelineParameter import PipelineParameter
-from tools import config_logger, run_decorator
+from .customTargets import FolderTarget, HDF5VolumeTarget
+from .dataTasks import InputData, StackedRegionAdjacencyGraph, ExternalSegmentation
+from .defectHandlingTasks import ModifiedAdjacency
+from .pipelineParameter import PipelineParameter
+from .tools import config_logger, run_decorator
 
 import logging
 import os
@@ -104,7 +105,7 @@ class RegionNodeFeatures(luigi.Task):
             )
 
             assert region_stats_slice.shape[0] == max_node + 1 - min_node
-            out.write([long(min_node), 0L], region_stats_slice)
+            out.write([min_node, 0], region_stats_slice)
             return True
 
         # parallel
@@ -112,7 +113,7 @@ class RegionNodeFeatures(luigi.Task):
         # n_workers = 1
         with futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
             tasks = []
-            for z in xrange(shape[0]):
+            for z in range(shape[0]):
                 start = [z, 0, 0]
                 end   = [z + 1, shape[1], shape[2]]
                 tasks.append(executor.submit(extract_stats_slice, start, end, z))
@@ -187,8 +188,8 @@ class RegionFeatures(luigi.Task):
 
         # we open the out file for this features
         out_file = nh5.createFile(os.path.join(out.path, '%s.h5' % key))
-        out_shape = [long(n_edges), long(n_feats)]
-        chunk_shape = [2500L, out_shape[1]]
+        out_shape = [n_edges, n_feats]
+        chunk_shape = [2500, out_shape[1]]
         out_array = nh5.Hdf5ArrayFloat32(out_file, 'data', out_shape, chunk_shape)
 
         # the statistic features that are combined by min, max, sum and absdiff
@@ -212,7 +213,7 @@ class RegionFeatures(luigi.Task):
             sV = centers[uvs_sub[:, 1], :]
             feats_sub.append(quadratic_euclidean_dist(sU, sV))
             feats_sub = np.concatenate(feats_sub, axis=1)
-            out_array.writeSubarray([edge_offset, 0L], feats_sub)
+            out_array.writeSubarray([edge_offset, 0], feats_sub)
             return True
 
         # TODO maybe some tweeking can speed this up further
@@ -224,7 +225,7 @@ class RegionFeatures(luigi.Task):
         n_splits = 500
         with futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
             tasks = []
-            for ii in xrange(n_splits):
+            for ii in range(n_splits):
                 edge_start = int(float(ii) / n_splits * n_edges)
                 edge_stop  = n_edges if ii == n_splits - 1 else int(float(ii + 1) / n_splits  * n_edges)
                 tasks.append(executor.submit(
@@ -238,7 +239,7 @@ class RegionFeatures(luigi.Task):
 
         if isinstance(skip_ranges, np.ndarray):
             assert skip_ranges.shape == (n_edges,)
-            out_array.writeSubarray([0L, n_feats - 1], skip_ranges[:, None])
+            out_array.writeSubarray([0, n_feats - 1], skip_ranges[:, None])
 
         # return the out file to close it after the array has gone out of scope
         return out_file
@@ -486,7 +487,7 @@ class EdgeFeatures(luigi.Task):
 
             keep_edge_intervals.extend(
                 [[consecutive_deletes[i][-1] + 1, consecutive_deletes[i + 1][0]]
-                 for i in xrange(len(consecutive_deletes) - 1)]
+                 for i in range(len(consecutive_deletes) - 1)]
             )
 
             if consecutive_deletes[-1][-1] != standard_feat_shape[0] - 1:
@@ -498,8 +499,8 @@ class EdgeFeatures(luigi.Task):
                 n_copy = keep_stop - keep_start
                 assert n_copy > 0, str(n_copy)
                 out_z_keep.writeSubarray(
-                    [long(total_copied), 0L],
-                    out_z.readSubarray([long(keep_start), 0L], [long(keep_stop), long(n_feats)])
+                    [total_copied, 0],
+                    out_z.readSubarray([keep_start, 0], [keep_stop, n_feats])
                 )
                 total_copied += n_copy
 
@@ -539,15 +540,15 @@ class EdgeFeatures(luigi.Task):
             vigra.writeHDF5(
                 skip_feats,
                 os.path.join(out.path, 'features_skip.h5'), 'data',
-                chunks=(min(2500L, skip_feats.shape[0]), skip_feats.shape[1])
+                chunks=(min(2500, skip_feats.shape[0]), skip_feats.shape[1])
             )
             #out_skip = nh5.Hdf5ArrayFloat32(
             #    skip_file,
             #    'data',
             #    skip_feats.shape,
-            #    [min(2500L, skip_feats.shape[0]), skip_feats.shape[1]]
+            #    [min(2500, skip_feats.shape[0]), skip_feats.shape[1]]
             #)
-            #out_skip.writeSubarray([0L, 0L], skip_feats)
+            #out_skip.writeSubarray([0, 0], skip_feats)
 
         # return the file handles to close the files properly once the arrays are out of scope
         files = [z_file]

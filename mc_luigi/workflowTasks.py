@@ -1,21 +1,22 @@
+from __future__ import division, print_function
+
 # Multicut Pipeline implemented with luigi
 # Workflow Tasks
 
 import luigi
 
-from multicutProblemTasks import MulticutProblem
+from .multicutProblemTasks import MulticutProblem
+from .multicutSolverTasks import McSolverFusionMoves  # ,McSolverExact
+from .blockwiseMulticutTasks import BlockwiseMulticutSolver
+from .blockwiseBaselineTasks import SubblockSegmentations, BlockwiseOverlapSolver
+from .blockwiseBaselineTasks import BlockwiseStitchingSolver, BlockwiseMulticutStitchingSolver, NoStitchingSolver
+from .dataTasks import StackedRegionAdjacencyGraph, ExternalSegmentation
+from .customTargets import HDF5VolumeTarget
+from .defectDetectionTasks import DefectSliceDetection
+#from .skeletonTasks import ResolveCandidates
 
-from multicutSolverTasks import McSolverFusionMoves  # ,McSolverExact
-from blockwiseMulticutTasks import BlockwiseMulticutSolver
-from blockwiseBaselineTasks import SubblockSegmentations, BlockwiseOverlapSolver
-from blockwiseBaselineTasks import BlockwiseStitchingSolver, BlockwiseMulticutStitchingSolver, NoStitchingSolver
-from dataTasks import StackedRegionAdjacencyGraph, ExternalSegmentation
-from customTargets import HDF5VolumeTarget
-from defectDetectionTasks import DefectSliceDetection
-from skeletonTasks import ResolveCandidates
-
-from pipelineParameter import PipelineParameter
-from tools import config_logger, run_decorator, get_replace_slices
+from .pipelineParameter import PipelineParameter
+from .tools import config_logger, run_decorator, get_replace_slices
 
 import logging
 import os
@@ -59,14 +60,12 @@ class SegmentationWorkflow(luigi.Task):
 
         seg.open()
         shape = seg.shape()
-        out = self.output()
-        out.open(shape)
 
-        ## TODO: this is only temporary for the sampleD experiments
-        ## where we don't need the segmentation (and writing it takes quite long....)
-        #seg.close()
-        #out.close()
-        #quit()
+        if PipelineParameter().haveOffsets:
+            out = self._expand_shape(shape)
+        else:
+            out = self.output()
+            out.open(shape)
 
         workflow_logger.info("SegmentationWorkflow: Projecting node result to segmentation.")
         self._project_result_to_segmentation(rag, mc_nodes, out)
@@ -76,15 +75,19 @@ class SegmentationWorkflow(luigi.Task):
             self._postprocess_defected_slices(inp, out)
 
         out.close()
+        # FIXME this does not work for some reason
+        #if PipelineParameter().haveOffsets:
+        #    self._serialize_offsets(out)
+
         seg.close()
 
     def _project_result_to_segmentation(self, rag, mc_nodes, out):
         assert mc_nodes.shape[0] == rag.numberOfNodes
         # get rid of 0 because we don't want it as segment label because it is reserved for the ignore label
-        mc_nodes, _, _ = vigra.analysis.relabelConsecutive(mc_nodes, start_label=0, keep_zeros=False)
+        mc_nodes, _, _ = vigra.analysis.relabelConsecutive(mc_nodes, start_label=0)
         if np.dtype(self.dtype) != np.dtype(mc_nodes.dtype):
             self.dtype = mc_nodes.dtype
-        nrag.projectScalarNodeDataToPixels(rag, mc_nodes, out.get(), 5)  # TODO investigate number of threads here
+        nrag.projectScalarNodeDataToPixels(rag, mc_nodes, out.get(), PipelineParameter().nThreads)
 
     def _postprocess_defected_slices(self, inp, out):
 
@@ -103,9 +106,26 @@ class SegmentationWorkflow(luigi.Task):
             replace_z = replace_slice[z]
             workflow_logger.info("SegmentationWorkflow: replacing defected slice %i by %i" % (z, replace_z))
             out.write(
-                [z, 0L, 0L],
-                out.read([replace_z, 0L, 0L], [replace_z + 1, shape[1], shape[2]])
+                [z, 0, 0],
+                out.read([replace_z, 0, 0], [replace_z + 1, shape[1], shape[2]])
             )
+
+    # expand the segmentation by offset !
+    def _expand_shape(self, seg_shape):
+        out = self.output()
+        offset_front = PipelineParameter().offsetFront
+        assert offset_front is not None
+        offset_back = PipelineParameter().offsetBack
+        assert offset_back is not None
+        shape = (np.array(offset_front) + np.array(offset_back) + np.array(seg_shape)).tolist()
+        out.open(shape)
+        out.set_offsets(offset_front, offset_back, serialize_offsets=False)
+        return out
+
+    def _serialize_offsets(self, out):
+        offset_front = PipelineParameter().offsetFront
+        offset_back = PipelineParameter().offsetBack
+        out.serialize_offsets(offset_front, offset_back)
 
     def output(self):
         raise AttributeError(

@@ -1,15 +1,16 @@
+from __future__ import print_function, division
+
 # Multicut Pipeline implemented with luigi
 # Tasks for learning and predicting random forests
 
 import luigi
 
-from taskSelection import get_local_features, get_local_features_for_multiinp
-from customTargets import HDF5DataTarget, HDF5VolumeTarget, FolderTarget
-from dataTasks import DenseGroundtruth, StackedRegionAdjacencyGraph
-from defectHandlingTasks import ModifiedAdjacency
-
-from pipelineParameter import PipelineParameter
-from tools import config_logger, run_decorator
+from .taskSelection import get_local_features, get_local_features_for_multiinp
+from .customTargets import HDF5DataTarget, HDF5VolumeTarget, FolderTarget
+from .dataTasks import DenseGroundtruth, StackedRegionAdjacencyGraph
+from .defectHandlingTasks import ModifiedAdjacency
+from .pipelineParameter import PipelineParameter
+from .tools import config_logger, run_decorator
 
 import logging
 
@@ -39,12 +40,12 @@ config_logger(workflow_logger)
 try:
     from sklearn.ensemble import RandomForestClassifier as RFType
     use_sklearn = True
-    import cPickle as pickle
-    workflow_logger.info("Using sklearn random forest")
+    import pickle
+    workflow_logger.debug("Using sklearn random forest")
 except ImportError:
     RFType = vigra.learning.RandomForest3
     use_sklearn = False
-    workflow_logger.info("Using vigra random forest 3")
+    workflow_logger.debug("Using vigra random forest 3")
 
 
 # wrapper for sklearn / random forest
@@ -81,7 +82,7 @@ class RandomForest(object):
         if use_sklearn:
             save_path = os.path.join(file_path, "%s.pkl" % key)
             assert os.path.exists(save_path), save_path
-            with open(save_path) as f:
+            with open(save_path, 'rb') as f:
                 rf = pickle.load(f)
             self.n_trees = rf.n_estimators
         else:
@@ -148,7 +149,7 @@ class RandomForest(object):
             if not os.path.exists(file_path):
                 os.mkdir(file_path)
             save_path = os.path.join(file_path, "%s.pkl" % (key))
-            with open(save_path, 'w') as f:
+            with open(save_path, 'wb') as f:
                 pickle.dump(self.rf, f)
         else:
             save_path = file_path + ".h5"
@@ -332,9 +333,10 @@ class EdgeProbabilities(luigi.Task):
                     offset += this_feats.shape[1]
 
         assert features.shape[1] == classifier.n_features, \
-            "Number of input and rf features do not match for %s: %i, %i" % (feat_type ,features.shape[1], classifier.n_features)
+            "Number of input and rf features do not match for %s: %i, %i" % (
+                feat_type, features.shape[1], classifier.n_features)
         probs = classifier.predict_probabilities(features, PipelineParameter().nThreads)[:, 1]
-        out.write([long(start)], probs)
+        out.write([start], probs)
 
     # Out of core prediction for edge type
     def _predict_out_of_core(
@@ -351,7 +353,7 @@ class EdgeProbabilities(luigi.Task):
         assert n_sub_feats > 1, str(n_sub_feats)
 
         def predict_subfeats(sub_feat_id):
-            print sub_feat_id, '/', n_sub_feats
+            print(sub_feat_id, '/', n_sub_feats)
             start_index = int(float(sub_feat_id) / n_sub_feats * n_edges)
             end_index   = int(float(sub_feat_id + 1) / n_sub_feats * n_edges)
             if sub_feat_id == n_sub_feats:
@@ -365,7 +367,7 @@ class EdgeProbabilities(luigi.Task):
                         sub_feats.append(f['data'][start_index:end_index, 0:f['data'].shape[1]])
             sub_feats = np.concatenate(sub_feats, axis=1)
 
-            read_start = long(start_index + start)
+            read_start = start_index + start
 
             probs = classifier.predict_probabilities(sub_feats, 1)[:, 1]
             out.write([read_start], probs)
@@ -374,7 +376,7 @@ class EdgeProbabilities(luigi.Task):
         n_workers = PipelineParameter().nThreads
         # n_workers = 1
         with futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
-            tasks = [executor.submit(predict_subfeats, sub_feat_id) for sub_feat_id in xrange(n_sub_feats)]
+            tasks = [executor.submit(predict_subfeats, sub_feat_id) for sub_feat_id in range(n_sub_feats)]
             [t.result() for t in tasks]
 
     def output(self):
@@ -519,11 +521,11 @@ class LearnClassifierFromGt(luigi.Task):
             feature_tasks = get_local_features_for_multiinp()
             assert len(feature_tasks) == n_inputs
             return_tasks = {
-                "gt": [EdgeGroundtruth(self.pathsToSeg[i], self.pathsToGt[i]) for i in xrange(n_inputs)],
+                "gt": [EdgeGroundtruth(self.pathsToSeg[i], self.pathsToGt[i]) for i in range(n_inputs)],
                 "features": feature_tasks
             }
         if PipelineParameter().defectPipeline:
-            return_tasks['modified_adjacency'] = [ModifiedAdjacency(self.pathsToSeg[i]) for i in xrange(n_inputs)]
+            return_tasks['modified_adjacency'] = [ModifiedAdjacency(self.pathsToSeg[i]) for i in range(n_inputs)]
         return return_tasks
 
     @run_decorator
@@ -642,7 +644,7 @@ class LearnClassifierFromGt(luigi.Task):
             features = features[mask]
             edge_gt = edge_gt[mask]
 
-        assert features.shape[0] == gt.shape[0], str(features.shape[0]) + " , " + str(gt.shape[0])
+        assert features.shape[0] == edge_gt.shape[0], "%i , %i" % (features.shape[0], edge_gt.shape[0])
         classifier = RandomForest(
             features,
             edge_gt,
@@ -706,7 +708,7 @@ class LearnClassifierFromGt(luigi.Task):
         features = []
         gts = []
 
-        for i in xrange(len(gt)):
+        for i in range(len(gt)):
             feat_tasks_i = feature_tasks[i]
             gt_i = gt[i]
 
@@ -746,7 +748,7 @@ class LearnClassifierFromGt(luigi.Task):
         features = []
         gts = []
 
-        for i in xrange(len(gt)):
+        for i in range(len(gt)):
             feat_tasks_i = feature_tasks[i]
             gt_i = gt[i]
             edge_gt = gt_i.read('edge_gt_z')
@@ -786,7 +788,7 @@ class LearnClassifierFromGt(luigi.Task):
         features = []
         gts = []
 
-        for i in xrange(len(gt)):
+        for i in range(len(gt)):
 
             gt_i = gt[i]
             edge_gt = gt_i.read('edge_gt')
@@ -835,7 +837,7 @@ class LearnClassifierFromGt(luigi.Task):
         features = []
         gts = []
 
-        for i in xrange(len(gt)):
+        for i in range(len(gt)):
             feat_tasks_i = feature_tasks[i]
             gt_i = gt[i]
 

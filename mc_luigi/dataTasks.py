@@ -1,11 +1,12 @@
+from __future__ import print_function, division
 # Multicut Pipeline implemented with luigi
 # Tasks for providing the input data
 
 import luigi
-from customTargets import HDF5VolumeTarget, StackedRagTarget, FolderTarget
 
-from pipelineParameter import PipelineParameter
-from tools import config_logger, run_decorator
+from .customTargets import HDF5VolumeTarget, StackedRagTarget, FolderTarget
+from .pipelineParameter import PipelineParameter
+from .tools import config_logger, run_decorator
 
 import logging
 
@@ -19,7 +20,7 @@ from concurrent import futures
 import subprocess
 
 # TODO benchmark and debug alternative impl
-from wsdt_impl import compute_wsdt_segmentation
+from .wsdt_impl import compute_wsdt_segmentation
 # from wsdt import wsDtSegmentation as compute_wsdt_segmentation
 
 # import the proper nifty version
@@ -126,7 +127,7 @@ class AffinityPrediction(luigi.Task):
             raw_shape = inp.shape()
 
             offset = np.array(list(raw_shape)) - np.array(list(aff_shape))
-            offset /= 2
+            offset //= 2
 
             # write the raw data offsets to the nifty h5 array
             inp.setOffsets(offset.tolist(), offset.tolist())
@@ -174,23 +175,97 @@ class WsdtSegmentation(luigi.Task):
         return InputData(self.pathToProbabilities)
 
     # TODO enable 3d wsdt for isotropic ppl
-    # TODO we could integrate the (statistics based) defect detection directly in here
-    # TODO parallelisation is really weird / slow, investigate !
-    # -> check if same strange behaviour on sirherny
-    # if not, probably nifty-package is responsible -> hdf5 parallel read/write ?! (libhdf5-serial ?)
-    # -> if this is true, also other applications should be horribly slow
+    # TODO zarr fir input / output to speed up parallelisation
     @run_decorator
     def run(self):
         pmap = self.input()
         pmap.open()
         shape = pmap.shape()
+        print(shape)
         out  = self.output()
         out.open(shape, pmap.chunk_shape())
 
+        # TODO need to benchmark this for larger data
         self._run_wsdt2d_standard(pmap, out, shape)
+        # self._run_wsdt2d_lessio(pmap, out, shape)
 
         out.close()
         pmap.close()
+
+    def _run_wsdt2d_lessio(self, pmap, out, shape):
+        # read the wsdt settings from ppl params
+        ppl_params = PipelineParameter()
+        threshold   = ppl_params.wsdtThreshold
+        min_seg     = ppl_params.wsdtMinSeg
+        sig_seeds   = ppl_params.wsdtSigSeeds
+        invert      = ppl_params.wsdtInvert
+        workflow_logger.info(
+            "WsdtSegmentation: Running lessio 2d dt watershed with threshold %f" % threshold
+        )
+
+        offsets = -1 * np.ones(shape[0], dtype='int64')
+
+        # TODO this logic could be changed:
+        # we wait until the offsets are there and then add them directly
+        # this should speed up everything significantly
+        def segment_slice(z):
+
+            print("Slice", z, "/", shape[0])
+            sliceStart = [z, 0, 0]
+            sliceStop  = [z + 1, shape[1], shape[2]]
+            pmap_z = pmap.read(sliceStart, sliceStop).squeeze()
+
+            if invert:
+                pmap_z = 1. - pmap_z
+
+            seg, max_z = compute_wsdt_segmentation(pmap_z, threshold, sig_seeds, min_seg)
+
+            # if we are in the lowest slice, we simply return the max-seg-id
+            if z == 0:
+                out.write(sliceStart, seg[None, :, :])
+                return z, max_z + 1
+
+            # otherwise, we wait for the previous thread to finish and add it's result
+            else:
+                # we wait for and get the offset from the previous slice
+                offset = offsets[z - 1]
+                while offset == -1:
+                    # FIXME Does this lock the GIL ? -> should get rid of it and use something else
+                    time.sleep(1)
+                    offset = offsets[z - 1]
+
+                # add the offset
+                seg += offset
+                max_z += offset
+                out.write(sliceStart, seg[None, :, :])
+                return z, max_z + 1
+
+        n_workers = PipelineParameter().nThreads
+
+        # callback to write out offset
+        def done_cb(fn):
+            if fn.cancelled():
+                raise RuntimeError('Future was cancelled - this should not happen!')
+            elif fn.done():
+                error = fn.exception()
+                if error:
+                    raise error
+                else:
+                    z, off = fn.result()
+                    offsets[z] = off
+
+        t_ws = time.time()
+        with futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
+            [executor.submit(segment_slice, z).add_done_callback(done_cb) for z in range(shape[0])]
+        workflow_logger.info(
+            "WsdtSegmentation: Running watershed took: %f s" % (time.time() - t_ws)
+        )
+
+        if offsets[-1] >= 4294967295 and self.dtype == np.dtype('uint32'):
+            print("WARNING: UINT32 overflow!")
+            return False
+
+        return True
 
     def _run_wsdt2d_standard(self, pmap, out, shape):
 
@@ -206,7 +281,7 @@ class WsdtSegmentation(luigi.Task):
 
         def segment_slice(z):
 
-            print "Slice", z, "/", shape[0]
+            print("Slice", z, "/", shape[0])
             sliceStart = [z, 0, 0]
             sliceStop  = [z + 1, shape[1], shape[2]]
             pmap_z = pmap.read(sliceStart, sliceStop).squeeze()
@@ -222,7 +297,7 @@ class WsdtSegmentation(luigi.Task):
 
         t_ws = time.time()
         with futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
-            tasks = [executor.submit(segment_slice, z) for z in xrange(shape[0])]
+            tasks = [executor.submit(segment_slice, z) for z in range(shape[0])]
             offsets = [future.result() for future in tasks]
         workflow_logger.info(
             "WsdtSegmentation: Running watershed took: %f s" % (time.time() - t_ws)
@@ -234,7 +309,7 @@ class WsdtSegmentation(luigi.Task):
         offsets = np.cumsum(offsets)
 
         if offsets[-1] >= 4294967295 and self.dtype == np.dtype('uint32'):
-            print "WARNING: UINT32 overflow!"
+            print("WARNING: UINT32 overflow!")
             # we don't add the offset, but only save the non-offset file
             return False
 
@@ -247,7 +322,7 @@ class WsdtSegmentation(luigi.Task):
 
         t_off = time.time()
         with futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
-            tasks = [executor.submit(add_offset, z, offsets[z]) for z in xrange(shape[0])]
+            tasks = [executor.submit(add_offset, z, offsets[z]) for z in range(shape[0])]
             [t.result() for t in tasks]
         workflow_logger.info("WsdtSegmentation: Adding offsets took %f s" % (time.time() - t_off))
         return True
@@ -414,7 +489,7 @@ class ExternalSegmentationLabeled(luigi.Task):
         n_workers = min(shape[0], PipelineParameter().nThreads)
         # n_workers = 1
         with futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
-            tasks = [executor.submit(label_slice, z) for z in xrange(shape[0])]
+            tasks = [executor.submit(label_slice, z) for z in range(shape[0])]
 
         # calculate the offsets for every slice
         offsets = np.array([task.result() for task in tasks], dtype='uint32')
@@ -432,7 +507,7 @@ class ExternalSegmentationLabeled(luigi.Task):
             return True
 
         with futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
-            tasks = [executor.submit(addOffset, offsets[z], z) for z in xrange(shape[0])]
+            tasks = [executor.submit(addOffset, offsets[z], z) for z in range(shape[0])]
         [task.result() for task in tasks]
 
     def output(self):
@@ -479,9 +554,8 @@ class DenseGroundtruth(luigi.Task):
         # and allow to keep arbitrary values fixed
 
         gt_labeled, _, _ = vigra.analysis.relabelConsecutive(
-            gt.read([0, 0, 0], gt.shape()),
-            start_label=1,
-            keep_zeros=True
+            gt.read([0, 0, 0], gt.shape()).astype('uint32'),
+            start_label=0
         )
 
         out = self.output()

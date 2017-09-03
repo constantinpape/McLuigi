@@ -195,8 +195,7 @@ class ResolveCandidates(luigi.Task):
 
         resolved_node_result = vigra.analysis.relabelConsecutive(
             resolved_node_result,
-            start_label=0,
-            keep_zeros=False
+            start_label=0
         )
         self.output().write(resolved_node_result)
 

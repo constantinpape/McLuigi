@@ -1,3 +1,5 @@
+from __future__ import division, print_function
+
 import time
 
 # import the proper nifty version
@@ -24,6 +26,7 @@ def available_factorys():
     return available
 
 
+# FIXME this fails for the mc-andres, that's wht we have this ugly workaround...
 def run_nifty_solver(
     obj,
     factory,
@@ -38,11 +41,17 @@ def run_nifty_solver(
         timeLimitSolver=time_limit
     )
 
+    t_inf = time.time()
     ret = solver.optimize(visitor)
+    t_inf = time.time() - t_inf
     energies = visitor.energies()
     runtimes = visitor.runtimes()
 
-    return ret, energies, runtimes
+    # workaround if we don't have any energies / runtimes
+    if len(energies) == 0:
+        return ret, [obj.evalNodeLabels(ret)], [t_inf]
+    else:
+        return ret, energies, runtimes
 
 
 def nifty_greedy_factory(

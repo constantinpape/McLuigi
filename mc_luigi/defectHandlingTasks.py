@@ -1,13 +1,14 @@
+from __future__ import print_function, division
+
 # Multicut Pipeline implemented with luigi
 # Taksks for defect and handling
 import luigi
 
-from customTargets import HDF5DataTarget
-from dataTasks import ExternalSegmentation, StackedRegionAdjacencyGraph
-from defectDetectionTasks import DefectSliceDetection
-
-from pipelineParameter import PipelineParameter
-from tools import config_logger, run_decorator, get_unique_rows
+from .customTargets import HDF5DataTarget
+from .dataTasks import ExternalSegmentation, StackedRegionAdjacencyGraph
+from .defectDetectionTasks import DefectSliceDetection
+from .pipelineParameter import PipelineParameter
+from .tools import config_logger, run_decorator, get_unique_rows
 
 import logging
 
@@ -53,15 +54,15 @@ class DefectsToNodes(luigi.Task):
 
         assert seg.shape() == defects.shape()
 
-        ny = long(seg.shape()[1])
-        nx = long(seg.shape()[2])
+        ny = seg.shape()[1]
+        nx = seg.shape()[2]
 
         def defects_to_nodes_z(z):
-            slice_begin = [long(z), 0L, 0L]
-            slice_end   = [long(z + 1), ny, nx]
+            slice_begin = [z, 0, 0]
+            slice_end   = [z + 1, ny, nx]
             defect_mask = defects.read(slice_begin, slice_end)
             if 1 in defect_mask:
-                print z
+                print(z)
                 seg_z = seg.read(slice_begin, slice_end)
                 where_defect = defect_mask == 1
                 defect_nodes_slice = np.unique(seg_z[where_defect])
@@ -72,13 +73,13 @@ class DefectsToNodes(luigi.Task):
         # non-parallel for debugging
         # defect_nodes = []
         # nodes_z = []
-        # for z in xrange(seg.shape[0]):
+        # for z in range(seg.shape[0]):
         #    res = defects_to_nodes_z(z)
         #    defect_nodes.extend(res[0])
         #    nodes_z.extend(res[1])
 
         with futures.ThreadPoolExecutor(max_workers=PipelineParameter().nThreads) as executor:
-            tasks = [executor.submit(defects_to_nodes_z, z) for z in xrange(seg.shape()[0])]
+            tasks = [executor.submit(defects_to_nodes_z, z) for z in range(seg.shape()[0])]
             defect_nodes = []
             nodes_z      = []
             for fut in tasks:
@@ -145,7 +146,7 @@ class ModifiedAdjacency(luigi.Task):
 
         # get the original rag adjacency
         uv_ids = rag.uvIds()
-        n_nodes = uv_ids.max() + 1
+        n_nodes = rag.numberOfNodes
 
         defect_slices = np.unique(nodes_z)
 
@@ -157,7 +158,7 @@ class ModifiedAdjacency(luigi.Task):
         for consec in consecutive_defect_slices:
             if len(consec) > 1:
                 has_lower_defect_list.extend(consec[1:])
-        print "Slices with lower defect slice:", has_lower_defect_list
+        print("Slices with lower defect slice:", has_lower_defect_list)
 
         def get_skip_edges_from_nifty(z, i):
             has_lower_defect = z in has_lower_defect_list
@@ -167,7 +168,7 @@ class ModifiedAdjacency(luigi.Task):
                 defect_node_dict,
                 has_lower_defect
             )
-            print 'Finished processing slice', z, ':', i, '/', len(defect_slices)
+            print('Finished processing slice', z, ':', i, '/', len(defect_slices))
             return z, delete_edges_z, ignore_edges_z, skip_edges_z, skip_ranges_z
 
         # non-parallel for debugging
@@ -245,6 +246,7 @@ class ModifiedAdjacency(luigi.Task):
             workflow_logger.info(
                 "ModifiedAdjacency: Total number of edges in modified adjacency: %i" % n_edges_modified
             )
+
             modified_adjacency = modified_adjacency.serialize()
             out = self.output()
             out.write(True, "has_defects")

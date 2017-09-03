@@ -1,9 +1,11 @@
+from __future__ import division, print_function
+
 from luigi.target import FileSystemTarget
 from luigi.file import LocalFileSystem
 
 import os
 import numpy as np
-import cPickle as pickle
+import pickle
 
 import vigra
 import h5py
@@ -79,10 +81,13 @@ class HDF5VolumeTarget(FileSystemTarget):
 
             # check if any offsets were added to the array
             if self.has_offsets(key):
+                print("Loading with offsets")
                 with h5py.File(self.path) as f:
                     ds = f[key]
                     offset_front = ds.attrs.get('offset_front')
                     offset_back = ds.attrs.get('offset_back')
+                    print(offset_front)
+                    print(offset_back)
                     self.arrays[key].setOffsetFront(offset_front)
                     self.arrays[key].setOffsetBack(offset_back)
 
@@ -101,13 +106,17 @@ class HDF5VolumeTarget(FileSystemTarget):
             )
 
     # add offsets to the nh5 array
-    def setOffsets(self, offset_front, offset_back, key='data'):
+    def set_offsets(self, offset_front, offset_back, key='data', serialize_offsets=True):
         if key not in self.arrays:
             raise KeyError("Key does not name a valid dataset in H5 file.")
         self.arrays[key].setOffsetFront(offset_front)
         self.arrays[key].setOffsetBack(offset_back)
         # serialize the offsets
-        with h5py.File(self.path) as f:
+        if serialize_offsets:
+            self.serialize_offsets(offset_front, offset_back, key)
+
+    def serialize_offsets(self, offset_front, offset_back, key='data'):
+        with h5py.File(self.path, 'r') as f:
             ds = f[key]
             ds.attrs.create('offset_front', offset_front)
             ds.attrs.create('offset_back', offset_back)
@@ -123,7 +132,7 @@ class HDF5VolumeTarget(FileSystemTarget):
             raise KeyError("Key does not name a valid dataset in H5 file.")
         assert self.opened
         # to avoid errors in python glue code
-        start = list(map(long, start))
+        start = list(start)
         self.arrays[key].writeSubarray(start, data)
 
     def read(self, start, stop, key='data'):
@@ -131,8 +140,8 @@ class HDF5VolumeTarget(FileSystemTarget):
             raise KeyError("Key does not name a valid dataset in H5 file.")
         assert self.opened
         # to avoid errors in python glue code
-        start = list(map(long, start))
-        stop = list(map(long, stop))
+        start = list(start)
+        stop = list(stop)
         return self.arrays[key].readSubarray(start, stop)
 
     def get(self, key='data'):
@@ -328,6 +337,6 @@ class StackedRagTarget(FileSystemTarget):
     def readKey(self, key):
         with h5py.File(self.path, 'r') as f:
             if key not in f.keys():
-                print "The key", key, "is not in", f.keys()
+                print("The key", key, "is not in", f.keys())
                 raise KeyError("Key not found!")
         return vigra.readHDF5(self.path, key)

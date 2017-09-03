@@ -1,3 +1,5 @@
+from __future__ import division, print_function
+
 # Multicut Pipeline implemented with luigi
 # Multicut Problem Tasks
 
@@ -5,13 +7,12 @@ import luigi
 
 import os
 
-from dataTasks import StackedRegionAdjacencyGraph
-from learningTasks import EdgeProbabilities
-from customTargets import HDF5DataTarget
-from defectHandlingTasks import ModifiedAdjacency, SkipEdgeLengths
-
-from pipelineParameter import PipelineParameter
-from tools import config_logger, run_decorator
+from .dataTasks import StackedRegionAdjacencyGraph
+from .learningTasks import EdgeProbabilities
+from .customTargets import HDF5DataTarget
+from .defectHandlingTasks import ModifiedAdjacency, SkipEdgeLengths
+from .pipelineParameter import PipelineParameter
+from .tools import config_logger, run_decorator
 
 import logging
 
@@ -37,7 +38,7 @@ class MulticutProblem(luigi.Task):
     pathToSeg = luigi.Parameter()
     # this can either contain a single path (classifier trained for xy - and z - edges jointly)
     # or two paths (classfier trained for xy - edges + classifier trained for z - edges separately)
-    pathsToClassifier  = luigi.ListParameter()
+    pathsToClassifier  = luigi.Parameter()
 
     def requires(self):
         return_tasks = {
@@ -60,7 +61,7 @@ class MulticutProblem(luigi.Task):
         len_costs = edge_cost_file.shape()[0]
         workflow_logger.info("MulticutProblem: loaded edge costs of len %i" % len_costs)
 
-        edge_costs = edge_cost_file.read([0L], [long(len_costs)])
+        edge_costs = edge_cost_file.read([0], [len_costs])
 
         if PipelineParameter().defectPipeline:
             workflow_logger.info("MulticutProblem: computing MulticutProblem for defect correction pipeline.")

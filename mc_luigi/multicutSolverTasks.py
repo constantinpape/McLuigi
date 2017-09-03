@@ -1,3 +1,5 @@
+from __future__ import division, print_function
+
 # Multicut Pipeline implemented with luigi
 # Multicut Solver Tasks
 
@@ -5,10 +7,10 @@ import luigi
 
 import os
 
-from customTargets import HDF5DataTarget
-from pipelineParameter import PipelineParameter
-from tools import config_logger, run_decorator
-from nifty_helper import run_nifty_solver, nifty_ilp_factory, string_to_factory
+from .customTargets import HDF5DataTarget
+from .pipelineParameter import PipelineParameter
+from .tools import config_logger, run_decorator
+from .nifty_helper import run_nifty_solver, nifty_ilp_factory, string_to_factory
 
 import logging
 
@@ -70,7 +72,7 @@ class McSolverFusionMoves(luigi.Task):
         workflow_logger.info("McSolverFusionMoves: Solving problems with solver %s" % solver_type)
         workflow_logger.info(
             "McSolverFusionMoves: With Params %s" % ' '.join(
-                ['%s, %s,' % (str(k), str(v)) for k, v in solver_params.iteritems()]
+                ['%s, %s,' % (str(k), str(v)) for k, v in solver_params.items()]
             )
         )
 
