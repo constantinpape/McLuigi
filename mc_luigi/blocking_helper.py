@@ -5,8 +5,7 @@ from .customTargets import HDF5DataTarget
 from .dataTasks import ExternalSegmentation
 from .pipelineParameter import PipelineParameter
 from .defectDetectionTasks import DefectSliceDetection
-from .tools import find_matching_row_indices
-from .tools import run_decorator, config_logger, cartesian
+from .tools import run_decorator, config_logger
 
 import numpy as np
 import os
@@ -33,7 +32,7 @@ class NodesToBlocks(luigi.Task):
 
     blockShape   = luigi.ListParameter()
     blockOverlap = luigi.ListParameter()
-    dtype        = luigi.ListParameter('uint32')
+    dtype        = luigi.Parameter(default='uint32')
 
     def requires(self):
         if PipelineParameter().defectPipeline:
@@ -120,7 +119,7 @@ class BlockGridGraph(luigi.Task):
 
             # find adjacent blocks via all blocks in the bounding box and excluding the current block id
             inner_block = blocking.getBlockWithHalo(block_id, overlap).innerBlock
-            inner_begin, inner_end =  np.array(inner_block.begin), np.array(inner_block.end)
+            inner_begin, inner_end = np.array(inner_block.begin), np.array(inner_block.end)
             center = (inner_end + inner_begin) / 2.
 
             adjacent_blocks = np.array(blocking.getBlockIdsOverlappingBoundingBox(block.begin, block.end, overlap))

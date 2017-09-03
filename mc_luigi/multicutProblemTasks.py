@@ -38,7 +38,7 @@ class MulticutProblem(luigi.Task):
     pathToSeg = luigi.Parameter()
     # this can either contain a single path (classifier trained for xy - and z - edges jointly)
     # or two paths (classfier trained for xy - edges + classifier trained for z - edges separately)
-    pathsToClassifier  = luigi.ListParameter()
+    pathsToClassifier  = luigi.Parameter()
 
     def requires(self):
         return_tasks = {

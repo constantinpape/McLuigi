@@ -106,9 +106,9 @@ class PipelineParameter(object, metaclass=Singleton):
         self.overlapThreshold = .5
 
         # shape offsets for the segmentation result
-        haveOffsets = False
-        offsetFront = None
-        offsetBack = None
+        self.haveOffsets = False
+        self.offsetFront = None
+        self.offsetBack = None
 
     # TODO range and type cheks via @property and setproperty
 

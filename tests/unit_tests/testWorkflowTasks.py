@@ -25,13 +25,13 @@ class TestDataTasks(McLuigiTestCase):
 
     def test_multicut_wf(self):
         call(['python', 'task_wrapper.py', 'mc'])
-        seg_path = './cache/MulticutSegmentation.h5'
+        seg_path = './cache/MulticutSegmentation_standard.h5'
         self.assertTrue(os.path.exists(seg_path))
         self.check_segmentation(vigra.readHDF5(seg_path, 'data'))
 
     def test_blockwise_wf(self):
         call(['python', 'task_wrapper.py', 'blockwise_mc'])
-        seg_path = './cache/BlockwiseMulticutSegmentation.h5'
+        seg_path = './cache/BlockwiseMulticutSegmentation_L1_20_256_256_5_50_50_standard.h5'
         self.assertTrue(os.path.exists(seg_path))
         self.check_segmentation(vigra.readHDF5(seg_path, 'data'))
 
