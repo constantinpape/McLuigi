@@ -8,8 +8,8 @@ from .customTargets import HDF5DataTarget
 from .dataTasks import ExternalSegmentation, StackedRegionAdjacencyGraph
 from .defectDetectionTasks import DefectSliceDetection
 from .pipelineParameter import PipelineParameter
-from .featureTasks import RegionNodeFeatures
-from .learningTasks import RandomForest
+# from .featureTasks import RegionNodeFeatures
+# from .learningTasks import RandomForest
 from .tools import config_logger, run_decorator, get_unique_rows
 
 import logging
@@ -56,6 +56,7 @@ class DefectsToNodes(luigi.Task):
             assert os.path.exists(PipelineParameter().defectRfPath), self.pathToClassifier
             inputs = PipelineParameter().inputs
             # FIXME this won't work for multiple input datasets
+            # FIXME dependency on RegionNodeFeatures causes circular imports
             raw_path = inputs['data'][0]
             required_tasks = {
                 'feats': RegionNodeFeatures(raw_path, self.pathToSeg),
@@ -109,6 +110,7 @@ class DefectsToNodes(luigi.Task):
         feats = inp['feats']
         feats.open()
 
+        # FIXME dependency on RandomForest causes circular imports
         rf = RandomForest.load_from_file(PipelineParameter().defectRfPath, 'rf')
 
         n_feats = feats.shape()[1]

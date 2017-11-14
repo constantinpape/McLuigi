@@ -95,7 +95,10 @@ def iterative_inplace_watershed(hmap, seeds, min_segment_size):
         _, max_label = vigra.analysis.watershedsNew(hmap, seeds=seeds, out=seeds)
 
         # Remove gaps in the list of label values.
-        _, max_label, _ = vigra.analysis.relabelConsecutive(seeds, start_label=0, out=seeds)
+        _, max_label, _ = vigra.analysis.relabelConsecutive(seeds,
+                                                            start_label=0,
+                                                            out=seeds,
+                                                            keep_zeros=False)
 
     return max_label
 

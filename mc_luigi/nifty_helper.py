@@ -26,7 +26,7 @@ def available_factorys():
     return available
 
 
-# FIXME this fails for the mc-andres, that's wht we have this ugly workaround...
+# FIXME this fails for the mc-andres, that's why we have this ugly workaround...
 def run_nifty_solver(
     obj,
     factory,

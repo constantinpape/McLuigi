@@ -97,7 +97,7 @@ class BlockwiseMulticutSolver(BlockwiseSolver):
         reduced_graph = nifty.graph.UndirectedGraph()
         reduced_graph.deserialize(reduced_problem.read("graph"))
         reduced_costs = reduced_problem.read("costs")
-        reduced_objective = nifty.graph.optimization.multicut.multicutObjective(reduced_graph, reduced_costs)
+        reduced_objective = nifty.graph.opt.multicut.multicutObjective(reduced_graph, reduced_costs)
 
         #
         # run global multicut inference
@@ -493,7 +493,7 @@ class BlockwiseSubSolver(luigi.Task):
                 "BlockwiseSubSolver: Solving MC Problem for block %i with %i nodes / %i edges"
                 % (block_id, g.numberOfNodes, g.numberOfEdges)
             )
-            obj = nifty.graph.optimization.multicut.multicutObjective(g, costs)
+            obj = nifty.graph.opt.multicut.multicutObjective(g, costs)
             factory = string_to_factory(obj, sub_solver_type, solver_params)
             solver = factory.create(obj)
             t_inf  = time.time()
@@ -637,7 +637,7 @@ class TestSubSolver(luigi.Task):
             else:
                 solver_params = dict()
 
-            obj = nifty.graph.optimization.multicut.multicutObjective(g, costs)
+            obj = nifty.graph.opt.multicut.multicutObjective(g, costs)
             solver = string_to_factory(obj, sub_solver_type, solver_params).create(obj)
             t_inf  = time.time()
             res    = solver.optimize()

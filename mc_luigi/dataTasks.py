@@ -160,6 +160,8 @@ class AffinityPrediction(luigi.Task):
         return FolderTarget(affinity_folder)
 
 
+# FIXME creates wrong offsets atm !!
+# not ingestible by stacked rag
 class WsdtSegmentation(luigi.Task):
     """
     Task for generating segmentation via wsdt.
@@ -181,7 +183,6 @@ class WsdtSegmentation(luigi.Task):
         pmap = self.input()
         pmap.open()
         shape = pmap.shape()
-        print(shape)
         out  = self.output()
         out.open(shape, pmap.chunk_shape())
 
@@ -290,17 +291,18 @@ class WsdtSegmentation(luigi.Task):
                 pmap_z = 1. - pmap_z
 
             seg, max_z = compute_wsdt_segmentation(pmap_z, threshold, sig_seeds, min_seg)
+
             out.write(sliceStart, seg[None, :, :])
             return max_z + 1
 
         n_workers = PipelineParameter().nThreads
 
-        t_ws = time.time()
+        t_wsdt = time.time()
         with futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
             tasks = [executor.submit(segment_slice, z) for z in range(shape[0])]
             offsets = [future.result() for future in tasks]
         workflow_logger.info(
-            "WsdtSegmentation: Running watershed took: %f s" % (time.time() - t_ws)
+            "WsdtSegmentation: Running watershed took: %f s" % (time.time() - t_wsdt)
         )
 
         # accumulate the offsets for each slice
@@ -555,7 +557,8 @@ class DenseGroundtruth(luigi.Task):
 
         gt_labeled, _, _ = vigra.analysis.relabelConsecutive(
             gt.read([0, 0, 0], gt.shape()).astype('uint32'),
-            start_label=0
+            start_label=1,
+            keep_zeros=True
         )
 
         out = self.output()
