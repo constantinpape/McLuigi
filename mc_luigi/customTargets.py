@@ -1,7 +1,6 @@
 from __future__ import division, print_function
 
 from luigi.target import FileSystemTarget
-from luigi.file import LocalFileSystem
 
 import os
 import numpy as np
@@ -9,6 +8,7 @@ import pickle
 
 import vigra
 import h5py
+import z5py
 
 # import the proper nifty version
 try:
@@ -23,11 +23,12 @@ except ImportError:
         import nifty_with_gurobi.hdf5 as nh5
 
 
-class HDF5VolumeTarget(FileSystemTarget):
+class BaseTarget(FileSystemTarget):
     """
-    Target for volumetric data larger than RAM
+    Custom target base class
     """
-    fs = LocalFileSystem()
+    def __init__(self, path):
+        super(BaseTarget, self).__init__(path)
 
     def makedirs(self):
         """
@@ -41,70 +42,137 @@ class HDF5VolumeTarget(FileSystemTarget):
             except OSError:
                 pass
 
-    def __init__(self, path, dtype, defaultKey='data', compression=-1):
-        super(HDF5VolumeTarget, self).__init__(path)
-        self.h5_file = None
-        self.dtype = dtype
-        self.compression = compression
-        self.arrays = {}
-        self.opened = False
 
+# TODO enable zarr format ?!
+class N5Target(BaseTarget):
+    """
+    Target for data in n5 format
+    """
+    def __init__(self, path):
+        super(N5Target, self).__init__(path)
+        self.datasets = {}
+        self.n5_file = z5py.File(self.path, use_zarr_format=False)
 
-    def has_offsets(self, key='data'):
-        with h5py.File(self.path) as f:
-            ds = f[key]
-            if 'offset_front' in ds.attrs.keys():
-                assert 'offset_back' in ds.attrs.keys()
-                return True
-            else:
-                return False
-
-
-    def open(self, shape=None, chunkShape=None, key='data'):
-
-        # check if this file is already open
-        if not self.opened:
-            # open an existing hdf5 file
-            if os.path.exists(self.path):
-                self.h5_file = nh5.openFile(self.path)
-            # create a new file
-            else:
-                self.makedirs()
-                self.h5_file = nh5.createFile(self.path)  # , cacheSettings)
-            self.opened = True
-
-        # open an existing dataset
-        if shape is None:
-            assert chunkShape is None
-
-            self.arrays[key] = nh5.hdf5Array(self.dtype, self.h5_file, key)
-
-            # check if any offsets were added to the array
-            if self.has_offsets(key):
-                print("Loading with offsets")
-                with h5py.File(self.path) as f:
-                    ds = f[key]
-                    offset_front = ds.attrs.get('offset_front')
-                    offset_back = ds.attrs.get('offset_back')
-                    print(offset_front)
-                    print(offset_back)
-                    self.arrays[key].setOffsetFront(offset_front)
-                    self.arrays[key].setOffsetBack(offset_back)
-
-        # create a new dataset
+    # TODO change compression to blosc as soon as n5 supports it !
+    # TODO offset handling, need to implement loading with offsets and offsets in z5
+    def open(self, key='data', dtype=None, shape=None, chunks=None, compression='gzip', **compression_opts):
+        # if we have already opened the dataset, we don't need to do anything
+        if key in self.datasets:
+            return self
+        # otherwise we need to check, if this dataset exists on file and either open or create it
+        if key in self.n5_file:
+            self.datasets[key] = self.n5_file[key]
         else:
-            # if we no chunk chape was given, use default chunks
-            if chunkShape is not None:
-                assert len(chunkShape) == len(shape), str(len(chunkShape)) + " , " + str(len(shape))
-                for dd in range(len(shape)):
-                    assert chunkShape[dd] <= shape[dd]
-            else:
-                chunkShape = [1, min(shape[1], 512), min(shape[2], 512)]
+            # if we need to create the dataset, we need to make sure that
+            # dtype, shape and chunks are actually specified
+            assert dtype is not None, "Can't open a new dataset if dtype is not specified"
+            assert shape is not None, "Can't open a new dataset if shape is not specified"
+            assert chunks is not None, "Can't open a new dataset if chunks are not specified"
+            self.datasets[key] = self.n5_file.create_dataset(key,
+                                                             dtype=dtype,
+                                                             shape=shape,
+                                                             chunks=chunks,
+                                                             compressor=compression,
+                                                             **compression_opts)
+        return self
 
-            self.arrays[key] = nh5.hdf5Array(
-                self.dtype, self.h5_file, key, shape, chunkShape, compression=self.compression
-            )
+    def write(self, start, data, key='data'):
+        assert key in self.datasets, "Can't write to a dataset that has not been opened"
+        self.datasets[key].write_subarray(start, data)
 
+    def read(self, start, stop, key='data'):
+        assert key in self.datasets, "Can't read from a dataset that has not been opened"
+        return self.datasets[key].read_subarray(start, stop)
+
+    # get the dataset implementation to pass to c++ code
+    def get(self, key='data'):
+        assert key in self.datasets, "Can't get ds impl for a dataset that has not been opened"
+        return self.datasets[key]._impl
+
+    def shape(self, key='data'):
+        assert key in self.datasets, "Can't get shape for a dataset that has not been opened"
+        return self.datasets[key].shape
+
+    def chunks(self, key='data'):
+        assert key in self.datasets, "Can't get chunks for a dataset that has not been opened"
+        return self.datasets[key].chunks
+
+    # dummy implementation to be consisteny with HDF5Target
+    def close(self):
+        pass
+
+
+# TODO change api, s.t. this can be used interchangebly with N5Target
+class HDF5Target(BaseTarget):
+    """
+    Target for h5 data larger than RAM
+    """
+    def __init__(self, path):
+        super(HDF5Target, self).__init__(path)
+        self.datasets = {}
+        self.h5_file = nh5.openFile(self.path) if os.path.exists(self.path) else \
+            nh5.createFile(self.path)
+
+    # TODO opening with offsets
+    def open(self, key='data', dtype=None, shape=None, chunks=None, compression='gzip', **compression_opts):
+
+        # if we have already opened the dataset, we don't need to do anything
+        if key in self.datasets:
+            return self
+        # otherwise we need to check, if this dataset exists on file and either open or create it
+        with h5py.File(self.path) as fh5:
+            has_key = key in fh5
+        if has_key:
+            self.datasets[key] = nh5.hdf5Array(self.dtype, self.h5_file, key)
+        else:
+            # if we need to create the dataset, we need to make sure that
+            # dtype, shape and chunks are actually specified
+            assert dtype is not None, "Can't open a new dataset if dtype is not specified"
+            assert shape is not None, "Can't open a new dataset if shape is not specified"
+            assert chunks is not None, "Can't open a new dataset if chunks are not specified"
+            self.datasets[key] = nh5.hdf5Array(dtype, self.h5_file, key,
+                                               shape, chunks,
+                                               compression=compression,
+                                               **compression_opts)
+        # TODO opening with offsets
+        # # check if any offsets were added to the array
+        # if self.has_offsets(key):
+        #     print("Loading with offsets")
+        #     with h5py.File(self.path) as f:
+        #         ds = f[key]
+        #         offset_front = ds.attrs.get('offset_front')
+        #         offset_back = ds.attrs.get('offset_back')
+        #         print(offset_front)
+        #         print(offset_back)
+        #         self.arrays[key].setOffsetFront(offset_front)
+        #         self.arrays[key].setOffsetBack(offset_back)
+
+    def close(self):
+        nh5.closeFile(self.h5_file)
+
+    def write(self, start, data, key='data'):
+        assert key in self.datasets, "Can't write to a dataset that has not been opened"
+        self.datasets[key].writeSubarray(list(start), data)
+
+    def read(self, start, stop, key='data'):
+        assert key in self.datasets, "Can't read from a dataset that has not been opened"
+        return self.datasets[key].readSubarray(list(start), list(stop))
+
+    def get(self, key='data'):
+        assert key in self.datasets, "Can't get ds impl for a dataset that has not been opened"
+        return self.datasets[key]
+
+    def shape(self, key='data'):
+        assert key in self.datasets, "Can't get shape for a dataset that has not been opened"
+        return self.datasets[key].shape
+
+    def chunks(self, key='data'):
+        assert key in self.datasets, "Can't get chunks for a dataset that has not been opened"
+        return self.datasets[key].chunkShape
+
+    # TODO
+    # TODO offset API
+    # TODO
     # add offsets to the nh5 array
     def set_offsets(self, offset_front, offset_back, key='data', serialize_offsets=True):
         if key not in self.arrays:
@@ -121,88 +189,20 @@ class HDF5VolumeTarget(FileSystemTarget):
             ds.attrs.create('offset_front', offset_front)
             ds.attrs.create('offset_back', offset_back)
 
-    def close(self):
-        assert self.opened
-        assert self.h5_file is not None
-        nh5.closeFile(self.h5_file)
-        self.opened = False
-
-    def write(self, start, data, key='data'):
-        if key not in self.arrays:
-            raise KeyError("Key does not name a valid dataset in H5 file.")
-        assert self.opened
-        # to avoid errors in python glue code
-        start = list(start)
-        self.arrays[key].writeSubarray(start, data)
-
-    def read(self, start, stop, key='data'):
-        if key not in self.arrays:
-            raise KeyError("Key does not name a valid dataset in H5 file.")
-        assert self.opened
-        # to avoid errors in python glue code
-        start = list(start)
-        stop = list(stop)
-        return self.arrays[key].readSubarray(start, stop)
-
-    def get(self, key='data'):
-        if key not in self.arrays:
-            raise KeyError("Key does not name a valid dataset in H5 file.")
-        assert self.opened
-        return self.arrays[key]
-
-    def shape(self, key='data'):
-        if key not in self.arrays:
-            raise KeyError("Key does not name a valid dataset in H5 file.")
-        assert self.opened
-        return self.arrays[key].shape
-
-    def chunk_shape(self, key='data'):
-        if key not in self.arrays:
-            raise KeyError("Key does not name a valid dataset in H5 file.")
-        assert self.opened
-        return self.arrays[key].chunkShape
-
-    # TODO not exposed in nifty right now
-    # def writeLocked(self, start, data, key = 'data'):
-    #    if not key in self.arrays:
-    #        raise KeyError("Key does not name a valid dataset in H5 file.")
-    #    # to avoid errors in python glue code
-    #    start = list(map(long,start))
-    #    try:
-    #        self.arrays[key].writeSubarrayLocked(start, data)
-    #    except AttributeError:
-    #        raise RuntimeError("You must call open once before calling read or write!")
-
-    # def readLocked(self, start, stop, key = 'data'):
-    #    if not key in self.arrays:
-    #        raise KeyError("Key does not name a valid dataset in H5 file.")
-    #    # to avoid errors in python glue code
-    #    start = list(map(long,start))
-    #    stop = list(map(long,stop))
-    #    try:
-    #        return self.arrays[key].readSubarrayLocked(start, stop)
-    #    except AttributeError:
-    #        raise RuntimeError("You must call open once before calling read or write!")
+    def has_offsets(self, key='data'):
+        with h5py.File(self.path) as f:
+            ds = f[key]
+            if 'offset_front' in ds.attrs.keys():
+                assert 'offset_back' in ds.attrs.keys()
+                return True
+            else:
+                return False
 
 
-class HDF5DataTarget(FileSystemTarget):
+class HDF5DataTarget(BaseTarget):
     """
-    Target for in ram data
+    Target for h5 data in RAM
     """
-    fs = LocalFileSystem()
-
-    def makedirs(self):
-        """
-        Create all parent folders if they do not exist.
-        """
-        normpath = os.path.normpath(self.path)
-        parentfolder = os.path.dirname(normpath)
-        if parentfolder:
-            try:
-                os.makedirs(parentfolder)
-            except OSError:
-                pass
-
     def __init__(self, path):
         super(HDF5DataTarget, self).__init__(path)
 
@@ -231,21 +231,10 @@ class HDF5DataTarget(FileSystemTarget):
         return shape
 
 
-class PickleTarget(FileSystemTarget):
-    fs = LocalFileSystem()
-
-    def makedirs(self):
-        """
-        Create all parent folders if they do not exist.
-        """
-        normpath = os.path.normpath(self.path)
-        parentfolder = os.path.dirname(normpath)
-        if parentfolder:
-            try:
-                os.makedirs(parentfolder)
-            except OSError:
-                pass
-
+class PickleTarget(BaseTarget):
+    """
+    Target for pickle data
+    """
     def __init__(self, path):
         super(PickleTarget, self).__init__(path)
 
@@ -265,21 +254,10 @@ class PickleTarget(FileSystemTarget):
 # Folder target that does basically nothing
 # wee need this for the sklearn random forest,
 # that is pickled to different files in a common folder
-class FolderTarget(FileSystemTarget):
-    fs = LocalFileSystem()
-
-    def makedirs(self):
-        """
-        Create all parent folders if they do not exist.
-        """
-        normpath = os.path.normpath(self.path)
-        parentfolder = os.path.dirname(normpath)
-        if parentfolder:
-            try:
-                os.makedirs(parentfolder)
-            except OSError:
-                pass
-
+class FolderTarget(BaseTarget):
+    """
+    Target for multiple files in folder
+    """
     def __init__(self, path):
         super(FolderTarget, self).__init__(path)
         self.path = path
@@ -295,21 +273,10 @@ class FolderTarget(FileSystemTarget):
 
 
 # serializing the nifty rag
-class StackedRagTarget(FileSystemTarget):
-    fs = LocalFileSystem()
-
-    def makedirs(self):
-        """
-        Create all parent folders if they do not exist.
-        """
-        normpath = os.path.normpath(self.path)
-        parentfolder = os.path.dirname(normpath)
-        if parentfolder:
-            try:
-                os.makedirs(parentfolder)
-            except OSError:
-                pass
-
+class StackedRagTarget(BaseTarget):
+    """
+    Target for nifty stacked rag
+    """
     def __init__(self, path):
         super(StackedRagTarget, self).__init__(path)
 
