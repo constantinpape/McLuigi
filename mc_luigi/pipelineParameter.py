@@ -45,6 +45,8 @@ class PipelineParameter(object, metaclass=Singleton):
         # flag to indicate if defects are detected with heuristics or random forest
         self.defectsFromRf = False
         self.defectRfPath = ''
+        # n5 or h5 backend
+        self.useN5Backend = True
 
         # feature string
         # FIXME in the current form z-affnity are toxic for defects!

@@ -4,7 +4,7 @@ from __future__ import print_function, division
 
 import luigi
 
-from .customTargets import HDF5VolumeTarget, StackedRagTarget, FolderTarget
+from .customTargets import VolumeTarget, StackedRagTarget, FolderTarget
 from .pipelineParameter import PipelineParameter
 from .tools import config_logger, run_decorator
 
@@ -42,122 +42,120 @@ config_logger(workflow_logger)
 ###########################
 
 
-# FIXME this won't work for larger data.
-# -> affinity prediction is not parallelized yet
-# -> not everything is done out of core (affinity reshaping)
-# TODO check plans of speeding up gunpowder predictions with Jan
+# TODO reimplement using Simpleference
 
-# first predict affinities with mala,
-# then reshape them properly (xy, z affinities)
-# TODO do reshaping in gunpowder output node already
-class AffinityPrediction(luigi.Task):
-
-    rawPath = luigi.Parameter()
-
-    def requires(self):
-        return InputData(self.rawPath)
-
-    @run_decorator
-    def run(self):
-
-        # TODO change this if we have correct gunpowder output directly and don't need
-        # postprocessing steps any longer
-        out = self.output()
-        out_path = os.path.join(out.path, 'prediction_tmp.h5')
-
-        workflow_logger.info("AffinityPrediction: writing net predictions to %s" % out_path)
-
-        t_pred = time.time()
-        self._predict_affinities(out_path)
-        workflow_logger.info("AffinityPrediction: prediction took %f s" % (time.time() - t_pred,))
-
-        t_pp = time.time()
-        self._postprocess_affinities(out_path)
-        workflow_logger.info("AffinityPrediction: postprocessing took %f s" % (time.time() - t_pp,))
-
-    def _predict_affinities(self, out_path):
-
-        net_path = PipelineParameter().netArchitecturePath
-        assert os.path.exists(net_path), net_path
-        net_weights = PipelineParameter().netWeightsPath
-        assert os.path.exists(net_weights), net_weights
-
-        workflow_logger.info(
-            "AffinityPrediction: starting prediction for raw data in %s with net from %s %s"
-            % (self.rawPath, net_path, net_weights)
-        )
-
-        scripts_path = os.path.split(__file__)[0]
-        affinity_exe_path = os.path.join(scripts_path, 'affinity_prediction.sh')
-        prediction_script = os.path.join(scripts_path, 'affinity_prediction.py')
-        assert os.path.exists(affinity_exe_path), affinity_exe_path
-        assert os.path.exists(prediction_script), prediction_script
-
-        command_line = [
-            'bash', affinity_exe_path,
-            prediction_script, self.rawPath,
-            out_path, net_path,
-            net_weights, str(PipelineParameter().netGpuId)
-        ]
-
-        workflow_logger.info(
-            "AffinityPrediction: calling prediction script with command: %s" % str(command_line)
-        )
-        subprocess.call(command_line)
-
-    def _postprocess_affinities(self, out_path):
-
-        assert os.path.exists(out_path), out_path
-        raw_name = os.path.split(self.rawPath)[1]
-
-        # crop the padding context from the raw data and save it!
-        with h5py.File(out_path) as f_aff:
-
-            ds_aff = f_aff['volumes/predicted_affs']
-            aff_shape = ds_aff.shape[1:]
-
-            inp = self.input()
-            inp.open()
-
-            # if for some reason we already have offsets, they need to be over-written
-            if inp.has_offsets():
-                inp.setOffsets([0, 0, 0], [0, 0, 0])
-                workflow_logger.info("AffinityPrediction: overwriting old raw offsets")
-
-            raw_shape = inp.shape()
-
-            offset = np.array(list(raw_shape)) - np.array(list(aff_shape))
-            offset //= 2
-
-            # write the raw data offsets to the nifty h5 array
-            inp.setOffsets(offset.tolist(), offset.tolist())
-            assert tuple(inp.shape()) == aff_shape, "%s, %s" % (str(inp.shape()), str(aff_shape))
-            inp.close()
-            workflow_logger.info(
-                "AffinityPrediction: cropping cnn context %s from raw data" % str(offset)
-            )
-
-            # save the xy-affinities and the z-affinities seperately
-            affinity_folder = self.output().path
-            save_path_xy = os.path.join(affinity_folder, '%s_affinities_xy.h5' % raw_name[:-3])
-            save_path_z  = os.path.join(affinity_folder, '%s_affinities_z.h5' % raw_name[:-3])
-            with h5py.File(save_path_xy) as f_xy, h5py.File(save_path_z) as f_z:
-
-                # TODO compress ?, uint8 ?
-                ds_xy = f_xy.create_dataset('data', shape=aff_shape, chunks=(1, 512, 512), dtype='float32')
-                ds_z = f_z.create_dataset('data', shape=aff_shape, chunks=(1, 512, 512), dtype='float32')
-
-                # TODO this could be parallelized and done in a out-of-core fashion !
-                ds_xy[:] = (ds_aff[1, :] + ds_aff[2, :]) / 2.
-                ds_z[:] = (ds_aff[0, :])
-
-        # remover the temp file
-        os.remove(out_path)
-
-    def output(self):
-        raw_prefix = os.path.split(self.rawPath)[1][:-3]
-        affinity_folder = os.path.join(PipelineParameter().cache, '%s_affinities' % raw_prefix)
-        return FolderTarget(affinity_folder)
+## first predict affinities with mala,
+## then reshape them properly (xy, z affinities)
+## TODO do reshaping in gunpowder output node already
+#class AffinityPrediction(luigi.Task):
+#
+#    rawPath = luigi.Parameter()
+#
+#    def requires(self):
+#        return InputData(self.rawPath)
+#
+#    @run_decorator
+#    def run(self):
+#
+#        # TODO change this if we have correct gunpowder output directly and don't need
+#        # postprocessing steps any longer
+#        out = self.output()
+#        out_path = os.path.join(out.path, 'prediction_tmp.h5')
+#
+#        workflow_logger.info("AffinityPrediction: writing net predictions to %s" % out_path)
+#
+#        t_pred = time.time()
+#        self._predict_affinities(out_path)
+#        workflow_logger.info("AffinityPrediction: prediction took %f s" % (time.time() - t_pred,))
+#
+#        t_pp = time.time()
+#        self._postprocess_affinities(out_path)
+#        workflow_logger.info("AffinityPrediction: postprocessing took %f s" % (time.time() - t_pp,))
+#
+#    def _predict_affinities(self, out_path):
+#
+#        net_path = PipelineParameter().netArchitecturePath
+#        assert os.path.exists(net_path), net_path
+#        net_weights = PipelineParameter().netWeightsPath
+#        assert os.path.exists(net_weights), net_weights
+#
+#        workflow_logger.info(
+#            "AffinityPrediction: starting prediction for raw data in %s with net from %s %s"
+#            % (self.rawPath, net_path, net_weights)
+#        )
+#
+#        scripts_path = os.path.split(__file__)[0]
+#        affinity_exe_path = os.path.join(scripts_path, 'affinity_prediction.sh')
+#        prediction_script = os.path.join(scripts_path, 'affinity_prediction.py')
+#        assert os.path.exists(affinity_exe_path), affinity_exe_path
+#        assert os.path.exists(prediction_script), prediction_script
+#
+#        command_line = [
+#            'bash', affinity_exe_path,
+#            prediction_script, self.rawPath,
+#            out_path, net_path,
+#            net_weights, str(PipelineParameter().netGpuId)
+#        ]
+#
+#        workflow_logger.info(
+#            "AffinityPrediction: calling prediction script with command: %s" % str(command_line)
+#        )
+#        subprocess.call(command_line)
+#
+#    def _postprocess_affinities(self, out_path):
+#
+#        assert os.path.exists(out_path), out_path
+#        raw_name = os.path.split(self.rawPath)[1]
+#
+#        # crop the padding context from the raw data and save it!
+#        with h5py.File(out_path) as f_aff:
+#
+#            ds_aff = f_aff['volumes/predicted_affs']
+#            aff_shape = ds_aff.shape[1:]
+#
+#            inp = self.input()
+#            inp.open()
+#
+#            # if for some reason we already have offsets, they need to be over-written
+#            if inp.has_offsets():
+#                inp.setOffsets([0, 0, 0], [0, 0, 0])
+#                workflow_logger.info("AffinityPrediction: overwriting old raw offsets")
+#
+#            raw_shape = inp.shape()
+#
+#            offset = np.array(list(raw_shape)) - np.array(list(aff_shape))
+#            offset //= 2
+#
+#            # write the raw data offsets to the nifty h5 array
+#            inp.setOffsets(offset.tolist(), offset.tolist())
+#            assert tuple(inp.shape()) == aff_shape, "%s, %s" % (str(inp.shape()), str(aff_shape))
+#            inp.close()
+#            workflow_logger.info(
+#                "AffinityPrediction: cropping cnn context %s from raw data" % str(offset)
+#            )
+#
+#            # save the xy-affinities and the z-affinities seperately
+#            affinity_folder = self.output().path
+#            save_path_xy = os.path.join(affinity_folder, '%s_affinities_xy.h5' % raw_name[:-3])
+#            save_path_z  = os.path.join(affinity_folder, '%s_affinities_z.h5' % raw_name[:-3])
+#            with h5py.File(save_path_xy) as f_xy, h5py.File(save_path_z) as f_z:
+#
+#                # TODO compress ?, uint8 ?
+#                ds_xy = f_xy.create_dataset('data', shape=aff_shape, chunks=(1, 512, 512), dtype='float32')
+#                ds_z = f_z.create_dataset('data', shape=aff_shape, chunks=(1, 512, 512), dtype='float32')
+#
+#                # TODO this could be parallelized and done in a out-of-core fashion !
+#                ds_xy[:] = (ds_aff[1, :] + ds_aff[2, :]) / 2.
+#                ds_z[:] = (ds_aff[0, :])
+#
+#        # remover the temp file
+#        os.remove(out_path)
+#
+#    def output(self):
+#        raw_prefix = os.path.split(self.rawPath)[1][:-3]
+#        affinity_folder = os.path.join(PipelineParameter().cache, '%s_affinities' % raw_prefix)
+#        # FIXME use VolumeTarget and 2 datasets for different affinites
+#        return FolderTarget(affinity_folder)
 
 
 # FIXME creates wrong offsets atm !!
@@ -168,6 +166,7 @@ class WsdtSegmentation(luigi.Task):
     """
 
     pathToProbabilities = luigi.Parameter()
+    keyToProbabilities = luigi.Parameter()
     dtype = luigi.Parameter(default='uint32')
 
     def requires(self):
@@ -181,10 +180,10 @@ class WsdtSegmentation(luigi.Task):
     @run_decorator
     def run(self):
         pmap = self.input()
-        pmap.open()
-        shape = pmap.shape()
-        out  = self.output()
-        out.open(shape, pmap.chunk_shape())
+        pmap.open(self.keyToProbabilities)
+        shape = pmap.shape
+        out = self.output()
+        out.open(shape=shape, chunks=pmap.chunks(), dtype=self.dtype, compression='gzip')
 
         # TODO need to benchmark this for larger data
         self._run_wsdt2d_standard(pmap, out, shape)
@@ -329,13 +328,11 @@ class WsdtSegmentation(luigi.Task):
         workflow_logger.info("WsdtSegmentation: Adding offsets took %f s" % (time.time() - t_off))
         return True
 
-    # TODO if we integrate defects / 3d ws reflect this in the caching name
     def output(self):
-        save_path = os.path.join(
-            PipelineParameter().cache,
-            "WsdtSegmentation_%s.h5" % os.path.split(self.pathToProbabilities)[1][:-3]
-        )
-        return HDF5VolumeTarget(save_path, self.dtype, compression=PipelineParameter().compressionLevel)
+        save_path = os.path.join(PipelineParameter().cache,
+                                 "WsdtSegmentation_%s.h5" %
+                                 os.path.split(self.pathToProbabilities)[1][:-3])
+        return VolumeTarget(save_path)
 
 
 ###########################
@@ -346,56 +343,35 @@ class WsdtSegmentation(luigi.Task):
 class InputData(luigi.Task):
     """
     Task for loading external input data, e.g. raw data or probability maps.
-    For HDF5 input.
     """
-
     path = luigi.Parameter()
-    key  = luigi.Parameter(default="data")
-    # the dtype, should either be float32 or uint8
-    dtype = luigi.Parameter(default="float32")
 
-    # if the input data is not existing, this is an affinity map task
-    # and we need to predict the affinities first
-    def requires(self):
-        if not os.path.exists(self.path):
-
-            # find the corresponding raw data from the inputs
-            raw_prefix = os.path.split(self.path)[1].split('_')[:-2]
-            raw_prefix = '_'.join(raw_prefix) + '.h5'
-            inputs = PipelineParameter().inputs['data']
-            found_raw = False
-            for in_path in inputs:
-                if os.path.split(in_path)[1] == raw_prefix:
-                    raw_path = in_path
-                    found_raw = True
-                    break
-            if not found_raw:
-                raise RuntimeError("Couldn't find raw path for requested affinity map: %s" % self.path)
-
-            return AffinityPrediction(raw_path)
-
-    def run(self):
-        pass
+    ## if the input data is not existing, this is an affinity map task
+    ## and we need to predict the affinities first
+    #def requires(self):
+    #    if not os.path.exists(self.path):
+    #        # find the corresponding raw data from the inputs
+    #        raw_prefix = os.path.split(self.path)[1].split('_')[:-2]
+    #        raw_prefix = '_'.join(raw_prefix) + '.h5'
+    #        inputs = PipelineParameter().inputs['data']
+    #        found_raw = False
+    #        for in_path in inputs:
+    #            if os.path.split(in_path)[1] == raw_prefix:
+    #                raw_path = in_path
+    #                found_raw = True
+    #                break
+    #        if not found_raw:
+    #            raise RuntimeError("Couldn't find raw path for requested affinity map: %s" % self.path)
+    #        return AffinityPrediction(raw_path)
 
     def output(self):
         """
         Returns the target output.
 
         :return: Target output
-        :rtype: object( :py:class: HDF5Target)
+        :rtype: object( :py:class: VolumeTarget)
         """
-
-        if os.path.exists(self.path):
-            with h5py.File(self.path, 'r') as f:
-                assert self.key in f.keys(), self.key + " , " + str(f.keys())
-                dset = f[self.key]
-
-                if np.dtype(self.dtype) != np.dtype(dset.dtype):
-                    workflow_logger.debug("InputData: task, loading data from %s" % self.path)
-                    workflow_logger.debug("InputData: changing dtype from %s to %s" % (self.dtype, dset.dtype))
-                    self.dtype = dset.dtype
-
-        return HDF5VolumeTarget(self.path, self.dtype, self.key)
+        return VolumeTarget(self.path)
 
 
 class ExternalSegmentation(luigi.Task):
@@ -405,9 +381,6 @@ class ExternalSegmentation(luigi.Task):
 
     # Path to the segmentation
     path = luigi.Parameter()
-    key  = luigi.Parameter(default="data")
-    # the dtype, should either be uint32 or uint64
-    dtype = luigi.Parameter(default="uint32")
 
     # if the path does not exist, run the watershed on distance transform segmentation
     def requires(self):
@@ -427,30 +400,14 @@ class ExternalSegmentation(luigi.Task):
                 raise RuntimeError("Couldn't find affinty path for requested wsdt segmentation: %s" % self.path)
             return WsdtSegmentation(aff_path)
 
-    def run(self):
-        pass
-
     def output(self):
         """
         Returns the target output.
 
         :return: Target output
-        :rtype: object( :py:class: HDF5Target)
+        :rtype: object( :py:class: VolumeTarget)
         """
-
-        if os.path.exists(self.path):
-            with h5py.File(self.path, 'r') as f:
-                assert self.key in f.keys(), self.key + " , " + str(f.keys())
-                dset = f[self.key]
-
-                if np.dtype(self.dtype) != np.dtype(dset.dtype):
-                    workflow_logger.debug("ExternalSegmentation: loading data from %s" % self.path)
-                    workflow_logger.debug(
-                        "ExternalSegmentation: changing dtype from %s to %s" % (self.dtype, dset.dtype)
-                    )
-                    self.dtype = dset.dtype
-
-        return HDF5VolumeTarget(self.path, self.dtype, self.key, compression=PipelineParameter().compressionLevel)
+        return VolumeTarget(self.path)
 
 
 class ExternalSegmentationLabeled(luigi.Task):
@@ -461,23 +418,23 @@ class ExternalSegmentationLabeled(luigi.Task):
 
     # Path to the segmentation
     pathToSeg = luigi.Parameter()
-    keyToSeg  = luigi.Parameter(default="data")
+    key  = luigi.Parameter(default="data")
     # the dtype, should either be uint32 or uint64
     dtype = luigi.Parameter(default="uint32")
 
     def requires(self):
-        return ExternalSegmentation(self.pathToSeg, self.keyToSeg, self.dtype)
+        return ExternalSegmentation(self.pathToSeg)
 
     @run_decorator
     def run(self):
 
         seg_in = self.input()
-        seg_in.open()
+        seg_in.open(self.key)
 
         shape = seg_in.shape
 
         seg_out = self.output()
-        seg_out.open(shape)
+        seg_out.open(self.key, shape=shape, chunks=seg_in.chunks, dtype=dtype)
 
         def label_slice(z):
             begin = [z, 0, 0]
@@ -513,22 +470,9 @@ class ExternalSegmentationLabeled(luigi.Task):
         [task.result() for task in tasks]
 
     def output(self):
-        f = h5py.File(self.path, 'r')
-        assert self.key in f.keys(), self.key + " , " + f.keys()
-        dset = f[self.key]
-
-        if np.dtype(self.dtype) != np.dtype(dset.dtype):
-            workflow_logger.debug("ExternalSegmentationLabeled: loading data from %s" % self.path)
-            workflow_logger.debug(
-                "ExternalSegmentationLabeled: changing dtype from %s to %s" % (self.dtype, dset.dtype)
-            )
-            self.dtype = dset.dtype
-
-        save_path = os.path.join(
-            PipelineParameter().cache,
-            os.path.split(self.pathToSeg)[1][:-3] + "_labeled.h5"
-        )
-        return HDF5VolumeTarget(save_path, self.dtype, compression=PipelineParameter().compressionLevel)
+        save_path = os.path.join(PipelineParameter().cache,
+                                os.path.split(self.pathToSeg)[1][:-3] + "_labeled.h5")
+        return VolumeTarget(save_path)
 
 
 class DenseGroundtruth(luigi.Task):
@@ -542,38 +486,36 @@ class DenseGroundtruth(luigi.Task):
     dtype = luigi.Parameter(default="uint32")
 
     def requires(self):
-        return ExternalSegmentation(self.path, self.key, self.dtype)
+        return ExternalSegmentation(self.path)
 
     @run_decorator
     def run(self):
 
         gt = self.input()
 
-        gt.open()
+        gt.open(self.key)
 
         # FIXME this will be problematic for ignore labels that are not 0
         # easiest fix is to reimplement 'relabelConsecutive' based on 'replace_from_dict'
         # and allow to keep arbitrary values fixed
 
         gt_labeled, _, _ = vigra.analysis.relabelConsecutive(
-            gt.read([0, 0, 0], gt.shape()).astype('uint32'),
+            gt.read([0, 0, 0], gt.shape).astype('uint32'),
             start_label=1,
             keep_zeros=True
         )
 
         out = self.output()
-        out.open(gt.shape())
+        out.open(self.key, shape=gt.shape, chunks=gt.chunks, dtype=self.dtype)
         out.write([0, 0, 0], gt_labeled)
 
         gt.close()
         out.close()
 
     def output(self):
-        save_path = os.path.join(
-            PipelineParameter().cache,
-            os.path.split(self.path)[1][:-3] + "_labeled.h5"
-        )
-        return HDF5VolumeTarget(save_path, self.dtype, compression=PipelineParameter().compressionLevel)
+        save_path = os.path.join(PipelineParameter().cache,
+                                 os.path.split(self.path)[1][:-3] + "_labeled.h5")
+        return VolumeTarget(save_path)
 
 
 class StackedRegionAdjacencyGraph(luigi.Task):
@@ -595,7 +537,7 @@ class StackedRegionAdjacencyGraph(luigi.Task):
         seg = self.input()
 
         seg.open()
-        shape = seg.shape()
+        shape = seg.shape
 
         seg_last = seg.read([shape[0] - 1, 0, 0], shape)
         n_labels = seg_last.max() + 1

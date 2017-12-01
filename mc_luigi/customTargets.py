@@ -10,6 +10,8 @@ import vigra
 import h5py
 import z5py
 
+from .pipelineParameter import PipelineParameter
+
 # import the proper nifty version
 try:
     import nifty.graph.rag as nrag
@@ -41,6 +43,10 @@ class BaseTarget(FileSystemTarget):
                 os.makedirs(parentfolder)
             except OSError:
                 pass
+
+
+# choose n5 / h5 backedn globally
+VolumeTarget = N5Target if PipelineParameter().useN5Backend else HDF5Target
 
 
 # TODO enable zarr format ?!
@@ -89,10 +95,12 @@ class N5Target(BaseTarget):
         assert key in self.datasets, "Can't get ds impl for a dataset that has not been opened"
         return self.datasets[key]._impl
 
+    @property
     def shape(self, key='data'):
         assert key in self.datasets, "Can't get shape for a dataset that has not been opened"
         return self.datasets[key].shape
 
+    @property
     def chunks(self, key='data'):
         assert key in self.datasets, "Can't get chunks for a dataset that has not been opened"
         return self.datasets[key].chunks
@@ -162,10 +170,12 @@ class HDF5Target(BaseTarget):
         assert key in self.datasets, "Can't get ds impl for a dataset that has not been opened"
         return self.datasets[key]
 
+    @property
     def shape(self, key='data'):
         assert key in self.datasets, "Can't get shape for a dataset that has not been opened"
         return self.datasets[key].shape
 
+    @property
     def chunks(self, key='data'):
         assert key in self.datasets, "Can't get chunks for a dataset that has not been opened"
         return self.datasets[key].chunkShape
