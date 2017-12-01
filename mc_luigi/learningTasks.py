@@ -6,7 +6,7 @@ from __future__ import print_function, division
 import luigi
 
 from .taskSelection import get_local_features, get_local_features_for_multiinp
-from .customTargets import HDF5DataTarget, HDF5VolumeTarget, FolderTarget
+from .customTargets import HDF5DataTarget, VolumeTarget, FolderTarget
 from .dataTasks import DenseGroundtruth, StackedRegionAdjacencyGraph, InputData
 from .defectHandlingTasks import ModifiedAdjacency
 from .pipelineParameter import PipelineParameter
@@ -52,15 +52,12 @@ except ImportError:
 # wrapper for sklearn / random forest
 class RandomForest(object):
 
-    def __init__(
-            self,
-            train_data,
-            train_labels,
-            n_trees,
-            n_threads,
-            max_depth=None
-    ):
-
+    def __init__(self,
+                 train_data,
+                 train_labels,
+                 n_trees,
+                 n_threads,
+                 max_depth=None):
         if isinstance(train_data, str) and train_data == '__will_deserialize__':
             return
         else:
@@ -168,10 +165,8 @@ class EdgeProbabilities(luigi.Task):
     pathToClassifier = luigi.Parameter()
 
     def requires(self):
-        return_tasks = {
-            "features": get_local_features(),
-            "rag": StackedRegionAdjacencyGraph(self.pathToSeg)
-        }
+        return_tasks = {"features": get_local_features(),
+                        "rag": StackedRegionAdjacencyGraph(self.pathToSeg)}
         if PipelineParameter().defectPipeline:
             return_tasks['modified_adjacency'] = ModifiedAdjacency(self.pathToSeg)
         return return_tasks
@@ -183,7 +178,6 @@ class EdgeProbabilities(luigi.Task):
         feature_tasks = inp["features"]
 
         if PipelineParameter().defectPipeline:
-
             mod_adjacency = inp["modified_adjacency"]
             if mod_adjacency.read("has_defects"):
                 n_edges = mod_adjacency.read("n_edges_modified")
@@ -200,11 +194,10 @@ class EdgeProbabilities(luigi.Task):
             n_edges = inp['rag'].readKey('numberOfEdges')
             workflow_logger.info("EdgeProbabilities: Total number of edges: %i" % n_edges)
 
-        out  = self.output()
-        out.open([n_edges], [min(262144, n_edges)])  # 262144 = chunk size (64**3)
-
+        out = self.output()
+        # 262144 = chunk size (64**3)
+        out.open('data', shape=(n_edges,), chunks=(min(262144, n_edges),), dtype='float32')
         self._predict(feature_tasks, out)
-
         out.close()
 
     def _predict(self, feature_tasks, out):
@@ -236,21 +229,21 @@ class EdgeProbabilities(luigi.Task):
         n_feats_skip = 0
         for feat in feature_tasks:
 
-            xy_path = os.path.join(feat.path, 'features_xy.h5')
-            if os.path.exists(xy_path):
-                with h5py.File(xy_path) as f:
-                    n_feats_xy += f['data'].shape[1]
+            xy_key = 'features_xy'
+            if xy_key in feat:
+                feat.open(xy_key)
+                n_feats_xy += feat.shape(xy_key)[1]
 
-            z_path = os.path.join(feat.path, 'features_z.h5')
-            if os.path.exists(z_path):
-                with h5py.File(z_path) as f:
-                    n_feats_z += f['data'].shape[1]
+            z_key = 'features_z'
+            if z_key in feat:
+                feat.open(z_key)
+                n_feats_z += feat.shape(z_key)[1]
 
             if has_defects:
-                skip_path = os.path.join(feat.path, 'features_skip.h5')
-                if os.path.exists(skip_path):
-                    with h5py.File(skip_path) as f:
-                        n_feats_skip += f['data'].shape[1]
+                skip_key = 'features_skip'
+                if skip_key in feat:
+                    feat.open(skip_key)
+                    n_feats_skip += feat.shape(skip_key)[1]
 
         feat_types = ['features_xy', 'features_z']
         classifier_types = feat_types if PipelineParameter().separateEdgeClassification else 2 * ['features_joined']
@@ -284,54 +277,46 @@ class EdgeProbabilities(luigi.Task):
                     if PipelineParameter().separateEdgeClassification else
                     "EdgeProbabilities: predicting %s edges with joint classifier out of core" % feat_type
                 )
-                self._predict_out_of_core(
-                    classifier,
-                    feature_tasks,
-                    out,
-                    feat_type,
-                    n_edges_type,
-                    n_feats_type,
-                    start_type
-                )
+                self._predict_out_of_core(classifier,
+                                          feature_tasks,
+                                          out,
+                                          feat_type,
+                                          n_edges_type,
+                                          n_feats_type,
+                                          start_type)
             else:
                 workflow_logger.info(
                     "EdgeProbabilities: predicting %s edges with seperate claissifier in core." % feat_type
                     if PipelineParameter().separateEdgeClassification else
                     "EdgeProbabilities: predicting %s edges with joint classifier in core" % feat_type
                 )
-                self._predict_in_core(
-                    classifier,
-                    feature_tasks,
-                    out,
-                    feat_type,
-                    n_edges_type,
-                    n_feats_type,
-                    start_type
-                )
+                self._predict_in_core(classifier,
+                                      feature_tasks,
+                                      out,
+                                      feat_type,
+                                      n_edges_type,
+                                      n_feats_type,
+                                      start_type)
 
     # In core prediction for edge type
-    def _predict_in_core(
-            self,
-            classifier,
-            feature_tasks,
-            out,
-            feat_type,
-            n_edges,
-            n_feats,
-            start
-    ):
+    def _predict_in_core(self,
+                         classifier,
+                         feature_tasks,
+                         out,
+                         feat_type,
+                         n_edges,
+                         n_feats,
+                         start):
 
         # read all features of this type in one chunk
         offset = 0
         features = np.zeros((n_edges, n_feats), dtype='float32')
 
         for ii, feat in enumerate(feature_tasks):
-            feat_path = os.path.join(feat.path, '%s.h5' % feat_type)
-            if os.path.exists(feat_path):
-                with h5py.File(feat_path) as f:
-                    this_feats = f['data'][:]
-                    features[:, offset:offset + this_feats.shape[1]] = this_feats
-                    offset += this_feats.shape[1]
+            if feat_type in feat:
+                this_feats = feat.read((0, 0), feat.shape(feat_type), feat_type)
+                features[:, offset:offset + this_feats.shape[1]] = this_feats
+                offset += this_feats.shape[1]
 
         assert features.shape[1] == classifier.n_features, \
             "Number of input and rf features do not match for %s: %i, %i" % (
@@ -340,16 +325,14 @@ class EdgeProbabilities(luigi.Task):
         out.write([start], probs)
 
     # Out of core prediction for edge type
-    def _predict_out_of_core(
-            self,
-            classifier,
-            feature_tasks,
-            out,
-            feat_type,
-            n_edges,
-            n_feats,
-            start
-    ):
+    def _predict_out_of_core(self,
+                             classifier,
+                             feature_tasks,
+                             out,
+                             feat_type,
+                             n_edges,
+                             n_feats,
+                             start):
         n_sub_feats = PipelineParameter().nFeatureChunks
         assert n_sub_feats > 1, str(n_sub_feats)
 
@@ -362,10 +345,10 @@ class EdgeProbabilities(luigi.Task):
 
             sub_feats = []
             for feat in feature_tasks:
-                feat_path = os.path.join(feat.path, '%s.h5' % feat_type)
-                if os.path.exists(feat_path):
-                    with h5py.File(feat_path) as f:
-                        sub_feats.append(f['data'][start_index:end_index, 0:f['data'].shape[1]])
+                if feat_type in feat:
+                    sub_feats.append(feat.read((start_index, 0),
+                                               (end_index, feat.shape(feat_type)[1]),
+                                               feat_type))
             sub_feats = np.concatenate(sub_feats, axis=1)
 
             read_start = start_index + start
@@ -388,7 +371,7 @@ class EdgeProbabilities(luigi.Task):
                 "modified" if PipelineParameter().defectPipeline else "standard"
             )
         )
-        return HDF5VolumeTarget(save_path, 'float32')
+        return VolumeTarget(save_path)
 
 
 # TODO fuzzy mapping in nifty ?!
@@ -501,6 +484,7 @@ class EdgeGroundtruth(luigi.Task):
         return HDF5DataTarget(save_path)
 
 
+# TODO adjust to new feature tasks
 class LearnClassifierFromGt(luigi.Task):
 
     pathsToSeg = luigi.ListParameter()
@@ -588,13 +572,11 @@ class LearnClassifierFromGt(luigi.Task):
                 edge_gt = edge_gt[mask]
 
             assert features.shape[0] == edge_gt.shape[0], str(features.shape[0]) + " , " + str(edge_gt.shape[0])
-            classifier = RandomForest(
-                features,
-                edge_gt,
-                n_trees=PipelineParameter().nTrees,
-                max_depth=PipelineParameter().maxDepth,
-                n_threads=PipelineParameter().nThreads
-            )
+            classifier = RandomForest(features,
+                                      edge_gt,
+                                      n_trees=PipelineParameter().nTrees,
+                                      max_depth=PipelineParameter().maxDepth,
+                                      n_threads=PipelineParameter().nThreads)
             classifier.write(str(self.output().path), 'rf_joined')
 
         if PipelineParameter().defectPipeline:
@@ -867,13 +849,11 @@ class LearnClassifierFromGt(luigi.Task):
         features = np.concatenate(features, axis=0)
         gts      = np.concatenate(gts)
         assert features.shape[0] == gts.shape[0], str(features.shape[0]) + " , " + str(gts.shape[0])
-        classifier = RandomForest(
-            features,
-            gts,
-            n_trees=PipelineParameter().nTrees,
-            max_depth=PipelineParameter().maxDepth,
-            n_threads=PipelineParameter().nThreads
-        )
+        classifier = RandomForest(features,
+                                  gts,
+                                  n_trees=PipelineParameter().nTrees,
+                                  max_depth=PipelineParameter().maxDepth,
+                                  n_threads=PipelineParameter().nThreads)
         classifier.write(str(self.output().path), 'rf_features_skip')
 
     def output(self):
@@ -951,7 +931,7 @@ class LearnDefectRandomForest(luigi.Task):
         labels = []
         for i, gt in enumerate(gts):
             this_gt = gt.read()
-            this_feats = feats[i].read([0, 0], feats[i].shape())
+            this_feats = feats[i].read([0, 0], feats[i].shape)
             assert len(this_gt) == len(this_feats), "%i, %i" % (len(this_gt), len(this_feats))
             features.append(this_feats)
             labels.append(this_gt)
@@ -968,7 +948,7 @@ class LearnDefectRandomForest(luigi.Task):
         inp = self.input()
         gt = inp['gt'].read()
         feats = inp['feats']
-        feats = feats.readSubarray([0, 0], feats.shape())
+        feats = feats.readSubarray([0, 0], feats.shape)
         assert len(gt) == len(feats), "%i, %i" % (len(gt), len(feats))
         rf = RandomForest(
             feats, gt,

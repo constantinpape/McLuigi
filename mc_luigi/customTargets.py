@@ -45,10 +45,6 @@ class BaseTarget(FileSystemTarget):
                 pass
 
 
-# choose n5 / h5 backedn globally
-VolumeTarget = N5Target if PipelineParameter().useN5Backend else HDF5Target
-
-
 # TODO enable zarr format ?!
 class N5Target(BaseTarget):
     """
@@ -58,6 +54,9 @@ class N5Target(BaseTarget):
         super(N5Target, self).__init__(path)
         self.datasets = {}
         self.n5_file = z5py.File(self.path, use_zarr_format=False)
+
+    def __contains__(self, key):
+        return key in self.n5_file
 
     # TODO change compression to blosc as soon as n5 supports it !
     # TODO offset handling, need to implement loading with offsets and offsets in z5
@@ -80,6 +79,12 @@ class N5Target(BaseTarget):
                                                              chunks=chunks,
                                                              compressor=compression,
                                                              **compression_opts)
+        # check if any offsets were added to the array
+        if self.has_offsets(key):
+            ds = self.datasets[key]
+            offset_front = ds.attrs.get('offset_front')
+            offset_back = ds.attrs.get('offset_back')
+            self.set_offsets(offset_front, offset_back, 'data', serialize_offsets=False)
         return self
 
     def write(self, start, data, key='data'):
@@ -95,12 +100,10 @@ class N5Target(BaseTarget):
         assert key in self.datasets, "Can't get ds impl for a dataset that has not been opened"
         return self.datasets[key]._impl
 
-    @property
     def shape(self, key='data'):
         assert key in self.datasets, "Can't get shape for a dataset that has not been opened"
         return self.datasets[key].shape
 
-    @property
     def chunks(self, key='data'):
         assert key in self.datasets, "Can't get chunks for a dataset that has not been opened"
         return self.datasets[key].chunks
@@ -109,8 +112,33 @@ class N5Target(BaseTarget):
     def close(self):
         pass
 
+    # add offsets to the nh5 array
+    def set_offsets(self, offset_front, offset_back, key='data', serialize_offsets=True):
+        assert False, "Offsets not implemented in z5py yet"
+        assert key in self.datasets, "Can't set offsets for a dataset that has not been opened"
+        # TODO implement in z5
+        self.datasets[key].set_offset_front(offset_front)
+        self.datasets[key].set_offset_back(offset_back)
+        # serialize the offsets
+        if serialize_offsets:
+            self.serialize_offsets(offset_front, offset_back, key)
 
-# TODO change api, s.t. this can be used interchangebly with N5Target
+    def serialize_offsets(self, offset_front, offset_back, key='data'):
+        assert key in self.datasets, "Can't serialize offsets for a dataset that has not been opened"
+        self.datasets[key].attrs['offset_front'] = offset_front
+        self.datasets[key].attrs['offset_back'] = offset_back
+
+    @staticmethod
+    def has_offsets(path, key='data'):
+        f = z5py.File(path)
+        ds = f[key]
+        if 'offset_front' in ds.attrs:
+            assert 'offset_back' in ds.attrs
+            return True
+        else:
+            return False
+
+
 class HDF5Target(BaseTarget):
     """
     Target for h5 data larger than RAM
@@ -121,7 +149,10 @@ class HDF5Target(BaseTarget):
         self.h5_file = nh5.openFile(self.path) if os.path.exists(self.path) else \
             nh5.createFile(self.path)
 
-    # TODO opening with offsets
+    def __contains__(self, key):
+        with h5py.File(self.path) as f:
+            return key in f
+
     def open(self, key='data', dtype=None, shape=None, chunks=None, compression='gzip', **compression_opts):
 
         # if we have already opened the dataset, we don't need to do anything
@@ -142,18 +173,13 @@ class HDF5Target(BaseTarget):
                                                shape, chunks,
                                                compression=compression,
                                                **compression_opts)
-        # TODO opening with offsets
-        # # check if any offsets were added to the array
-        # if self.has_offsets(key):
-        #     print("Loading with offsets")
-        #     with h5py.File(self.path) as f:
-        #         ds = f[key]
-        #         offset_front = ds.attrs.get('offset_front')
-        #         offset_back = ds.attrs.get('offset_back')
-        #         print(offset_front)
-        #         print(offset_back)
-        #         self.arrays[key].setOffsetFront(offset_front)
-        #         self.arrays[key].setOffsetBack(offset_back)
+        # check if any offsets were added to the array
+        if self.has_offsets(key):
+            ds = self.datasets[key]
+            offset_front = ds.attrs.get('offset_front')
+            offset_back = ds.attrs.get('offset_back')
+            self.set_offsets(offset_front, offset_back, 'data', serialize_offsets=False)
+        return self
 
     def close(self):
         nh5.closeFile(self.h5_file)
@@ -170,43 +196,41 @@ class HDF5Target(BaseTarget):
         assert key in self.datasets, "Can't get ds impl for a dataset that has not been opened"
         return self.datasets[key]
 
-    @property
     def shape(self, key='data'):
         assert key in self.datasets, "Can't get shape for a dataset that has not been opened"
         return self.datasets[key].shape
 
-    @property
     def chunks(self, key='data'):
         assert key in self.datasets, "Can't get chunks for a dataset that has not been opened"
         return self.datasets[key].chunkShape
 
-    # TODO
-    # TODO offset API
-    # TODO
     # add offsets to the nh5 array
     def set_offsets(self, offset_front, offset_back, key='data', serialize_offsets=True):
-        if key not in self.arrays:
-            raise KeyError("Key does not name a valid dataset in H5 file.")
-        self.arrays[key].setOffsetFront(offset_front)
-        self.arrays[key].setOffsetBack(offset_back)
+        assert key in self.datasets, "Can't set offsets for a dataset that has not been opened"
+        self.datasets[key].setOffsetFront(offset_front)
+        self.datasets[key].setOffsetBack(offset_back)
         # serialize the offsets
         if serialize_offsets:
             self.serialize_offsets(offset_front, offset_back, key)
 
     def serialize_offsets(self, offset_front, offset_back, key='data'):
-        with h5py.File(self.path, 'r') as f:
-            ds = f[key]
-            ds.attrs.create('offset_front', offset_front)
-            ds.attrs.create('offset_back', offset_back)
+        assert key in self.datasets, "Can't serialize offsets for a dataset that has not been opened"
+        self.datasets[key].attrs.create('offset_front', offset_front)
+        self.datasets[key].attrs.create('offset_back', offset_back)
 
-    def has_offsets(self, key='data'):
-        with h5py.File(self.path) as f:
+    @staticmethod
+    def has_offsets(path, key='data'):
+        with h5py.File(path) as f:
             ds = f[key]
-            if 'offset_front' in ds.attrs.keys():
-                assert 'offset_back' in ds.attrs.keys()
+            if 'offset_front' in ds.attrs:
+                assert 'offset_back' in ds.attrs
                 return True
             else:
                 return False
+
+
+# choose n5 / h5 backedn globally
+VolumeTarget = N5Target if PipelineParameter().useN5Backend else HDF5Target
 
 
 class HDF5DataTarget(BaseTarget):
@@ -282,6 +306,7 @@ class FolderTarget(BaseTarget):
         raise AttributeError("Not implemented")
 
 
+# TODO enable n5 supported rag
 # serializing the nifty rag
 class StackedRagTarget(BaseTarget):
     """

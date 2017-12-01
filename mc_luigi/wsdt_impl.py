@@ -19,13 +19,11 @@ def local_maxima(image, *args, **kwargs):
 # watershed on distance transform:
 # seeds are generated on the inverted distance transform
 # the probability map is used for growing
-def compute_wsdt_segmentation(
-    probability_map,
-    threshold,
-    sigma_seeds,
-    min_segment_size=0,
-    preserve_membrane=True
-):
+def compute_wsdt_segmentation(probability_map,
+                              threshold,
+                              sigma_seeds,
+                              min_segment_size=0,
+                              preserve_membrane=True):
 
     # first, we compute the signed distance transform
     dt = signed_distance_transform(probability_map, threshold, preserve_membrane)
@@ -99,64 +97,4 @@ def iterative_inplace_watershed(hmap, seeds, min_segment_size):
                                                             start_label=0,
                                                             out=seeds,
                                                             keep_zeros=False)
-
     return max_label
-
-
-if __name__ == '__main__':
-    # from volumina_viewer import volumina_n_layer
-    from wsdt import wsDtSegmentation
-    from concurrent import futures
-    import time
-
-    pmap_path = '/home/consti/Work/data_neuro/cache/cremi/sample_A_train/inp1.h5'
-    pmap = vigra.readHDF5(pmap_path, 'data')
-
-    sigma = 1.6
-    min_seg = 25
-    th = 0.2
-
-    def process_parallel(ws_fu):
-
-        seg = np.zeros_like(pmap, dtype='uint32')
-
-        def seg_z(z):
-            seg_z, _ = ws_fu(pmap[z])
-            seg[z] = seg_z
-
-        with futures.ThreadPoolExecutor(max_workers=8) as tp:
-            tasks = [tp.submit(seg_z, z) for z in range(seg.shape[0])]
-            [t.result() for t in tasks]
-
-        return seg
-
-    from functools import partial
-    ws0 = partial(
-        compute_wsdt_segmentation,
-        threshold=th,
-        sigma_seeds=sigma,
-        min_segment_size=min_seg
-    )
-    t0 = time.time()
-    seg0 = process_parallel(ws0)
-    print("T0:", time.time() - t0, 's')
-
-    ws1 = partial(
-        wsDtSegmentation,
-        pmin=th,
-        minMembraneSize=0,
-        minSegmentSize=min_seg,
-        sigmaMinima=sigma,
-        sigmaWeights=0.,
-        groupSeeds=False,
-        preserve_membrane_pmaps=True,
-        grow_on_pmap=True
-    )
-    t1 = time.time()
-    seg1 = process_parallel(ws1)
-    print("T1:", time.time() - t1, 's')
-
-    assert seg0.shape == seg1.shape
-    print(seg0.shape)
-
-    # volumina_n_layer([pm, seg0])

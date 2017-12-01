@@ -6,12 +6,12 @@ from __future__ import division, print_function
 import luigi
 
 from .multicutProblemTasks import MulticutProblem
-from .multicutSolverTasks import McSolverFusionMoves  # ,McSolverExact
+from .multicutSolverTasks import McSolverFusionMoves
 from .blockwiseMulticutTasks import BlockwiseMulticutSolver
 from .blockwiseBaselineTasks import SubblockSegmentations, BlockwiseOverlapSolver
 from .blockwiseBaselineTasks import BlockwiseStitchingSolver, BlockwiseMulticutStitchingSolver, NoStitchingSolver
 from .dataTasks import StackedRegionAdjacencyGraph, ExternalSegmentation
-from .customTargets import HDF5VolumeTarget
+from .customTargets import VolumeTarget
 from .defectHandlingTasks import DefectsToNodes
 # from .skeletonTasks import ResolveCandidates
 
@@ -55,17 +55,18 @@ class SegmentationWorkflow(luigi.Task):
 
         inp = self.input()
         rag = inp["rag"].read()
-        mc_nodes = inp["mc_nodes"].read().astype(self.dtype)
+        mc_nodes = inp["mc_nodes"].read().astype(self.dtype, copy=False)
         seg = inp["seg"]
 
         seg.open()
         shape = seg.shape()
 
+        chunks = (1, min(1024, shape[1]), min(1024, shape[2]))
         if PipelineParameter().haveOffsets:
-            out = self._expand_shape(shape)
+            out = self._expand_shape(shape, chunks)
         else:
             out = self.output()
-            out.open(shape)
+            out.open('data', shape=shape, chunks=chunks, dtype=self.dtype)
 
         workflow_logger.info("SegmentationWorkflow: Projecting node result to segmentation.")
         self._project_result_to_segmentation(rag, mc_nodes, out)
@@ -78,7 +79,6 @@ class SegmentationWorkflow(luigi.Task):
         # FIXME this does not work for some reason
         # if PipelineParameter().haveOffsets:
         #     self._serialize_offsets(out)
-
         seg.close()
 
     def _project_result_to_segmentation(self, rag, mc_nodes, out):
@@ -105,20 +105,18 @@ class SegmentationWorkflow(luigi.Task):
         for z in defected_slices:
             replace_z = replace_slice[z]
             workflow_logger.info("SegmentationWorkflow: replacing defected slice %i by %i" % (z, replace_z))
-            out.write(
-                [z, 0, 0],
-                out.read([replace_z, 0, 0], [replace_z + 1, shape[1], shape[2]])
-            )
+            out.write([z, 0, 0],
+                      out.read([replace_z, 0, 0], [replace_z + 1, shape[1], shape[2]]))
 
     # expand the segmentation by offset !
-    def _expand_shape(self, seg_shape):
+    def _expand_shape(self, seg_shape, chunks):
         out = self.output()
         offset_front = PipelineParameter().offsetFront
         assert offset_front is not None
         offset_back = PipelineParameter().offsetBack
         assert offset_back is not None
         shape = (np.array(offset_front) + np.array(offset_back) + np.array(seg_shape)).tolist()
-        out.open(shape)
+        out.open('data', shape=shape, chunks=chunks, dtype=self.dtype)
         out.set_offsets(offset_front, offset_back, serialize_offsets=False)
         return out
 
@@ -147,13 +145,10 @@ class MulticutSegmentation(SegmentationWorkflow):
         return return_tasks
 
     def output(self):
-        save_path = os.path.join(
-            PipelineParameter().cache,
-            "MulticutSegmentation_%s.h5" % (
-                "modified" if PipelineParameter().defectPipeline else "standard",
-            )
-        )
-        return HDF5VolumeTarget(save_path, self.dtype, compression=PipelineParameter().compressionLevel)
+        save_path = os.path.join(PipelineParameter().cache,
+                                 "MulticutSegmentation_%s.h5" % (
+                                     "modified" if PipelineParameter().defectPipeline else "standard",))
+        return VolumeTarget(save_path)
 
 
 class BlockwiseMulticutSegmentation(SegmentationWorkflow):
@@ -184,7 +179,7 @@ class BlockwiseMulticutSegmentation(SegmentationWorkflow):
                 "modified" if PipelineParameter().defectPipeline else "standard",
             )
         )
-        return HDF5VolumeTarget(save_path, self.dtype, compression=PipelineParameter().compressionLevel)
+        return VolumeTarget(save_path)
 
 
 class BlockwiseStitchingSegmentation(SegmentationWorkflow):
@@ -218,7 +213,7 @@ class BlockwiseStitchingSegmentation(SegmentationWorkflow):
                 self.boundaryBias
             )
         )
-        return HDF5VolumeTarget(save_path, self.dtype, compression=PipelineParameter().compressionLevel)
+        return VolumeTarget(save_path)
 
 
 class BlockwiseMulticutStitchingSegmentation(SegmentationWorkflow):
@@ -249,7 +244,7 @@ class BlockwiseMulticutStitchingSegmentation(SegmentationWorkflow):
                 "modified" if PipelineParameter().defectPipeline else "standard",
             )
         )
-        return HDF5VolumeTarget(save_path, self.dtype, compression=PipelineParameter().compressionLevel)
+        return VolumeTarget(save_path)
 
 
 class BlockwiseOverlapSegmentation(SegmentationWorkflow):
@@ -281,7 +276,7 @@ class BlockwiseOverlapSegmentation(SegmentationWorkflow):
                 PipelineParameter().overlapThreshold
             )
         )
-        return HDF5VolumeTarget(save_path, self.dtype, compression=PipelineParameter().compressionLevel)
+        return VolumeTarget(save_path)
 
 
 class NoStitchingSegmentation(SegmentationWorkflow):
@@ -312,7 +307,7 @@ class NoStitchingSegmentation(SegmentationWorkflow):
                 "modified" if PipelineParameter().defectPipeline else "standard"
             )
         )
-        return HDF5VolumeTarget(save_path, self.dtype, compression=PipelineParameter().compressionLevel)
+        return VolumeTarget(save_path)
 
 
 # TODO
@@ -345,7 +340,7 @@ class NoStitchingSegmentation(SegmentationWorkflow):
 #                 "modified" if PipelineParameter().defectPipeline else "standard",
 #             )
 #         )
-#         return HDF5VolumeTarget(save_path, self.dtype, compression=PipelineParameter().compressionLevel)
+#         return VolumeTarget(save_path)
 
 
 class SubblockSegmentationWorkflow(luigi.Task):
