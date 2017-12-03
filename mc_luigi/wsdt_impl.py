@@ -1,7 +1,9 @@
 from __future__ import division, print_function
 
 import vigra
-import fastfilters
+# FIXME weird segfault that occurs when including nifty build with
+# `WITH_FASTFILTERS` and importing fastfilters
+# import fastfilters
 import numpy as np
 
 from scipy.ndimage.morphology import distance_transform_edt
@@ -41,7 +43,7 @@ def signed_distance_transform(probability_map, threshold, preserve_membrane):
 
     # get the distance transform of the pmap
     binary_membranes = (probability_map >= threshold)
-    distance_to_membrane = distance_transform_edt(np.logical_not(binary_membranes))
+    distance_to_membrane = distance_transform_edt(np.logical_not(binary_membranes)).astype('float32',copy=False)
 
     # Instead of computing a negative distance transform within the thresholded membrane areas,
     # Use the original probabilities (but inverted)
@@ -64,13 +66,18 @@ def seeds_from_distance_transform(distance_transform, sigma_seeds):
     # we are not using the dt after this point, so it's ok to smooth it
     # and later use it for calculating the seeds
     if sigma_seeds > 0.:
-        distance_transform = fastfilters.gaussianSmoothing(distance_transform, sigma_seeds)
+        # distance_transform = fastfilters.gaussianSmoothing(distance_transform, sigma_seeds)
+        distance_transform = vigra.filters.gaussianSmoothing(distance_transform, sigma_seeds)
 
     # If any seeds end up on the membranes, we'll remove them.
     # This is more likely to happen when the distance transform was generated with preserve_membrane_pmaps=True
     membrane_mask = (distance_transform < 0)
 
-    local_maxima(distance_transform, allowPlateaus=True, allowAtBorder=True, marker=np.nan, out=distance_transform)
+    local_maxima(distance_transform,
+                 allowPlateaus=True,
+                 allowAtBorder=True,
+                 marker=np.nan,
+                 out=distance_transform)
     distance_transform = np.isnan(distance_transform)
 
     distance_transform[membrane_mask] = 0

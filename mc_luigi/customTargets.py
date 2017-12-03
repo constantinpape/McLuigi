@@ -1,6 +1,7 @@
 from __future__ import division, print_function
 
 from luigi.target import FileSystemTarget
+from luigi.file import LocalFileSystem
 
 import os
 import numpy as np
@@ -29,6 +30,8 @@ class BaseTarget(FileSystemTarget):
     """
     Custom target base class
     """
+    fs = LocalFileSystem()
+
     def __init__(self, path):
         super(BaseTarget, self).__init__(path)
 
@@ -51,16 +54,27 @@ class N5Target(BaseTarget):
     Target for data in n5 format
     """
     def __init__(self, path):
-        super(N5Target, self).__init__(path)
+        path_ = path if path[-3:] == '.n5' else path + '.n5'
+        super(N5Target, self).__init__(path_)
         self.datasets = {}
+        self.n5_file = None
+
+    def _open_file(self):
         self.n5_file = z5py.File(self.path, use_zarr_format=False)
 
     def __contains__(self, key):
+        if self.n5_file is None:
+            self._open_file()
         return key in self.n5_file
 
     # TODO change compression to blosc as soon as n5 supports it !
     # TODO offset handling, need to implement loading with offsets and offsets in z5
     def open(self, key='data', dtype=None, shape=None, chunks=None, compression='gzip', **compression_opts):
+
+        # open the n5 file if it wasn't opened yet
+        if self.n5_file is None:
+            self._open_file()
+
         # if we have already opened the dataset, we don't need to do anything
         if key in self.datasets:
             return self
@@ -79,32 +93,39 @@ class N5Target(BaseTarget):
                                                              chunks=chunks,
                                                              compressor=compression,
                                                              **compression_opts)
+        # TODO implement offsets in n5
         # check if any offsets were added to the array
-        if self.has_offsets(key):
-            ds = self.datasets[key]
-            offset_front = ds.attrs.get('offset_front')
-            offset_back = ds.attrs.get('offset_back')
-            self.set_offsets(offset_front, offset_back, 'data', serialize_offsets=False)
+        #if self.has_offsets(key):
+        #    ds = self.datasets[key]
+        #    offset_front = ds.attrs.get('offset_front')
+        #    offset_back = ds.attrs.get('offset_back')
+        #    self.set_offsets(offset_front, offset_back, 'data', serialize_offsets=False)
+
         return self
 
     def write(self, start, data, key='data'):
+        assert self.n5_file is not None, "Need to open the n5 file first"
         assert key in self.datasets, "Can't write to a dataset that has not been opened"
         self.datasets[key].write_subarray(start, data)
 
     def read(self, start, stop, key='data'):
+        assert self.n5_file is not None, "Need to open the n5 file first"
         assert key in self.datasets, "Can't read from a dataset that has not been opened"
         return self.datasets[key].read_subarray(start, stop)
 
     # get the dataset implementation to pass to c++ code
     def get(self, key='data'):
+        assert self.n5_file is not None, "Need to open the n5 file first"
         assert key in self.datasets, "Can't get ds impl for a dataset that has not been opened"
         return self.datasets[key]._impl
 
     def shape(self, key='data'):
+        assert self.n5_file is not None, "Need to open the n5 file first"
         assert key in self.datasets, "Can't get shape for a dataset that has not been opened"
         return self.datasets[key].shape
 
     def chunks(self, key='data'):
+        assert self.n5_file is not None, "Need to open the n5 file first"
         assert key in self.datasets, "Can't get chunks for a dataset that has not been opened"
         return self.datasets[key].chunks
 
@@ -124,12 +145,14 @@ class N5Target(BaseTarget):
             self.serialize_offsets(offset_front, offset_back, key)
 
     def serialize_offsets(self, offset_front, offset_back, key='data'):
+        assert False, "Offsets not implemented in z5py yet"
         assert key in self.datasets, "Can't serialize offsets for a dataset that has not been opened"
         self.datasets[key].attrs['offset_front'] = offset_front
         self.datasets[key].attrs['offset_back'] = offset_back
 
     @staticmethod
     def has_offsets(path, key='data'):
+        assert False, "Offsets not implemented in z5py yet"
         f = z5py.File(path)
         ds = f[key]
         if 'offset_front' in ds.attrs:
@@ -144,8 +167,13 @@ class HDF5Target(BaseTarget):
     Target for h5 data larger than RAM
     """
     def __init__(self, path):
-        super(HDF5Target, self).__init__(path)
+        path_ = path if path[-3:] == '.h5' else path + '.h5'
+        super(HDF5Target, self).__init__(path_)
         self.datasets = {}
+        self.h5_file = None
+
+    def _open_file(self):
+        self.makedirs()
         self.h5_file = nh5.openFile(self.path) if os.path.exists(self.path) else \
             nh5.createFile(self.path)
 
@@ -154,6 +182,10 @@ class HDF5Target(BaseTarget):
             return key in f
 
     def open(self, key='data', dtype=None, shape=None, chunks=None, compression='gzip', **compression_opts):
+
+        # open the h5 file if it is not exisiting already
+        if self.h5_file is None:
+            self._open_file()
 
         # if we have already opened the dataset, we don't need to do anything
         if key in self.datasets:
@@ -182,30 +214,37 @@ class HDF5Target(BaseTarget):
         return self
 
     def close(self):
+        assert self.h5_file is not None, "Need to open the n5 file first"
         nh5.closeFile(self.h5_file)
 
     def write(self, start, data, key='data'):
+        assert self.h5_file is not None, "Need to open the n5 file first"
         assert key in self.datasets, "Can't write to a dataset that has not been opened"
         self.datasets[key].writeSubarray(list(start), data)
 
     def read(self, start, stop, key='data'):
+        assert self.h5_file is not None, "Need to open the n5 file first"
         assert key in self.datasets, "Can't read from a dataset that has not been opened"
         return self.datasets[key].readSubarray(list(start), list(stop))
 
     def get(self, key='data'):
+        assert self.h5_file is not None, "Need to open the n5 file first"
         assert key in self.datasets, "Can't get ds impl for a dataset that has not been opened"
         return self.datasets[key]
 
     def shape(self, key='data'):
+        assert self.h5_file is not None, "Need to open the n5 file first"
         assert key in self.datasets, "Can't get shape for a dataset that has not been opened"
         return self.datasets[key].shape
 
     def chunks(self, key='data'):
+        assert self.h5_file is not None, "Need to open the n5 file first"
         assert key in self.datasets, "Can't get chunks for a dataset that has not been opened"
         return self.datasets[key].chunkShape
 
     # add offsets to the nh5 array
     def set_offsets(self, offset_front, offset_back, key='data', serialize_offsets=True):
+        assert self.h5_file is not None, "Need to open the n5 file first"
         assert key in self.datasets, "Can't set offsets for a dataset that has not been opened"
         self.datasets[key].setOffsetFront(offset_front)
         self.datasets[key].setOffsetBack(offset_back)
@@ -214,6 +253,7 @@ class HDF5Target(BaseTarget):
             self.serialize_offsets(offset_front, offset_back, key)
 
     def serialize_offsets(self, offset_front, offset_back, key='data'):
+        assert self.h5_file is not None, "Need to open the n5 file first"
         assert key in self.datasets, "Can't serialize offsets for a dataset that has not been opened"
         self.datasets[key].attrs.create('offset_front', offset_front)
         self.datasets[key].attrs.create('offset_back', offset_back)

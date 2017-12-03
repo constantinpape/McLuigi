@@ -62,9 +62,11 @@ class WsdtSegmentation(luigi.Task):
     def run(self):
         pmap = self.input()
         pmap.open(self.keyToProbabilities)
-        shape = pmap.shape()
+        shape = pmap.shape(self.keyToProbabilities)
         out = self.output()
-        out.open(shape=shape, chunks=pmap.chunks(), dtype=self.dtype)
+        out.open(shape=shape,
+                 chunks=pmap.chunks(self.keyToProbabilities),
+                 dtype=self.dtype)
 
         self._run_wsdt2d_standard(pmap, out, shape)
 
@@ -88,7 +90,7 @@ class WsdtSegmentation(luigi.Task):
             print("Slice", z, "/", shape[0])
             sliceStart = [z, 0, 0]
             sliceStop  = [z + 1, shape[1], shape[2]]
-            pmap_z = pmap.read(sliceStart, sliceStop).squeeze()
+            pmap_z = pmap.read(sliceStart, sliceStop, self.keyToProbabilities).squeeze()
 
             if invert:
                 pmap_z = 1. - pmap_z
@@ -133,7 +135,7 @@ class WsdtSegmentation(luigi.Task):
 
     def output(self):
         save_path = os.path.join(PipelineParameter().cache,
-                                 "WsdtSegmentation_%s.h5" %
+                                 "WsdtSegmentation_%s" %
                                  os.path.split(self.pathToProbabilities)[1][:-3])
         return VolumeTarget(save_path)
 
