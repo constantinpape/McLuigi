@@ -48,22 +48,60 @@ class BaseTarget(FileSystemTarget):
                 pass
 
 
-# TODO
 class VolumeTarget(BaseTarget):
     """
+    Volume target, can hold n5 or hdf5 backend.
     """
-    def __init__(self):
-        pass
+    n5_ending = '.n5'
+    h5_ending = '.h5'
+
+    def __init__(self, path):
+        # FIXME this does nor work as default argument
+        use_n5 = PipelineParameter().useN5Backend
+        ending = path[-3:]
+        if ending in (self.n5_ending, self.h5_ending):
+            path_ = path
+        else:
+            path_ = path + self.n5_ending if use_n5 else path + self.h5_ending
+        super(BaseTarget, self).__init__(path_)
+        self.makedirs()
+        self._impl = N5Target(self.path) if use_n5 else HDF5Target(self.path)
+
+    def __contains__(self, key):
+        return key in self._impl
+
+    def open(self, key='data', dtype=None, shape=None, chunks=None, **compression_opts):
+        return self._impl.open(key=key, dtype=dtype, shape=shape, chunks=chunks,
+                               **compression_opts)
+
+    def write(self, start, data, key='data'):
+        self._impl.write(start, data, key)
+
+    def read(self, start, stop, key='data'):
+        return self._impl.read(start, stop, key)
+
+    def get(self, key='data'):
+        return self._impl.get(key)
+
+    def shape(self, key='data'):
+        return self._impl.shape(key)
+
+    def chunks(self, key='data'):
+        return self._impl.chunks(key)
+
+    def close(self):
+        self._impl.close()
+
+    # TODO interface for the offsets once implemented in z5
 
 
 # TODO enable zarr format ?!
-class N5Target(BaseTarget):
+class N5Target(object):
     """
     Target for data in n5 format
     """
     def __init__(self, path):
-        path_ = path if path[-3:] == '.n5' else path + '.n5'
-        super(N5Target, self).__init__(path_)
+        self.path = path
         self.datasets = {}
         self.n5_file = None
 
@@ -103,11 +141,11 @@ class N5Target(BaseTarget):
                                                              **compression_opts)
         # TODO implement offsets in n5
         # check if any offsets were added to the array
-        #if self.has_offsets(key):
-        #    ds = self.datasets[key]
-        #    offset_front = ds.attrs.get('offset_front')
-        #    offset_back = ds.attrs.get('offset_back')
-        #    self.set_offsets(offset_front, offset_back, 'data', serialize_offsets=False)
+        # if self.has_offsets(key):
+        #     ds = self.datasets[key]
+        #     offset_front = ds.attrs.get('offset_front')
+        #     offset_back = ds.attrs.get('offset_back')
+        #     self.set_offsets(offset_front, offset_back, 'data', serialize_offsets=False)
 
         return self
 
@@ -170,18 +208,16 @@ class N5Target(BaseTarget):
             return False
 
 
-class HDF5Target(BaseTarget):
+class HDF5Target(object):
     """
     Target for h5 data larger than RAM
     """
     def __init__(self, path):
-        path_ = path if path[-3:] == '.h5' else path + '.h5'
-        super(HDF5Target, self).__init__(path_)
+        self.path = path
         self.datasets = {}
         self.h5_file = None
 
     def _open_file(self):
-        self.makedirs()
         self.h5_file = nh5.openFile(self.path) if os.path.exists(self.path) else \
             nh5.createFile(self.path)
 
@@ -213,7 +249,7 @@ class HDF5Target(BaseTarget):
             assert shape is not None, "Can't open a new dataset if shape is not specified"
             assert chunks is not None, "Can't open a new dataset if chunks are not specified"
             clevel = compression_opts.get('level', 4)
-            compression_ = -1 if compression != 'gzip' else clevel;
+            compression_ = -1 if compression != 'gzip' else clevel
             self.datasets[key] = nh5.hdf5Array(dtype, self.h5_file, key,
                                                shape, chunks,
                                                compression=compression_)

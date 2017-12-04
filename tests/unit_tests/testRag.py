@@ -1,9 +1,9 @@
 import unittest
 import luigi
-import json
 import os
 
-from mc_luigi import LearnClassifierFromGt, PipelineParameter
+from mc_luigi import PipelineParameter
+from mc_luigi.dataTasks import StackedRegionAdjacencyGraph
 from testClass import McLuigiTestCase
 
 
@@ -17,18 +17,18 @@ class TestDataTasks(McLuigiTestCase):
     def tearDownClass(cls):
         super(TestDataTasks, cls).tearDownClass()
 
-    def test_learnrf(self):
+    def test_rag(self):
         ppl_parameter = PipelineParameter()
         ppl_parameter.read_input_file('./inputs.json')
         ppl_parameter.useN5Backend = False
         inputs = ppl_parameter.inputs
+        seg = inputs["seg"][0]
 
         # TODO get central scheduler running
         luigi.run(["--local-scheduler",
-                   "--pathsToSeg", json.dumps(inputs["seg"]),
-                   "--pathsToGt", json.dumps(inputs["gt"])],
-                  LearnClassifierFromGt)
-        self.assertTrue(os.path.exists(inputs["rf"]))
+                   "--pathToSeg", seg],
+                  StackedRegionAdjacencyGraph)
+        self.assertTrue(os.path.exists('./cache/StackedRegionAdjacencyGraph_seg.h5'))
 
 
 if __name__ == '__main__':

@@ -21,13 +21,11 @@ class McLuigiTestCase(unittest.TestCase):
             f.extractall('.')
         os.remove(data_file)
 
-        input_dict = {
-            'data': ['./data/raw.h5', './data/pmap.h5'],
-            'seg': ['./data/seg.h5'],
-            'gt': ['./data/gt.h5'],
-            'rf': './cache/LearnClassifierFromGt_SingleInput',
-            'cache': './cache'
-        }
+        input_dict = {'data': ['./data/raw.h5', './data/pmap.h5'],
+                      'seg': ['./data/seg.h5'],
+                      'gt': ['./data/gt.h5'],
+                      'rf': './cache/LearnClassifierFromGt_SingleInput',
+                      'cache': './cache'}
         with open('./inputs.json', 'w') as f:
             json.dump(input_dict, f)
 

@@ -24,7 +24,7 @@ class Singleton(type):
 
 # FIXME this is not python 2 compatible
 class PipelineParameter(object, metaclass=Singleton):
-    #__metaclass__ = Singleton
+    # __metaclass__ = Singleton
 
     def __init__(self):
 
@@ -53,7 +53,9 @@ class PipelineParameter(object, metaclass=Singleton):
         # for non-affinity maps replace 'affinitiesXY/Z' with prob
         # self.features = ["raw", "affinitiesXY", "affinitiesZ", "reg"]
         self.features = ["raw", "prob", "reg"]
-        self.zAffinityDirection = 2 # encoding of z-affinities: 1 -> slice z has affinties to z+1, 2 -> z+1 has affinities to z
+        # encoding of z-affinities: 1 -> slice z has affinties to z+1,
+        #                           2 -> z+1 has affinities to z
+        self.zAffinityDirection = 2
         self.useSimpleFeatures = False
 
         # path to neural network snapshots
@@ -67,8 +69,6 @@ class PipelineParameter(object, metaclass=Singleton):
 
         # number of threads
         self.nThreads = multiprocessing.cpu_count()
-        # compression level
-        self.compressionLevel = 5
         # log level
         self.logLevel = logging.INFO
         # enable using seperate classifier for xy - and z - edges
