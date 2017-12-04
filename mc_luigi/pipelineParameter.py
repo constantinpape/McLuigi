@@ -130,7 +130,7 @@ class PipelineParameter(object, metaclass=Singleton):
     # no segmentation -> assume we don't have probabilities either
     # and produce pmaps as well as segmentation
     def read_input_file(self, input_file):
-        with open(input_file) as f:
+        with open(input_file, 'r') as f:
             inp_dict = json.load(f)
 
         self.cache  = inp_dict['cache']

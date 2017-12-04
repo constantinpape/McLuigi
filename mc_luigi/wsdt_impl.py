@@ -6,16 +6,22 @@ import vigra
 # import fastfilters
 import numpy as np
 
+from skimage.feature import peak_local_max
 from scipy.ndimage.morphology import distance_transform_edt
 
 
 # wrap vigra local maxima properly
-def local_maxima(image, *args, **kwargs):
-    assert image.ndim in (2, 3), "Unsupported dimensionality: {}".format(image.ndim)
-    if image.ndim == 2:
-        return vigra.analysis.localMaxima(image, *args, **kwargs)
-    if image.ndim == 3:
-        return vigra.analysis.localMaxima3D(image, *args, **kwargs)
+def local_maxima(array):
+    assert array.ndim in (2, 3), "Unsupported dimensionality: {}".format(array.ndim)
+    if array.ndim == 2:
+        # this is considerably faster than the vigra implementation, but only works in 2d
+        # TODO check that this actually does the right thing
+        return peak_local_max(array, indices=False, exclude_border=False)
+    if array.ndim == 3:
+        return vigra.analysis.localMaxima3D(array,
+                                            allowAtBorder=True,
+                                            allowPlateaus=True,
+                                            marker=1).astype('bool')
 
 
 # watershed on distance transform:
@@ -43,7 +49,8 @@ def signed_distance_transform(probability_map, threshold, preserve_membrane):
 
     # get the distance transform of the pmap
     binary_membranes = (probability_map >= threshold)
-    distance_to_membrane = distance_transform_edt(np.logical_not(binary_membranes)).astype('float32',copy=False)
+    # distance_to_membrane = distance_transform_edt(np.logical_not(binary_membranes)).astype('float32',copy=False)
+    distance_to_membrane = vigra.filters.distanceTransform(np.logical_not(binary_membranes).astype('uint32'))#.astype('float32', copy=False)
 
     # Instead of computing a negative distance transform within the thresholded membrane areas,
     # Use the original probabilities (but inverted)
@@ -70,18 +77,11 @@ def seeds_from_distance_transform(distance_transform, sigma_seeds):
         distance_transform = vigra.filters.gaussianSmoothing(distance_transform, sigma_seeds)
 
     # If any seeds end up on the membranes, we'll remove them.
-    # This is more likely to happen when the distance transform was generated with preserve_membrane_pmaps=True
+    # This is more likely to happen when the distance transform
+    # was generated with preserve_membrane_pmaps=True
     membrane_mask = (distance_transform < 0)
-
-    local_maxima(distance_transform,
-                 allowPlateaus=True,
-                 allowAtBorder=True,
-                 marker=np.nan,
-                 out=distance_transform)
-    distance_transform = np.isnan(distance_transform)
-
-    distance_transform[membrane_mask] = 0
-
+    distance_transform = local_maxima(distance_transform)
+    distance_transform[membrane_mask] = False
     return vigra.analysis.labelMultiArrayWithBackground(distance_transform.view('uint8'))
 
 
