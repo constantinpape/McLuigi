@@ -106,7 +106,7 @@ class WsdtSegmentation(luigi.Task):
                                                    sig_seeds,
                                                    min_seg)
             # alternative: use default watershed and mask after that
-            seg[mask_z] = 0
+            seg[np.logical_not(mask_z)] = 0
             seg = vigra.analysis.labelMultiArrayWithBackground(seg)
             max_z = seg.max()
             out.write(sliceStart, seg[None, :, :])
@@ -136,7 +136,7 @@ class WsdtSegmentation(luigi.Task):
             sliceStop  = [z + 1, shape[1], shape[2]]
             seg = out.read(sliceStart, sliceStop)
             mask_z = mask.read(sliceStart, sliceStop, self.keyToMask).astype('bool')
-            seg[np.logical_not(mask_z)] += offset
+            seg[mask_z] += offset
             out.write(sliceStart, seg)
 
         t_off = time.time()
