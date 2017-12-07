@@ -104,7 +104,7 @@ class WsdtSegmentation(luigi.Task):
             mask_z = mask.read(sliceStart, sliceStop, self.keyToMask).squeeze().astype('bool')
             if invert:
                 pmap_z = 1. - pmap_z
-            pmap_z[mask_z] = 1.
+            pmap_z[np.logical_not(mask_z)] = 1.
             seg, max_z = compute_wsdt_segmentation(pmap_z,
                                                    threshold,
                                                    sig_seeds,
