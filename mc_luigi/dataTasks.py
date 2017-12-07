@@ -51,6 +51,7 @@ class WsdtSegmentation(luigi.Task):
     pathToMask = luigi.Parameter(default=None)
     keyToMask = luigi.Parameter(default='data')
     savePath = luigi.Parameter(default=None)
+    saveKey = luigi.Parameter(default='data')
 
     def requires(self):
         """
@@ -68,7 +69,8 @@ class WsdtSegmentation(luigi.Task):
         pmap.open(self.keyToProbabilities)
         shape = pmap.shape(self.keyToProbabilities)
         out = self.output()
-        out.open(shape=shape,
+        out.open(key=self.saveKey,
+                 shape=shape,
                  chunks=pmap.chunks(self.keyToProbabilities),
                  dtype=self.dtype)
 
@@ -110,7 +112,7 @@ class WsdtSegmentation(luigi.Task):
             seg[np.logical_not(mask_z)] = 0
             seg = vigra.analysis.labelMultiArrayWithBackground(seg)
             max_z = seg.max()
-            out.write(sliceStart, seg[None, :, :])
+            out.write(sliceStart, seg[None, :, :], self.saveKey)
             return max_z + 1
 
         n_workers = PipelineParameter().nThreads
@@ -135,10 +137,10 @@ class WsdtSegmentation(luigi.Task):
         def add_offset(z, offset):
             sliceStart = [z, 0, 0]
             sliceStop  = [z + 1, shape[1], shape[2]]
-            seg = out.read(sliceStart, sliceStop)
+            seg = out.read(sliceStart, sliceStop, self.saveKey)
             mask_z = mask.read(sliceStart, sliceStop, self.keyToMask).astype('bool')
             seg[mask_z] += offset
-            out.write(sliceStart, seg)
+            out.write(sliceStart, seg, self.saveKey)
 
         t_off = time.time()
         with futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
@@ -167,7 +169,7 @@ class WsdtSegmentation(luigi.Task):
             if invert:
                 pmap_z = 1. - pmap_z
             seg, max_z = compute_wsdt_segmentation(pmap_z, threshold, sig_seeds, min_seg)
-            out.write(sliceStart, seg[None, :, :])
+            out.write(sliceStart, seg[None, :, :], self.saveKey)
             return max_z + 1
 
         n_workers = PipelineParameter().nThreads
@@ -192,9 +194,9 @@ class WsdtSegmentation(luigi.Task):
         def add_offset(z, offset):
             sliceStart = [z, 0, 0]
             sliceStop  = [z + 1, shape[1], shape[2]]
-            seg = out.read(sliceStart, sliceStop)
+            seg = out.read(sliceStart, sliceStop, self.saveKey)
             seg += offset
-            out.write(sliceStart, seg)
+            out.write(sliceStart, seg, self.saveKey)
 
         t_off = time.time()
         with futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
