@@ -31,7 +31,8 @@ def compute_wsdt_segmentation(probability_map,
                               threshold,
                               sigma_seeds,
                               min_segment_size=0,
-                              preserve_membrane=True):
+                              preserve_membrane=True,
+                              start_label=0):
 
     # first, we compute the signed distance transform
     dt = signed_distance_transform(probability_map, threshold, preserve_membrane)
@@ -41,7 +42,7 @@ def compute_wsdt_segmentation(probability_map,
     del dt  # remove the array name
 
     # run watershed on the pmaps with dt seeds
-    max_label = iterative_inplace_watershed(probability_map, seeds, min_segment_size)
+    max_label = iterative_inplace_watershed(probability_map, seeds, min_segment_size, start_label)
     return seeds, max_label
 
 
@@ -85,7 +86,7 @@ def seeds_from_distance_transform(distance_transform, sigma_seeds):
     return vigra.analysis.labelMultiArrayWithBackground(distance_transform.view('uint8'))
 
 
-def iterative_inplace_watershed(hmap, seeds, min_segment_size):
+def iterative_inplace_watershed(hmap, seeds, min_segment_size, start_label=0):
 
     _, max_label = vigra.analysis.watershedsNew(hmap, seeds=seeds, out=seeds)
 
@@ -101,7 +102,7 @@ def iterative_inplace_watershed(hmap, seeds, min_segment_size):
 
         # Remove gaps in the list of label values.
         _, max_label, _ = vigra.analysis.relabelConsecutive(seeds,
-                                                            start_label=0,
+                                                            start_label=start_label,
                                                             out=seeds,
                                                             keep_zeros=False)
     return max_label

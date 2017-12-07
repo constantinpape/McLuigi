@@ -47,7 +47,7 @@ class WsdtSegmentation(luigi.Task):
 
     pathToProbabilities = luigi.Parameter()
     keyToProbabilities = luigi.Parameter()
-    dtype = luigi.Parameter(default='uint32')
+    dtype = luigi.Parameter(default='uint64')
     pathToMask = luigi.Parameter(default=None)
     keyToMask = luigi.Parameter(default='data')
     savePath = luigi.Parameter(default=None)
@@ -104,15 +104,17 @@ class WsdtSegmentation(luigi.Task):
             mask_z = mask.read(sliceStart, sliceStop, self.keyToMask).squeeze().astype('bool')
             if invert:
                 pmap_z = 1. - pmap_z
+            pmap_z[mask_z] = 1.
             seg, max_z = compute_wsdt_segmentation(pmap_z,
                                                    threshold,
                                                    sig_seeds,
-                                                   min_seg)
+                                                   min_seg,
+                                                   start_label=1)
             # alternative: use default watershed and mask after that
             seg[np.logical_not(mask_z)] = 0
             seg = vigra.analysis.labelMultiArrayWithBackground(seg)
             max_z = seg.max()
-            out.write(sliceStart, seg[None, :, :], self.saveKey)
+            out.write(sliceStart, seg[None, :, :].astype(self.dtype, copy=False), self.saveKey)
             return max_z + 1
 
         n_workers = PipelineParameter().nThreads
@@ -120,7 +122,7 @@ class WsdtSegmentation(luigi.Task):
         t_wsdt = time.time()
         with futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
             tasks = [executor.submit(segment_slice, z) for z in range(shape[0])]
-            offsets = [future.result() for future in tasks]
+            offsets = np.array([future.result() for future in tasks], dtype='uint64')
         workflow_logger.info("WsdtSegmentation: Running watershed took: %f s"
                              % (time.time() - t_wsdt))
 
@@ -169,7 +171,7 @@ class WsdtSegmentation(luigi.Task):
             if invert:
                 pmap_z = 1. - pmap_z
             seg, max_z = compute_wsdt_segmentation(pmap_z, threshold, sig_seeds, min_seg)
-            out.write(sliceStart, seg[None, :, :], self.saveKey)
+            out.write(sliceStart, seg[None, :, :].astype(self.dtype, copy=False), self.saveKey)
             return max_z + 1
 
         n_workers = PipelineParameter().nThreads
