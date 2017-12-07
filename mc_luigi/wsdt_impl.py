@@ -15,6 +15,7 @@ def local_maxima(array):
     assert array.ndim in (2, 3), "Unsupported dimensionality: {}".format(array.ndim)
     if array.ndim == 2:
         # this is considerably faster than the vigra implementation, but only works in 2d
+        # FIXME not sure if this lifts the gil
         return peak_local_max(array, indices=False, exclude_border=False)
         #return vigra.analysis.localMaxima(array,
         #                                  allowAtBorder=True,
@@ -54,6 +55,7 @@ def signed_distance_transform(probability_map, threshold, preserve_membrane):
     # get the distance transform of the pmap
     binary_membranes = (probability_map >= threshold)
     # distance_to_membrane = distance_transform_edt(np.logical_not(binary_membranes)).astype('float32',copy=False)
+    # FIXME not sure if this lifts the gil
     distance_to_membrane = vigra.filters.distanceTransform(binary_membranes.astype('uint32'))
 
     # Instead of computing a negative distance transform within the thresholded membrane areas,
