@@ -50,6 +50,7 @@ class WsdtSegmentation(luigi.Task):
     dtype = luigi.Parameter(default='uint32')
     pathToMask = luigi.Parameter(default=None)
     keyToMask = luigi.Parameter(default='data')
+    savePath = luigi.Parameter(default=None)
 
     def requires(self):
         """
@@ -203,9 +204,13 @@ class WsdtSegmentation(luigi.Task):
         return True
 
     def output(self):
-        save_path = os.path.join(PipelineParameter().cache,
-                                 "WsdtSegmentation_%s" %
-                                 os.path.split(self.pathToProbabilities)[1][:-3])
+        if self.savePath is None
+            save_path = os.path.join(PipelineParameter().cache,
+                                     "WsdtSegmentation_%s" %
+                                     os.path.split(self.pathToProbabilities)[1][:-3])
+            save_path += VolumeTarget.n5_ending
+        else:
+            save_path = self.savePath
         return VolumeTarget(save_path)
 
 
