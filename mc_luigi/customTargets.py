@@ -58,14 +58,13 @@ class VolumeTarget(BaseTarget):
     def __init__(self, path):
         # FIXME this does nor work as default argument
         use_n5 = PipelineParameter().useN5Backend
-        ending = path[-3:]
-        if ending in (self.n5_ending, self.h5_ending):
-            path_ = path
-        else:
-            path_ = path + self.n5_ending if use_n5 else path + self.h5_ending
-        super(BaseTarget, self).__init__(path_)
+        super(BaseTarget, self).__init__(path)
         self.makedirs()
         self._impl = N5Target(self.path) if use_n5 else HDF5Target(self.path)
+
+    @staticmethod
+    def file_ending():
+        return VolumeTarget.n5_ending if PipelineParameter().useN5Backend else VolumeTarget.h5_ending
 
     def __contains__(self, key):
         return key in self._impl

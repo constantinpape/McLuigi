@@ -107,7 +107,8 @@ class RegionNodeFeatures(luigi.Task):
 
     def output(self):
         seg_file = os.path.split(self.pathToSeg)[1][:-3]
-        save_path = os.path.join(PipelineParameter().cache, "RegionNodeFeatures_%s.h5" % seg_file)
+        save_path = os.path.join(PipelineParameter().cache, "RegionNodeFeatures_%s" % seg_file)
+        save_path += VolumeTarget.file_ending()
         return VolumeTarget(save_path)
 
 
@@ -272,6 +273,7 @@ class RegionFeatures(luigi.Task):
             save_path += "modified_%s" % seg_file
         else:
             save_path += "standard_%s" % seg_file
+        save_path += VolumeTarget.file_ending()
         return VolumeTarget(save_path)
 
 
@@ -504,4 +506,5 @@ class EdgeFeatures(luigi.Task):
             save_path += '_simple'
         if self.zDirection != 0:
             save_path += '_zDir%i' % self.zDirection
+        save_path += VolumeTarget.file_ending()
         return VolumeTarget(save_path)

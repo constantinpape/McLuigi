@@ -371,6 +371,7 @@ class EdgeProbabilities(luigi.Task):
                 "modified" if PipelineParameter().defectPipeline else "standard"
             )
         )
+        save_path += VolumeTarget.file_ending()
         return VolumeTarget(save_path)
 
 

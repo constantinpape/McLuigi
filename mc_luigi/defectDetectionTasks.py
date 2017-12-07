@@ -217,7 +217,8 @@ class DefectPatchDetection(luigi.Task):
     def output(self):
         segFile = os.path.split(self.pathToSeg)[1][:-3]
         save_path = os.path.join(PipelineParameter().cache,
-                                 "DefectPatchDetection_%s.h5" % segFile)
+                                 "DefectPatchDetection_%s" % segFile)
+        save_path += VolumeTarget.file_ending()
         return VolumeTarget(save_path)
 
 
@@ -294,10 +295,11 @@ class DefectSliceDetection(luigi.Task):
         segFile = os.path.split(self.pathToSeg)[1][:-3]
         save_path = os.path.join(
             PipelineParameter().cache,
-            "DefectSliceDetection_%s_nBins%i_binThreshold%i.h5" % (
+            "DefectSliceDetection_%s_nBins%i_binThreshold%i" % (
                 segFile,
                 PipelineParameter().nBinsSliceStatistics,
                 PipelineParameter().binThreshold
             )
         )
+        save_path += VolumeTarget.file_ending()
         return VolumeTarget(save_path)
