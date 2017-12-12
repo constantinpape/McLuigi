@@ -484,7 +484,6 @@ class EdgeFeatures(luigi.Task):
             # assert skip_feats.shape[1] == n_feats, "%i, %i" % (skip_feats.shape[1], n_feats)
 
             # open file for the skip edges
-            # skip_file = nh5.createFile(os.path.join(out.path, 'features_skip.h5'))
             vigra.writeHDF5(skip_feats,
                             os.path.join(out.path, 'features_skip.h5'), 'data',
                             chunks=(min(2500, skip_feats.shape[0]), skip_feats.shape[1]))

@@ -64,7 +64,6 @@ class PipelineParameter(object, metaclass=Singleton):
         self.netGpuId = 0  # id of gpu to be used
 
         # ignore label for edge groundtruth
-        self.haveIgnoreLabel = False
         self.ignoreLabel = -1
 
         # number of threads

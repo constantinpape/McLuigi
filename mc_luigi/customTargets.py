@@ -15,15 +15,21 @@ from .pipelineParameter import PipelineParameter
 
 # import the proper nifty version
 try:
+    import nifty
     import nifty.graph.rag as nrag
-    import nifty.hdf5 as nh5
 except ImportError:
     try:
+        import nifty_with_cplex as nifty
         import nifty_with_cplex.graph.rag as nrag
-        import nifty_with_cplex.hdf5 as nh5
     except ImportError:
+        import nifty_with_gurobi as nifty
         import nifty_with_gurobi.graph.rag as nrag
-        import nifty_with_gurobi.hdf5 as nh5
+
+if nifty.Configuration.WITH_HDF5:
+    import nifty.hdf5 as nh5
+
+if nifty.Configuration.WITH_Z5:
+    import nifty.z5 as nz5
 
 
 class BaseTarget(FileSystemTarget):
@@ -162,7 +168,8 @@ class N5Target(object):
     def get(self, key='data'):
         assert self.n5_file is not None, "Need to open the n5 file first"
         assert key in self.datasets, "Can't get ds impl for a dataset that has not been opened"
-        return self.datasets[key]._impl
+        dtype = self.datasets[key].dtype
+        return nz5.datasetWrapper(dtype, os.path.join(self.path, key))
 
     def shape(self, key='data'):
         assert self.n5_file is not None, "Need to open the n5 file first"
@@ -390,7 +397,6 @@ class FolderTarget(BaseTarget):
         raise AttributeError("Not implemented")
 
 
-# TODO enable n5 supported rag
 # serializing the nifty rag
 class StackedRagTarget(BaseTarget):
     """
@@ -412,11 +418,14 @@ class StackedRagTarget(BaseTarget):
     def read(self):
         labelsPath = vigra.readHDF5(self.path, "labelsPath")
         labelsKey = vigra.readHDF5(self.path, "labelsKey")
+        dtype = vigra.readHDF5(self.path, 'dtype')
 
-        h5_file = nh5.openFile(labelsPath)
-        labels = nh5.Hdf5ArrayUInt32(h5_file, labelsKey)
+        if PipelineParameter().useN5Backend:
+            labels = nz5.datasetWrapper(dtype, os.path.join(labelsPath, labelsKey))
+        else:
+            h5_file = nh5.openFile(labelsPath)
+            labels = nh5.Hdf5Array(dtype h5_file, labelsKey)
         nNodes = vigra.readHDF5(self.path, "numberOfNodes")
-
         return nrag.readStackedRagFromHdf5(labels, nNodes, self.path)
 
     # only read sub-parts

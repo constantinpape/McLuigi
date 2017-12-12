@@ -407,7 +407,17 @@ class StackedRegionAdjacencyGraph(luigi.Task):
 
         t_rag = time.time()
         # nThreads = -1, could also make this accessible
-        rag = nrag.gridRagStacked2DHdf5(seg.get(), n_labels, numberOfThreads=-1)
+        rag_factory = nrag.gridRagStacked2DZ5 if PipelineParameter().useN5Backend else \
+            nrag.gridRagStacked2DHdf5
+
+        # ignore label is set to -1 per default
+        # which is also the nifty default ignore label
+        # (meaning that there is no ignore label)
+
+        rag = rag_factory(seg.get(),
+                          numberOfLabels=n_labels,
+                          numberOfThreads=PipelineParameter().nThreads,
+                          ignoreLabel=PipelineParameter().ignoreLabel)
         t_rag = time.time() - t_rag
 
         self.output().write(rag, self.pathToSeg, self.keyToSeg)
