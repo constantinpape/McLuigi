@@ -434,7 +434,8 @@ class StackedRagTarget(BaseTarget):
     def read(self):
         labelsPath = vigra.readHDF5(self.path, "labelsPath")
         labelsKey = vigra.readHDF5(self.path, "labelsKey")
-        dtype = vigra.readHDF5(self.path, 'dtype')
+        with h5py.File(self.path) as f:
+            dtype = f.attrs['dtype']
 
         if PipelineParameter().useN5Backend:
             labels = nz5.datasetWrapper(dtype, os.path.join(labelsPath, labelsKey))

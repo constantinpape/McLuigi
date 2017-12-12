@@ -337,7 +337,8 @@ class ExternalSegmentationLabeled(luigi.Task):
 
     def output(self):
         save_path = os.path.join(PipelineParameter().cache,
-                                 os.path.split(self.pathToSeg)[1][:-3] + "_labeled.h5")
+                                 os.path.split(self.pathToSeg)[1][:-3] + "_labeled")
+        save_path += VolumeTarget.file_ending()
         return VolumeTarget(save_path)
 
 
@@ -370,7 +371,7 @@ class DenseGroundtruth(luigi.Task):
         )
 
         out = self.output()
-        out.open(self.key, shape=gt.shape(), chunks=gt.chunks, dtype=self.dtype)
+        out.open(self.key, shape=gt.shape(self.key), chunks=gt.chunks(self.key), dtype=self.dtype)
         out.write([0, 0, 0], gt_labeled)
 
         gt.close()
@@ -378,7 +379,8 @@ class DenseGroundtruth(luigi.Task):
 
     def output(self):
         save_path = os.path.join(PipelineParameter().cache,
-                                 os.path.split(self.path)[1][:-3] + "_labeled.h5")
+                                 os.path.split(self.path)[1][:-3] + "_labeled")
+        save_path += VolumeTarget.file_ending()
         return VolumeTarget(save_path)
 
 
