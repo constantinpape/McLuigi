@@ -39,6 +39,7 @@ config_logger(workflow_logger)
 
 
 # FIXME creates wrong offsets atm !!
+# FIXME FIXME FIXME
 # not ingestible by stacked rag
 class WsdtSegmentation(luigi.Task):
     """
@@ -399,13 +400,12 @@ class StackedRegionAdjacencyGraph(luigi.Task):
         # get the number of labels
         seg = self.input()
 
-        seg.open()
-        shape = seg.shape()
+        seg.open(self.keyToSeg)
+        shape = seg.shape(self.keyToSeg)
 
-        seg_last = seg.read([shape[0] - 1, 0, 0], shape)
-        n_labels = seg_last.max() + 1
+        seg_last = seg.read([shape[0] - 1, 0, 0], shape, self.keyToSeg)
+        n_labels = int(seg_last.max() + 1)
 
-        t_rag = time.time()
         # nThreads = -1, could also make this accessible
         rag_factory = nrag.gridRagStacked2DZ5 if PipelineParameter().useN5Backend else \
             nrag.gridRagStacked2DHdf5
@@ -414,11 +414,11 @@ class StackedRegionAdjacencyGraph(luigi.Task):
         # which is also the nifty default ignore label
         # (meaning that there is no ignore label)
 
-        rag = rag_factory(seg.get(),
+        rag = rag_factory(seg.get(self.keyToSeg),
+                          dtype=seg.dtype(self.keyToSeg),
                           numberOfLabels=n_labels,
                           numberOfThreads=PipelineParameter().nThreads,
                           ignoreLabel=PipelineParameter().ignoreLabel)
-        t_rag = time.time() - t_rag
 
         self.output().write(rag, self.pathToSeg, self.keyToSeg)
 

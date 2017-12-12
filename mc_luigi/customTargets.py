@@ -25,11 +25,14 @@ except ImportError:
         import nifty_with_gurobi as nifty
         import nifty_with_gurobi.graph.rag as nrag
 
-if nifty.Configuration.WITH_HDF5:
-    import nifty.hdf5 as nh5
 
-if nifty.Configuration.WITH_Z5:
-    import nifty.z5 as nz5
+# FIXME this should work ...
+#if nifty.Configuration.WITH_HDF5:
+#    import nifty.hdf5 as nh5
+#
+#if nifty.Configuration.WITH_Z5:
+#    import nifty.z5 as nz5
+import nifty.z5 as nz5
 
 
 class BaseTarget(FileSystemTarget):
@@ -93,6 +96,9 @@ class VolumeTarget(BaseTarget):
 
     def chunks(self, key='data'):
         return self._impl.chunks(key)
+
+    def dtype(self, key='data'):
+        return self._impl.dtype(key)
 
     def close(self):
         self._impl.close()
@@ -180,6 +186,11 @@ class N5Target(object):
         assert self.n5_file is not None, "Need to open the n5 file first"
         assert key in self.datasets, "Can't get chunks for a dataset that has not been opened"
         return self.datasets[key].chunks
+
+    def dtype(self, key='data'):
+        assert self.n5_file is not None, "Need to open the n5 file first"
+        assert key in self.datasets, "Can't get chunks for a dataset that has not been opened"
+        return self.datasets[key].dtype
 
     # dummy implementation to be consisteny with HDF5Target
     def close(self):
@@ -296,6 +307,11 @@ class HDF5Target(object):
         assert self.h5_file is not None, "Need to open the n5 file first"
         assert key in self.datasets, "Can't get chunks for a dataset that has not been opened"
         return self.datasets[key].chunkShape
+
+    def dtype(self, key='data'):
+        assert self.h5_file is not None, "Need to open the n5 file first"
+        with h5py.File(self.path) as f:
+            return f[key].dtype
 
     # add offsets to the nh5 array
     def set_offsets(self, offset_front, offset_back, key='data', serialize_offsets=True):
@@ -424,7 +440,7 @@ class StackedRagTarget(BaseTarget):
             labels = nz5.datasetWrapper(dtype, os.path.join(labelsPath, labelsKey))
         else:
             h5_file = nh5.openFile(labelsPath)
-            labels = nh5.Hdf5Array(dtype h5_file, labelsKey)
+            labels = nh5.Hdf5Array(dtype, h5_file, labelsKey)
         nNodes = vigra.readHDF5(self.path, "numberOfNodes")
         return nrag.readStackedRagFromHdf5(labels, nNodes, self.path)
 
