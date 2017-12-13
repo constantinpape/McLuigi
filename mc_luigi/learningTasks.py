@@ -7,11 +7,10 @@ import luigi
 
 from .taskSelection import get_local_features, get_local_features_for_multiinp
 from .customTargets import HDF5DataTarget, VolumeTarget, FolderTarget
-from .dataTasks import DenseGroundtruth, StackedRegionAdjacencyGraph, InputData
+from .dataTasks import DenseGroundtruth, StackedRegionAdjacencyGraph
 from .defectHandlingTasks import ModifiedAdjacency
 from .pipelineParameter import PipelineParameter
 from .tools import config_logger, run_decorator
-from .featureTasks import RegionNodeFeatures
 
 import logging
 
@@ -194,9 +193,17 @@ class EdgeProbabilities(luigi.Task):
             n_edges = inp['rag'].readKey('numberOfEdges')
             workflow_logger.info("EdgeProbabilities: Total number of edges: %i" % n_edges)
 
+        # we choose the chunk size according to n_feature chunks if we predict out of core
+        # otherwise we just set it to a default value
+        if PipelineParameter().nFeatureChunks > 1:
+            chunk_size = n_edges // PipelineParameter().nFeatureChunks
+        else:
+            chunk_size = 64**3
+        workflow_logger.info("EdgeProbabilities: Opening out file with chunks %i" % chunk_size)
+
         out = self.output()
-        # 262144 = chunk size (64**3)
-        out.open('data', shape=(n_edges,), chunks=(min(262144, n_edges),), dtype='float32')
+        # FIXME 1D gzip compression is broken ?!
+        out.open('data', shape=(n_edges,), chunks=(chunk_size,), dtype='float32', compression='raw')
         self._predict(feature_tasks, out)
         out.close()
 
@@ -209,8 +216,7 @@ class EdgeProbabilities(luigi.Task):
         # TODO this could be done better with a get("modified_adjacency") and a default value
         has_defects = False
         if PipelineParameter().defectPipeline:
-            if inp["modified_adjacency"].read("has_defects"):
-                has_defects = True
+            has_defects = inp["modified_adjacency"].read("has_defects")
 
         if has_defects:
             n_edges = inp["modified_adjacency"].read("n_edges_modified")
@@ -253,10 +259,8 @@ class EdgeProbabilities(luigi.Task):
 
         for ii, feat_type in enumerate(feat_types):
             workflow_logger.info("Predicting features for %s" % feat_type)
-            classifier = RandomForest.load_from_file(
-                str(self.pathToClassifier),
-                "rf_%s" % classifier_types[ii]
-            )
+            classifier = RandomForest.load_from_file(str(self.pathToClassifier),
+                                                     "rf_%s" % classifier_types[ii])
 
             if feat_type == 'features_xy':
                 n_edges_type = n_edges_xy
@@ -322,7 +326,7 @@ class EdgeProbabilities(luigi.Task):
             "Number of input and rf features do not match for %s: %i, %i" % (
                 feat_type, features.shape[1], classifier.n_features)
         probs = classifier.predict_probabilities(features, PipelineParameter().nThreads)[:, 1]
-        out.write([start], probs)
+        out.write([start], probs.astype('float32', copy=False))
 
     # Out of core prediction for edge type
     def _predict_out_of_core(self,
@@ -354,8 +358,7 @@ class EdgeProbabilities(luigi.Task):
             read_start = start_index + start
 
             probs = classifier.predict_probabilities(sub_feats, 1)[:, 1]
-            out.write([read_start], probs)
-            return True
+            out.write((read_start,), probs.astype('float32', copy=False))
 
         n_workers = PipelineParameter().nThreads
         # n_workers = 1
@@ -366,7 +369,7 @@ class EdgeProbabilities(luigi.Task):
     def output(self):
         save_path = os.path.join(
             PipelineParameter().cache,
-            "EdgeProbabilities%s_%s.h5" % (
+            "EdgeProbabilities%s_%s" % (
                 "Separate" if PipelineParameter().separateEdgeClassification else "Joint",
                 "modified" if PipelineParameter().defectPipeline else "standard"
             )
@@ -384,11 +387,9 @@ class EdgeGroundtruth(luigi.Task):
 
     def requires(self):
         if PipelineParameter().defectPipeline:
-            return {
-                "gt": DenseGroundtruth(self.pathToGt),
-                "rag": StackedRegionAdjacencyGraph(self.pathToSeg),
-                "modified_adjacency": ModifiedAdjacency(self.pathToSeg)
-            }
+            return {"gt": DenseGroundtruth(self.pathToGt),
+                    "rag": StackedRegionAdjacencyGraph(self.pathToSeg),
+                    "modified_adjacency": ModifiedAdjacency(self.pathToSeg)}
         else:
             return {"gt": DenseGroundtruth(self.pathToGt), "rag": StackedRegionAdjacencyGraph(self.pathToSeg)}
 
@@ -670,7 +671,7 @@ class LearnClassifierFromGt(luigi.Task):
             gt_i = gt[i]
 
             features_i = np.concatenate([feat_task.read((0, 0), feat_task.shape(key='features_xy'), key='features_xy')
-                                         for feat_task in feat_tasks_i if 'features_xy' in feat_task_i.keys()],
+                                         for feat_task in feat_tasks_i if 'features_xy' in feat_task.keys()],
                                         axis=1)
             edge_gt = gt_i.read('edge_gt_xy')
 
@@ -701,7 +702,7 @@ class LearnClassifierFromGt(luigi.Task):
             feat_tasks_i = feature_tasks[i]
             gt_i = gt[i]
             features_i = np.concatenate([feat_task.read((0, 0), feat_task.shape(key='features_z'), key='features_z')
-                                         for feat_task in feat_tasks_i if 'features_z' in feat_task_i.keys()],
+                                         for feat_task in feat_tasks_i if 'features_z' in feat_task.keys()],
                                         axis=1)
             edge_gt = gt_i.read('edge_gt_z')
 
@@ -738,7 +739,7 @@ class LearnClassifierFromGt(luigi.Task):
             for feat_task in feature_tasks[i]:
                 features_i.append(np.concatenate([feat_task.read((0, 0), feat_task.shape(key=key), key=key)
                                                   for key in ('features_xy', 'features_z')],
-                                                axis=1))
+                                                 axis=1))
             features_i = np.concatenate(features_i, axis=1)
 
             if PipelineParameter().ignoreLabel != -1:
@@ -804,105 +805,3 @@ class LearnClassifierFromGt(luigi.Task):
         ninp_str = "SingleInput" if (len(self.pathsToSeg) == 1) else "MultipleInput"
         save_path = os.path.join(PipelineParameter().cache, "LearnClassifierFromGt_%s" % ninp_str)
         return FolderTarget(save_path) if use_sklearn else HDF5DataTarget(save_path)
-
-
-class DefectNodeGroundtruth(luigi.Task):
-
-    pathToSeg = luigi.Parameter()
-    pathToDefectGt = luigi.Parameter()
-
-    def requires(self):
-        return{
-            "rag": StackedRegionAdjacencyGraph(self.pathToSeg),
-            "defect_gt": InputData(self.pathToDefectGt, dtype='uint8')
-        }
-
-    @run_decorator
-    def run(self):
-        inp = self.input()
-        rag = inp['rag'].read()
-        defect_gt = inp['defect_gt']
-        defect_gt.open()
-
-        node_labels = nrag.gridRagAccumulateLabels(rag, defect_gt.get())
-        assert (np.unique(node_labels) == np.array([0, 1])).all(), str(np.unique(node_labels))
-        self.output().write(node_labels)
-
-    def output(self):
-        seg_file = os.path.split(self.pathToSeg)[1][:-3]
-        save_path = "DefectNodeGroundtruth_%s.h5" % seg_file
-        return HDF5DataTarget(save_path)
-
-
-class LearnDefectRandomForest(luigi.Task):
-
-    pathsToSeg = luigi.ListParameter()
-    pathsToDefectGt = luigi.ListParameter()
-
-    def requires(self):
-        assert len(self.pathsToSeg) == len(self.pathsToGt)
-        n_inputs = len(self.pathsToSeg)
-        inputs = PipelineParameter().inputs
-
-        if n_inputs == 1:
-            raw_path = inputs['data'][0]
-            return {
-                'gt': DefectNodeGroundtruth(self.pathsToSeg[0], self.pathsToDefectGt[0]),
-                'feats': RegionNodeFeatures(self.pathsToSeg[0], raw_path)
-            }
-        else:
-            inp_paths = inputs['data']
-            assert n_inputs % inp_paths == 0
-            inp_per_seg = len(inp_paths) // n_inputs
-            return {
-                'gt': [DefectNodeGroundtruth(self.pathsToSeg[i], self.pathsToDefectGt[i]) for i in range(n_inputs)],
-                'feats': [RegionNodeFeatures(self.pathToSeg[i], inp_paths[inp_per_seg * i]) for i in range(n_inputs)]
-            }
-
-    @run_decorator
-    def run(self):
-        if(self.pathsToSeg) > 1:
-            self._learn_defect_rf_multi_input()
-        else:
-            self._learn_defect_rf_single_input()
-
-    def _learn_defect_rf_multi_input(self):
-        inp = self.input()
-        gts = inp['gt']
-        feats = inp['feats']
-        assert len(gts) == len(feats)
-        features = []
-        labels = []
-        for i, gt in enumerate(gts):
-            this_gt = gt.read()
-            this_feats = feats[i].read([0, 0], feats[i].shape)
-            assert len(this_gt) == len(this_feats), "%i, %i" % (len(this_gt), len(this_feats))
-            features.append(this_feats)
-            labels.append(this_gt)
-        features = np.concatenate(features, axis=0)
-        labels = np.concatenate(labels, axis=0)
-        rf = RandomForest(
-            features, labels,
-            n_trees=PipelineParameter().nTrees,
-            n_threads=PipelineParameter().nThreads
-        )
-        rf.write(str(self.output().path), 'rf')
-
-    def _learn_defect_rf_single_input(self):
-        inp = self.input()
-        gt = inp['gt'].read()
-        feats = inp['feats']
-        feats = feats.readSubarray([0, 0], feats.shape)
-        assert len(gt) == len(feats), "%i, %i" % (len(gt), len(feats))
-        rf = RandomForest(
-            feats, gt,
-            n_trees=PipelineParameter().nTrees,
-            n_threads=PipelineParameter().nThreads
-        )
-        rf.write(str(self.output().path), 'rf')
-
-    def output(self):
-        save_path = 'LearnDefectRandomForest_%s' % (
-            'multi_input' if len(self.pathsToSeg) > 1 else 'single_input',
-        )
-        return FolderTarget(save_path)
