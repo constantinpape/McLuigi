@@ -374,27 +374,40 @@ class EdgeFeatures(luigi.Task):
         n_edges_xy = rag.totalNumberOfInSliceEdges if not self.keepOnlyZ else 1
         n_edges_z  = rag.totalNumberOfInBetweenSliceEdges if not self.keepOnlyXY else 1
 
+        # as minimum chunk size, we choose the minimum number of edges
+        # of a given type per slice
+        min_edges_xy = min(np.min(rag.numberOfInSliceEdges()), n_edges_xy)
+        min_edges_z = min(np.min(rag.numberOfInBetweenSliceEdges()[:-1]), n_edges_z)
+
         # number of features:
         # 9 * 12 for features from filter accumulation
         # 9 for simple features
         # TODO would be nice not to hard code this here...
         n_feats = 9 if self.simpleFeatures else 9 * 12
+
+        # max chunk size s.t. n_feats * max_chunk_size ~ 64**3
+        max_chunk_size = 30000 if self.simpleFeatures else 2500
+
         out_shape_xy    = (n_edges_xy, n_feats)
-        chunk_shape_xy  = (min(2500, n_edges_xy), n_feats)
+        # we choose the min in-slice edge number as minimum chunk size
+        chunk_shape_xy  = (min(max_chunk_size, min_edges_xy), n_feats)
+
         out_shape_z    = (n_edges_z, n_feats)
-        chunk_shape_z  = (min(2500, n_edges_z), n_feats)
+        chunk_shape_z  = (min(max_chunk_size, min_edges_z), n_feats)
 
         # open the output files
         out.open('features_xy', dtype='float32', shape=out_shape_xy, chunks=chunk_shape_xy)
         out.open('features_z', dtype='float32', shape=out_shape_z, chunks=chunk_shape_z)
 
         if self.simpleFeatures:
+            workflow_logger.info("EdgeFeatures: computing standard features.")
             nrag.accumulateEdgeStandardFeatures(rag, data,
                                                 out.get('features_xy'), out.get('features_z'),
                                                 self.keepOnlyXY, self.keepOnlyZ,
                                                 self.zDirection,
                                                 PipelineParameter().nThreads)
         else:
+            workflow_logger.info("EdgeFeatures: computing features from filers.")
             nrag.accumulateEdgeFeaturesFromFilters(rag, data,
                                                    out.get('features_xy'), out.get('features_z'),
                                                    self.keepOnlyXY, self.keepOnlyZ,

@@ -485,7 +485,6 @@ class EdgeGroundtruth(luigi.Task):
         return HDF5DataTarget(save_path)
 
 
-# TODO adjust to new feature tasks
 class LearnClassifierFromGt(luigi.Task):
 
     pathsToSeg = luigi.ListParameter()
@@ -498,18 +497,14 @@ class LearnClassifierFromGt(luigi.Task):
         if n_inputs == 1:
             workflow_logger.info("LearnClassifierFromGt: learning classifier from single input")
             feature_tasks = get_local_features()
-            return_tasks = {
-                "gt": EdgeGroundtruth(self.pathsToSeg[0], self.pathsToGt[0]),
-                "features": feature_tasks
-            }
+            return_tasks = {"gt": EdgeGroundtruth(self.pathsToSeg[0], self.pathsToGt[0]),
+                            "features": feature_tasks}
         else:
             workflow_logger.info("LearnClassifierFromGt: learning classifier from %i inputs" % n_inputs)
             feature_tasks = get_local_features_for_multiinp()
             assert len(feature_tasks) == n_inputs
-            return_tasks = {
-                "gt": [EdgeGroundtruth(self.pathsToSeg[i], self.pathsToGt[i]) for i in range(n_inputs)],
-                "features": feature_tasks
-            }
+            return_tasks = {"gt": [EdgeGroundtruth(self.pathsToSeg[i], self.pathsToGt[i]) for i in range(n_inputs)],
+                            "features": feature_tasks}
         if PipelineParameter().defectPipeline:
             return_tasks['modified_adjacency'] = [ModifiedAdjacency(self.pathsToSeg[i]) for i in range(n_inputs)]
         return return_tasks
@@ -519,6 +514,10 @@ class LearnClassifierFromGt(luigi.Task):
         inp = self.input()
         gt = inp["gt"]
         feature_tasks = inp["features"]
+
+        # open all feature tasks
+        for feat in feature_tasks:
+            [feat.open(key) for key in feat.keys_on_filesystem()]
 
         n_inputs = len(self.pathsToSeg)
 
@@ -534,7 +533,6 @@ class LearnClassifierFromGt(luigi.Task):
             self._learn_classifier_from_single_input(gt, feature_tasks)
 
     def _learn_classifier_from_single_input(self, gt, feature_tasks):
-
         if PipelineParameter().separateEdgeClassification:
             workflow_logger.info(
                 "LearnClassifierFromGt: learning classfier from single input for xy and z edges separately."
@@ -545,23 +543,10 @@ class LearnClassifierFromGt(luigi.Task):
         else:
             workflow_logger.info("LearnClassifierFromGt: learning classfier from single input for all edges.")
             features = []
-
             for feat in feature_tasks:
-
-                this_feats = []
-
-                feat_path_xy = os.path.join(feat.path, 'features_xy')
-                assert os.path.exists(feat_path_xy)
-                with h5py.File(feat_path_xy) as f:
-                    this_feats.append(f['data'][:])
-
-                feat_path_z = os.path.join(feat.path, 'features_z')
-                assert os.path.exists(feat_path_z)
-                with h5py.File(feat_path_z) as f:
-                    this_feats.append(f['data'][:])
-
-                features.append(np.concatenate(this_feats, axis=0))
-
+                features.append(np.concatenate([feat.read(start=(0, 0), stop=feat.shape(key=key), key=key)
+                                                for key in ('features_xy', 'features_z')],
+                                               axis=0))
             features = np.concatenate(features, axis=1)
 
             edge_gt = gt.read('edge_gt')
@@ -589,13 +574,9 @@ class LearnClassifierFromGt(luigi.Task):
     def _learn_classifier_from_single_input_xy(self, gt, feature_tasks):
         edge_gt = gt.read('edge_gt_xy')
 
-        features = []
-        for feat_task in feature_tasks:
-            feat_path = os.path.join(feat_task.path, 'features_xy.h5')
-            if os.path.exists(feat_path):
-                with h5py.File(feat_path) as f:
-                    features.append(f['data'][:])
-        features = np.concatenate(features, axis=1)
+        features = np.concatenate([feat_task.read((0, 0), feat_task.shape(key='features_xy'), key='features_xy')
+                                   for feat_task in feature_tasks if 'features_xy' in feat_task.keys()],
+                                  axis=1)
 
         if PipelineParameter().ignoreLabel != -1:
             mask = gt.read('label_mask_xy')
@@ -603,43 +584,35 @@ class LearnClassifierFromGt(luigi.Task):
             edge_gt = edge_gt[mask]
 
         assert features.shape[0] == edge_gt.shape[0], str(features.shape[0]) + " , " + str(edge_gt.shape[0])
-        classifier = RandomForest(
-            features,
-            edge_gt,
-            n_trees=PipelineParameter().nTrees,
-            max_depth=PipelineParameter().maxDepth,
-            n_threads=PipelineParameter().nThreads
-        )
+        classifier = RandomForest(features,
+                                  edge_gt,
+                                  n_trees=PipelineParameter().nTrees,
+                                  max_depth=PipelineParameter().maxDepth,
+                                  n_threads=PipelineParameter().nThreads)
         classifier.write(str(self.output().path), 'rf_features_xy')
 
     def _learn_classifier_from_single_input_z(self, gt, feature_tasks):
         edge_gt = gt.read('edge_gt_z')
 
-        features = []
-        for feat_task in feature_tasks:
-            feat_path = os.path.join(feat_task.path, 'features_z.h5')
-            if os.path.exists(feat_path):
-                with h5py.File(feat_path) as f:
-                    features.append(f['data'][:])
-        features = np.concatenate(features, axis=1)
+        features = np.concatenate([feat_task.read((0, 0), feat_task.shape(key='features_z'), key='features_z')
+                                   for feat_task in feature_tasks if 'features_z' in feat_task.keys()],
+                                  axis=1)
 
-        if PipelineParameter().inoreLabel != -1:
+        if PipelineParameter().ignoreLabel != -1:
             mask = gt.read('label_mask_z')
             features = features[mask]
             edge_gt = edge_gt[mask]
 
         assert features.shape[0] == edge_gt.shape[0], "%i , %i" % (features.shape[0], edge_gt.shape[0])
-        classifier = RandomForest(
-            features,
-            edge_gt,
-            n_trees=PipelineParameter().nTrees,
-            max_depth=PipelineParameter().maxDepth,
-            n_threads=PipelineParameter().nThreads
-        )
+        classifier = RandomForest(features,
+                                  edge_gt,
+                                  n_trees=PipelineParameter().nTrees,
+                                  max_depth=PipelineParameter().maxDepth,
+                                  n_threads=PipelineParameter().nThreads)
         classifier.write(str(self.output().path), 'rf_features_z')
 
+    # FIXME defects currently not supported
     def _learn_classifier_from_single_input_defects(self, gt, feature_tasks):
-
         assert PipelineParameter().defectPipeline
         edge_gt = gt.read('edge_gt_skip')
 
@@ -696,15 +669,10 @@ class LearnClassifierFromGt(luigi.Task):
             feat_tasks_i = feature_tasks[i]
             gt_i = gt[i]
 
+            features_i = np.concatenate([feat_task.read((0, 0), feat_task.shape(key='features_xy'), key='features_xy')
+                                         for feat_task in feat_tasks_i if 'features_xy' in feat_task_i.keys()],
+                                        axis=1)
             edge_gt = gt_i.read('edge_gt_xy')
-
-            features_i = []
-            for feat_task in feat_tasks_i:
-                feat_path = os.path.join(feat_task.path, 'features_xy.h5')
-                if os.path.exists(feat_path):
-                    with h5py.File(feat_path) as f:
-                        features_i.append(f['data'][:])
-            features_i = np.concatenate(features_i, axis=1)
 
             if PipelineParameter().ignoreLabel != -1:
                 mask = gt_i.read('label_mask_xy')
@@ -717,13 +685,10 @@ class LearnClassifierFromGt(luigi.Task):
         features = np.concatenate(features, axis=0)
         gts      = np.concatenate(gts)
         assert features.shape[0] == gts.shape[0], str(features.shape[0]) + " , " + str(gts.shape[0])
-        classifier = RandomForest(
-            features,
-            gts,
-            n_trees=PipelineParameter().nTrees,
-            max_depth=PipelineParameter().maxDepth,
-            n_threads=PipelineParameter().nThreads
-        )
+        classifier = RandomForest(features, gts,
+                                  n_trees=PipelineParameter().nTrees,
+                                  max_depth=PipelineParameter().maxDepth,
+                                  n_threads=PipelineParameter().nThreads)
         classifier.write(str(self.output().path), 'rf_features_xy')
 
     def _learn_classifier_from_multiple_inputs_z(self, gt, feature_tasks):
@@ -735,15 +700,10 @@ class LearnClassifierFromGt(luigi.Task):
         for i in range(len(gt)):
             feat_tasks_i = feature_tasks[i]
             gt_i = gt[i]
+            features_i = np.concatenate([feat_task.read((0, 0), feat_task.shape(key='features_z'), key='features_z')
+                                         for feat_task in feat_tasks_i if 'features_z' in feat_task_i.keys()],
+                                        axis=1)
             edge_gt = gt_i.read('edge_gt_z')
-
-            features_i = []
-            for feat_task in feat_tasks_i:
-                feat_path = os.path.join(feat_task.path, 'features_z.h5')
-                if os.path.exists(feat_path):
-                    with h5py.File(feat_path) as f:
-                        features_i.append(f['data'][:])
-            features_i = np.concatenate(features_i, axis=1)
 
             if PipelineParameter().ignoreLabel != -1:
                 mask = gt_i.read('label_mask_z')
@@ -758,13 +718,10 @@ class LearnClassifierFromGt(luigi.Task):
         features = np.concatenate(features, axis=0)
         gts      = np.concatenate(gts)
         assert features.shape[0] == gts.shape[0], str(features.shape[0]) + " , " + str(gts.shape[0])
-        classifier = RandomForest(
-            features,
-            gts,
-            n_trees=PipelineParameter().nTrees,
-            max_depth=PipelineParameter().maxDepth,
-            n_threads=PipelineParameter().nThreads
-        )
+        classifier = RandomForest(features, gts,
+                                  n_trees=PipelineParameter().nTrees,
+                                  max_depth=PipelineParameter().maxDepth,
+                                  n_threads=PipelineParameter().nThreads)
         classifier.write(str(self.output().path), 'rf_features_z')
 
     def _learn_classifier_from_multiple_inputs_all(self, gt, feature_tasks):
@@ -779,20 +736,9 @@ class LearnClassifierFromGt(luigi.Task):
 
             features_i = []
             for feat_task in feature_tasks[i]:
-
-                this_feats = []
-                feat_path_xy = os.path.join(feat_task.path, 'features_xy.h5')
-                assert os.path.exists(feat_path_xy)
-                with h5py.File(feat_path_xy) as f:
-                    this_feats.append(f['data'][:])
-
-                feat_path_z = os.path.join(feat_task.path, 'features_z.h5')
-                assert os.path.exists(feat_path_z)
-                with h5py.File(feat_path_z) as f:
-                    this_feats.append(f['data'][:])
-
-                features_i.append(np.concatenate(this_feats, axis=0))
-
+                features_i.append(np.concatenate([feat_task.read((0, 0), feat_task.shape(key=key), key=key)
+                                                  for key in ('features_xy', 'features_z')],
+                                                axis=1))
             features_i = np.concatenate(features_i, axis=1)
 
             if PipelineParameter().ignoreLabel != -1:
@@ -806,15 +752,13 @@ class LearnClassifierFromGt(luigi.Task):
         features = np.concatenate(features, axis=0)
         gts      = np.concatenate(gts)
         assert features.shape[0] == gts.shape[0], str(features.shape[0]) + " , " + str(gts.shape[0])
-        classifier = RandomForest(
-            features,
-            gts,
-            n_trees=PipelineParameter().nTrees,
-            max_depth=PipelineParameter().maxDepth,
-            n_threads=PipelineParameter().nThreads
-        )
+        classifier = RandomForest(features, gts,
+                                  n_trees=PipelineParameter().nTrees,
+                                  max_depth=PipelineParameter().maxDepth,
+                                  n_threads=PipelineParameter().nThreads)
         classifier.write(str(self.output().path), 'rf_features_joined')
 
+    # FIXME defects currently not supported
     def _learn_classifier_from_multiple_inputs_defects(self, gt, feature_tasks):
         workflow_logger.info("LearnClassifierFromGt: learning classifier for multiple inputs for defects called.")
         assert PipelineParameter().defectPipeline
@@ -850,8 +794,7 @@ class LearnClassifierFromGt(luigi.Task):
         features = np.concatenate(features, axis=0)
         gts      = np.concatenate(gts)
         assert features.shape[0] == gts.shape[0], str(features.shape[0]) + " , " + str(gts.shape[0])
-        classifier = RandomForest(features,
-                                  gts,
+        classifier = RandomForest(features, gts,
                                   n_trees=PipelineParameter().nTrees,
                                   max_depth=PipelineParameter().maxDepth,
                                   n_threads=PipelineParameter().nThreads)

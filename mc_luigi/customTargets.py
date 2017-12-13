@@ -103,6 +103,12 @@ class VolumeTarget(BaseTarget):
     def close(self):
         self._impl.close()
 
+    def keys_on_filesystem(self):
+        return self._impl.keys_on_filesystem()
+
+    def keys(self):
+        return self._impl.keys()
+
     # TODO interface for the offsets once implemented in z5
 
 
@@ -123,6 +129,12 @@ class N5Target(object):
         if self.n5_file is None:
             self._open_file()
         return key in self.n5_file
+
+    def keys_on_filesystem(self):
+        # open the n5 file if it wasn't opened yet
+        if self.n5_file is None:
+            self._open_file()
+        return self.n5_file.keys()
 
     # TODO change compression to blosc as soon as n5 supports it !
     # TODO offset handling, need to implement loading with offsets and offsets in z5
@@ -192,6 +204,10 @@ class N5Target(object):
         assert key in self.datasets, "Can't get chunks for a dataset that has not been opened"
         return self.datasets[key].dtype
 
+    def keys(self):
+        assert self.n5_file is not None, "Need to open the n5 file first"
+        return self.datasets.keys()
+
     # dummy implementation to be consisteny with HDF5Target
     def close(self):
         pass
@@ -242,6 +258,10 @@ class HDF5Target(object):
         with h5py.File(self.path) as f:
             return key in f
 
+    def keys_on_filesystem(self):
+        with h5py.File(self.path) as f:
+            return f.keys()
+
     def open(self, key='data', dtype=None, shape=None, chunks=None, compression='gzip', **compression_opts):
 
         # open the h5 file if it is not exisiting already
@@ -280,38 +300,42 @@ class HDF5Target(object):
         return self
 
     def close(self):
-        assert self.h5_file is not None, "Need to open the n5 file first"
+        assert self.h5_file is not None, "Need to open the h5 file first"
         nh5.closeFile(self.h5_file)
 
     def write(self, start, data, key='data'):
-        assert self.h5_file is not None, "Need to open the n5 file first"
+        assert self.h5_file is not None, "Need to open the h5 file first"
         assert key in self.datasets, "Can't write to a dataset that has not been opened"
         self.datasets[key].writeSubarray(list(start), data)
 
     def read(self, start, stop, key='data'):
-        assert self.h5_file is not None, "Need to open the n5 file first"
+        assert self.h5_file is not None, "Need to open the h5 file first"
         assert key in self.datasets, "Can't read from a dataset that has not been opened"
         return self.datasets[key].readSubarray(list(start), list(stop))
 
     def get(self, key='data'):
-        assert self.h5_file is not None, "Need to open the n5 file first"
+        assert self.h5_file is not None, "Need to open the h5 file first"
         assert key in self.datasets, "Can't get ds impl for a dataset that has not been opened"
         return self.datasets[key]
 
     def shape(self, key='data'):
-        assert self.h5_file is not None, "Need to open the n5 file first"
+        assert self.h5_file is not None, "Need to open the h5 file first"
         assert key in self.datasets, "Can't get shape for a dataset that has not been opened"
         return self.datasets[key].shape
 
     def chunks(self, key='data'):
-        assert self.h5_file is not None, "Need to open the n5 file first"
+        assert self.h5_file is not None, "Need to open the h5 file first"
         assert key in self.datasets, "Can't get chunks for a dataset that has not been opened"
         return self.datasets[key].chunkShape
 
     def dtype(self, key='data'):
-        assert self.h5_file is not None, "Need to open the n5 file first"
+        assert self.h5_file is not None, "Need to open the h5 file first"
         with h5py.File(self.path) as f:
             return f[key].dtype
+
+    def keys(self):
+        assert self.h5_file is not None, "Need to open the h5 file first"
+        return self.datasets.keys()
 
     # add offsets to the nh5 array
     def set_offsets(self, offset_front, offset_back, key='data', serialize_offsets=True):
