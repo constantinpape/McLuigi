@@ -519,7 +519,10 @@ class LearnClassifierFromGt(luigi.Task):
 
         # open all feature tasks
         for feat in feature_tasks:
-            [feat.open(key) for key in feat.keys_on_filesystem()]
+            if isinstance(feat, list):
+                [ff.open(key) for ff in feat for key in ff.keys_on_filesystem()]
+            else:
+                [feat.open(key) for key in feat.keys_on_filesystem()]
 
         n_inputs = len(self.pathsToSeg)
 
