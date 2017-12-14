@@ -44,6 +44,8 @@ class SegmentationWorkflow(luigi.Task):
     pathToClassifier  = luigi.Parameter()
     keyToSeg = luigi.Parameter(default='data')
     dtype = luigi.Parameter(default='uint32')
+    savePath = luigi.Parameter(default=None)
+    saveKey = luigi.Parameter(default='data')
 
     def requires(self):
         raise AttributeError(
@@ -67,7 +69,7 @@ class SegmentationWorkflow(luigi.Task):
             out = self._expand_shape(shape, chunks)
         else:
             out = self.output()
-            out.open('data', shape=shape, chunks=chunks, dtype=self.dtype)
+            out.open(self.saveKey, shape=shape, chunks=chunks, dtype=self.dtype)
 
         workflow_logger.info("SegmentationWorkflow: Projecting node result to segmentation.")
         self._project_result_to_segmentation(rag, mc_nodes, out)
@@ -76,11 +78,11 @@ class SegmentationWorkflow(luigi.Task):
             workflow_logger.info("SegmentationWorkflow: Postprocessing defected slices.")
             self._postprocess_defected_slices(inp, out)
 
-        out.close()
         # FIXME this does not work for some reason
         # if PipelineParameter().haveOffsets:
         #     self._serialize_offsets(out)
         seg.close()
+        out.close()
 
     def _project_result_to_segmentation(self, rag, mc_nodes, out):
         assert mc_nodes.shape[0] == rag.numberOfNodes
@@ -97,13 +99,13 @@ class SegmentationWorkflow(luigi.Task):
             self.dtype = mc_nodes.dtype
         nrag.projectScalarNodeDataToPixels(rag,
                                            mc_nodes,
-                                           out.get(),
+                                           out.get(self.saveKey),
                                            PipelineParameter().nThreads)
 
     def _postprocess_defected_slices(self, inp, out):
 
         defect_slices_path = inp['defect_slices'].path
-        shape = out.shape()
+        shape = out.shape(self.saveKey)
         defected_slices = vigra.readHDF5(defect_slices_path, 'defect_slices')
 
         # we only replace slices if we actually have completely defected slices
@@ -117,7 +119,8 @@ class SegmentationWorkflow(luigi.Task):
             replace_z = replace_slice[z]
             workflow_logger.info("SegmentationWorkflow: replacing defected slice %i by %i" % (z, replace_z))
             out.write([z, 0, 0],
-                      out.read([replace_z, 0, 0], [replace_z + 1, shape[1], shape[2]]))
+                      out.read([replace_z, 0, 0], [replace_z + 1, shape[1], shape[2]]),
+                      key=self.saveKey)
 
     # expand the segmentation by offset !
     def _expand_shape(self, seg_shape, chunks):
@@ -127,7 +130,7 @@ class SegmentationWorkflow(luigi.Task):
         offset_back = PipelineParameter().offsetBack
         assert offset_back is not None
         shape = (np.array(offset_front) + np.array(offset_back) + np.array(seg_shape)).tolist()
-        out.open('data', shape=shape, chunks=chunks, dtype=self.dtype)
+        out.open(self.saveKey, shape=shape, chunks=chunks, dtype=self.dtype)
         out.set_offsets(offset_front, offset_back, serialize_offsets=False)
         return out
 
@@ -155,9 +158,12 @@ class MulticutSegmentation(SegmentationWorkflow):
         return return_tasks
 
     def output(self):
-        save_path = os.path.join(PipelineParameter().cache,
-                                 "MulticutSegmentation_%s.h5" % (
-                                     "modified" if PipelineParameter().defectPipeline else "standard",))
+        if self.savePath is None:
+            save_path = os.path.join(PipelineParameter().cache,
+                                     "MulticutSegmentation_%s.h5" % (
+                                         "modified" if PipelineParameter().defectPipeline else "standard",))
+        else:
+            save_path = self.savePath
         return VolumeTarget(save_path)
 
 
@@ -212,17 +218,20 @@ class BlockwiseStitchingSegmentation(SegmentationWorkflow):
         return return_tasks
 
     def output(self):
-        save_path = os.path.join(
-            PipelineParameter().cache,
-            "BlockwiseStitchingSegmentation_L%i_%s_%s_%s_%.2f" % (
-                self.numberOfLevels,
-                '_'.join(map(str, PipelineParameter().multicutBlockShape)),
-                '_'.join(map(str, PipelineParameter().multicutBlockOverlap)),
-                "modified" if PipelineParameter().defectPipeline else "standard",
-                self.boundaryBias
+        if self.savePath is None:
+            save_path = os.path.join(
+                PipelineParameter().cache,
+                "BlockwiseStitchingSegmentation_L%i_%s_%s_%s_%.2f" % (
+                    self.numberOfLevels,
+                    '_'.join(map(str, PipelineParameter().multicutBlockShape)),
+                    '_'.join(map(str, PipelineParameter().multicutBlockOverlap)),
+                    "modified" if PipelineParameter().defectPipeline else "standard",
+                    self.boundaryBias
+                )
             )
-        )
-        save_path += VolumeTarget.file_ending()
+            save_path += VolumeTarget.file_ending()
+        else:
+            save_path = self.savePath
         return VolumeTarget(save_path)
 
 
