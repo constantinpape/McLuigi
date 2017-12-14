@@ -185,16 +185,19 @@ class BlockwiseMulticutSegmentation(SegmentationWorkflow):
         return return_tasks
 
     def output(self):
-        save_path = os.path.join(
-            PipelineParameter().cache,
-            "BlockwiseMulticutSegmentation_L%i_%s_%s_%s" % (
-                self.numberOfLevels,
-                '_'.join(map(str, PipelineParameter().multicutBlockShape)),
-                '_'.join(map(str, PipelineParameter().multicutBlockOverlap)),
-                "modified" if PipelineParameter().defectPipeline else "standard",
+        if self.savePath is None:
+            save_path = os.path.join(
+                PipelineParameter().cache,
+                "BlockwiseMulticutSegmentation_L%i_%s_%s_%s" % (
+                    self.numberOfLevels,
+                    '_'.join(map(str, PipelineParameter().multicutBlockShape)),
+                    '_'.join(map(str, PipelineParameter().multicutBlockOverlap)),
+                    "modified" if PipelineParameter().defectPipeline else "standard",
+                )
             )
-        )
-        save_path += VolumeTarget.file_ending()
+            save_path += VolumeTarget.file_ending()
+        else:
+            save_path = self.savePath
         return VolumeTarget(save_path)
 
 
