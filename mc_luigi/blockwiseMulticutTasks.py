@@ -108,14 +108,12 @@ class BlockwiseMulticutSolver(BlockwiseSolver):
 
         # we use fm with kl as default backend, because this shows the best scaling behaviour
         solver_type = PipelineParameter().globalSolverType
-        inf_params  = dict(
-            sigma=PipelineParameter().multicutSigmaFusion,
-            number_of_iterations=PipelineParameter().multicutNumIt,
-            n_stop=PipelineParameter().multicutNumItStopGlobal,
-            n_threads=PipelineParameter().multicutNThreadsGlobal,
-            n_fuse=PipelineParameter().multicutNumFuse,
-            seed_fraction=PipelineParameter().multicutSeedFractionGlobal
-        )
+        inf_params  = dict(sigma=PipelineParameter().multicutSigmaFusion,
+                           number_of_iterations=PipelineParameter().multicutNumIt,
+                           n_stop=PipelineParameter().multicutNumItStopGlobal,
+                           n_threads=PipelineParameter().multicutNThreadsGlobal,
+                           n_fuse=PipelineParameter().multicutNumFuse,
+                           seed_fraction=PipelineParameter().multicutSeedFractionGlobal)
 
         workflow_logger.info("BlockwiseMulticutSolver: Solving problems with solver %s" % solver_type)
         workflow_logger.info(
@@ -516,23 +514,23 @@ class BlockwiseSubSolver(luigi.Task):
             return res
 
         # sequential for debugging
-        # subResults = []
-        # for blockId, subProblem in enumerate(sub_problems):
-        #     print "Sequential prediction for block id:", blockId
-        #     subResults.append( _solve_mc( subProblem[2], costs[subProblem[0]], blockId) )
+        # sub_results = []
+        # for block_id, sub_problem in enumerate(sub_problems):
+        #     print("Sequential prediction for block id:", block_id)
+        #     print(type(sub_problem[0]))
+        #     print(sub_problem[0].shape)
+        #     print(sub_problem[0].dtype)
+        #     sub_results.append(_solve_mc(sub_problem[2], costs[sub_problem[0]], block_id))
 
         n_workers = min(len(sub_problems), PipelineParameter().nThreads)
-        # n_workers = 1
         with futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
-            tasks = [executor.submit(
-                _solve_mc,
-                sub_problem[2],
-                costs[sub_problem[0]],
-                block_id) for block_id, sub_problem in enumerate(sub_problems)]
+            tasks = [executor.submit(_solve_mc,
+                     sub_problem[2],
+                     costs[sub_problem[0]],
+                     block_id) for block_id, sub_problem in enumerate(sub_problems)]
         sub_results = [task.result() for task in tasks]
 
         cut_edges = np.zeros(number_of_edges, dtype=np.uint8)
-
         assert len(sub_results) == len(sub_problems), str(len(sub_results)) + " , " + str(len(sub_problems))
 
         for block_id in range(len(sub_problems)):

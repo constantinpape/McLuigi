@@ -47,7 +47,7 @@ class NodesToBlocks(luigi.Task):
 
         inp = self.input()
         seg = inp["seg"]
-        seg.open()
+        seg.open(self.keyToSeg)
 
         # if we have defects, we need to skip the completly defected slices in the node extraction,
         # because nodes inside them are completely excluded from the graph now
@@ -73,6 +73,7 @@ class NodesToBlocks(luigi.Task):
 
         block_result = [np.array(b_res, dtype=self.dtype) for b_res in block_result]
         self.output().writeVlen(block_result)
+        seg.close()
 
     def output(self):
         block_string = '_'.join(map(str, self.blockShape))

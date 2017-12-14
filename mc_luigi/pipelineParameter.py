@@ -137,7 +137,7 @@ class PipelineParameter(object, metaclass=Singleton):
             with open(input_file, 'r') as f:
                 inp_dict = json.load(f)
         else:
-            assert isinstance(inp_dict, dict)
+            assert isinstance(input_file, dict)
             inp_dict = input_file
 
         self.cache  = inp_dict['cache']
