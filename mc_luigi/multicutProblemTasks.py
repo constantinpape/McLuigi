@@ -215,13 +215,6 @@ class MulticutProblem(luigi.Task):
         # transform edge costs to probabilities
         edge_costs = self._probabilities_to_costs(edge_costs)
 
-        # set edges that connect to an ignore label to be max repulsive
-        ignore_label = PipelineParameter().ignoreLabel
-        if ignore_label != -1:
-            max_repulsive = 10 * edge_costs.min()  # TODO TODO TODO is this correct ?
-            ignore_mask = (uv_ids == ignore_label).any(axis=1)
-            edge_costs[ignore_mask] = max_repulsive
-
         assert edge_costs.shape[0] == uv_ids.shape[0]
         assert np.isfinite(edge_costs.min()), str(edge_costs.min())
         assert np.isfinite(edge_costs.max()), str(edge_costs.max())

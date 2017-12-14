@@ -57,14 +57,12 @@ class McSolverFusionMoves(luigi.Task):
 
         solver_type = PipelineParameter().globalSolverType
         if solver_type in ('fm-ilp', 'fm-kl'):
-            solver_params  = dict(
-                sigma=PipelineParameter().multicutSigmaFusion,
-                number_of_iterations=PipelineParameter().multicutNumIt,
-                n_stop=PipelineParameter().multicutNumItStopGlobal,
-                n_threads=PipelineParameter().multicutNThreadsGlobal,
-                n_fuse=PipelineParameter().multicutNumFuse,
-                seed_fraction=PipelineParameter().multicutSeedFractionGlobal
-            )
+            solver_params  = dict(sigma=PipelineParameter().multicutSigmaFusion,
+                                  number_of_iterations=PipelineParameter().multicutNumIt,
+                                  n_stop=PipelineParameter().multicutNumItStopGlobal,
+                                  n_threads=PipelineParameter().multicutNThreadsGlobal,
+                                  n_fuse=PipelineParameter().multicutNumFuse,
+                                  seed_fraction=PipelineParameter().multicutSeedFractionGlobal)
 
         else:
             solver_params = dict()

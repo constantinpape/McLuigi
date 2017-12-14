@@ -88,8 +88,10 @@ class SegmentationWorkflow(luigi.Task):
                                                            start_label=1,
                                                            keep_zeros=False)
         # if we have an ignore label, set it's node value to zero
-        if PipelineParameter().ignoreLabel != -1:
-            mc_nodes[PipelineParameter().ignoreLabel] = 0
+        if PipelineParameter().ignoreSegLabel != -1:
+            workflow_logger.info("SegmentationWorkflow: Setting node values for ignore seg value: %i to 0."
+                                 % PipelineParameter().ignoreSegLabel)
+            mc_nodes[PipelineParameter().ignoreSegLabel] = 0
 
         if np.dtype(self.dtype) != np.dtype(mc_nodes.dtype):
             self.dtype = mc_nodes.dtype

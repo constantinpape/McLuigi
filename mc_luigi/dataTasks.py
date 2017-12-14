@@ -249,22 +249,22 @@ class ExternalSegmentation(luigi.Task):
     path = luigi.Parameter()
 
     # if the path does not exist, run the watershed on distance transform segmentation
-    def requires(self):
-        if not os.path.exists(self.path):
+    # def requires(self):
+    #     if not os.path.exists(self.path):
 
-            # find the corresponding affinity maps from the inputs
-            aff_prefix = os.path.split(self.path)[1].split('_')[1:]
-            aff_prefix = '_'.join(aff_prefix)
-            inputs = PipelineParameter().inputs['data']
-            found_aff = False
-            for in_path in inputs:
-                if os.path.split(in_path)[1] == aff_prefix:
-                    aff_path = in_path
-                    found_aff = True
-                    break
-            if not found_aff:
-                raise RuntimeError("Couldn't find affinty path for requested wsdt segmentation: %s" % self.path)
-            return WsdtSegmentation(aff_path)
+    #         # find the corresponding affinity maps from the inputs
+    #         aff_prefix = os.path.split(self.path)[1].split('_')[1:]
+    #         aff_prefix = '_'.join(aff_prefix)
+    #         inputs = PipelineParameter().inputs['data']
+    #         found_aff = False
+    #         for in_path in inputs:
+    #             if os.path.split(in_path)[1] == aff_prefix:
+    #                 aff_path = in_path
+    #                 found_aff = True
+    #                 break
+    #         if not found_aff:
+    #             raise RuntimeError("Couldn't find affinty path for requested wsdt segmentation: %s" % self.path)
+    #         return WsdtSegmentation(aff_path)
 
     def output(self):
         """
@@ -420,7 +420,7 @@ class StackedRegionAdjacencyGraph(luigi.Task):
                           dtype=seg.dtype(self.keyToSeg),
                           numberOfLabels=n_labels,
                           numberOfThreads=PipelineParameter().nThreads,
-                          ignoreLabel=PipelineParameter().ignoreLabel)
+                          ignoreLabel=PipelineParameter().ignoreSegLabel)
 
         self.output().write(rag, self.pathToSeg, self.keyToSeg)
 

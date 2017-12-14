@@ -64,8 +64,10 @@ class PipelineParameter(object, metaclass=Singleton):
         self.netArchitecturePath = ''
         self.netGpuId = 0  # id of gpu to be used
 
-        # ignore label for edge groundtruth
-        self.ignoreLabel = -1
+        # igonore label for segment ids
+        self.ignoreSegLabel = -1
+        # ignore label for groundtruth ids
+        self.ignoreGtLabel = -1
 
         # number of threads
         self.nThreads = multiprocessing.cpu_count()

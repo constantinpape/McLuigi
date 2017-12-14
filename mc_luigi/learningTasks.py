@@ -418,7 +418,7 @@ class EdgeGroundtruth(luigi.Task):
         u_gt, v_gt = self._compute_edge_gt(gt, rag, uv_ids, has_defects, inp, out)
 
         # check if we have an ignore label in the groundtruth and mask the labels accordingly
-        if PipelineParameter().ignoreLabel != -1:
+        if PipelineParameter().ignoreGtLabel != -1:
             self._compute_label_masks(u_gt, v_gt, rag, has_defects, inp, out)
 
         gt.close()
@@ -451,7 +451,7 @@ class EdgeGroundtruth(luigi.Task):
 
     def _compute_label_masks(self, u_gt, v_gt, rag, has_defects, inp, out):
 
-        ignore_label = PipelineParameter().ignoreLabel
+        ignore_label = PipelineParameter().ignoreGtLabel
         assert ignore_label != -1
         label_mask = np.logical_not(
             np.logical_or((u_gt == ignore_label), (v_gt == ignore_label))
@@ -557,7 +557,7 @@ class LearnClassifierFromGt(luigi.Task):
             edge_gt = gt.read('edge_gt')
 
             # if we have an ignore mask, mask the features and labels for which we don't have a label
-            if PipelineParameter().ignoreLabel != -1:
+            if PipelineParameter().ignoreGtLabel != -1:
                 mask = gt.read('label_mask')
                 features = features[mask]
                 edge_gt = edge_gt[mask]
@@ -583,7 +583,7 @@ class LearnClassifierFromGt(luigi.Task):
                                    for feat_task in feature_tasks if 'features_xy' in feat_task.keys()],
                                   axis=1)
 
-        if PipelineParameter().ignoreLabel != -1:
+        if PipelineParameter().ignoreGtLabel != -1:
             mask = gt.read('label_mask_xy')
             features = features[mask]
             edge_gt = edge_gt[mask]
@@ -603,7 +603,7 @@ class LearnClassifierFromGt(luigi.Task):
                                    for feat_task in feature_tasks if 'features_z' in feat_task.keys()],
                                   axis=1)
 
-        if PipelineParameter().ignoreLabel != -1:
+        if PipelineParameter().ignoreGtLabel != -1:
             mask = gt.read('label_mask_z')
             features = features[mask]
             edge_gt = edge_gt[mask]
@@ -629,7 +629,7 @@ class LearnClassifierFromGt(luigi.Task):
                     features.append(f['data'][:])
         features = np.concatenate(features, axis=1)
 
-        if PipelineParameter().ignoreLabel != -1:
+        if PipelineParameter().ignoreGtLabel != -1:
             mask = gt.read('label_mask_skip')
             features = features[mask]
             edge_gt = edge_gt[mask]
@@ -679,7 +679,7 @@ class LearnClassifierFromGt(luigi.Task):
                                         axis=1)
             edge_gt = gt_i.read('edge_gt_xy')
 
-            if PipelineParameter().ignoreLabel != -1:
+            if PipelineParameter().ignoreGtLabel != -1:
                 mask = gt_i.read('label_mask_xy')
                 features_i = features_i[mask]
                 edge_gt = edge_gt[mask]
@@ -710,7 +710,7 @@ class LearnClassifierFromGt(luigi.Task):
                                         axis=1)
             edge_gt = gt_i.read('edge_gt_z')
 
-            if PipelineParameter().ignoreLabel != -1:
+            if PipelineParameter().ignoreGtLabel != -1:
                 mask = gt_i.read('label_mask_z')
                 assert len(mask) == len(features_i), "%s, %s" % (str(mask.shape), str(features_i.shape))
                 assert len(mask) == len(edge_gt), "%s, %s" % (str(mask.shape), str(edge_gt.shape))
@@ -746,7 +746,7 @@ class LearnClassifierFromGt(luigi.Task):
                                                  axis=1))
             features_i = np.concatenate(features_i, axis=1)
 
-            if PipelineParameter().ignoreLabel != -1:
+            if PipelineParameter().ignoreGtLabel != -1:
                 mask = gt_i.read('label_mask')
                 features_i = features_i[mask]
                 edge_gt = edge_gt[mask]
@@ -788,7 +788,7 @@ class LearnClassifierFromGt(luigi.Task):
                         features_i.append(f['data'][:])
             features_i = np.concatenate(features_i, axis=1)
 
-            if PipelineParameter().ignoreLabel != -1:
+            if PipelineParameter().ignoreGtLabel != -1:
                 mask = gt_i.read('label_mask_skip')
                 features_i = features_i[mask]
                 edge_gt = edge_gt[mask]
