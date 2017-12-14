@@ -371,8 +371,13 @@ class HDF5DataTarget(BaseTarget):
     def __init__(self, path):
         super(HDF5DataTarget, self).__init__(path)
 
-    def open(self):
-        raise AttributeError("Not implemented")
+    def open(self, shape, dtype, compression=None, chunks=None, key='data'):
+        with h5py.File(self.path) as f:
+            f.create_dataset(key,
+                             shape=shape,
+                             compression=compression,
+                             chunks=chunks,
+                             dtype=dtype)
 
     def write(self, data, key="data", compression=None):
         self.makedirs()
@@ -394,6 +399,11 @@ class HDF5DataTarget(BaseTarget):
         with h5py.File(self.path) as f:
             shape = f[key].shape
         return shape
+
+    def writeSubarray(self, start, data, key="data"):
+        bb = tuple(slice(sta, sta + sha) for sta, sha in zip(start, data.shape))
+        with h5py.File(self.path) as f:
+            f[key][bb] = data
 
 
 class PickleTarget(BaseTarget):

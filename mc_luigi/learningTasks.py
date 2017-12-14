@@ -196,17 +196,21 @@ class EdgeProbabilities(luigi.Task):
 
         # we choose the chunk size according to n_feature chunks if we predict out of core
         # otherwise we just set it to a default value
-        if PipelineParameter().nFeatureChunks > 1:
-            chunk_size = n_edges // PipelineParameter().nFeatureChunks
+        n_feat_chunks = PipelineParameter().nFeatureChunks
+        if n_feat_chunks > 1:
+            if PipelineParameter().separateEdgeClassification:
+                n_edges_xy = inp['rag'].readKey('totalNumberOfInSliceEdges')
+                n_edges_z = inp['rag'].readKey('totalNumberOfInBetweenSliceEdges')
+                chunk_size = min(n_edges_xy, n_edges_z) // n_feat_chunks
+            else:
+                chunk_size = n_edges // n_feat_chunks
         else:
             chunk_size = 64**3
         workflow_logger.info("EdgeProbabilities: Opening out file with chunks %i" % chunk_size)
 
         out = self.output()
-        # FIXME 1D gzip compression is broken ?!
-        out.open('data', shape=(n_edges,), chunks=(chunk_size,), dtype='float32', compression='raw')
+        out.open(key='data', shape=(n_edges,), chunks=(chunk_size,), dtype='float32')
         self._predict(feature_tasks, out)
-        out.close()
 
     def _predict(self, feature_tasks, out):
         inp = self.input()
@@ -327,7 +331,7 @@ class EdgeProbabilities(luigi.Task):
             "Number of input and rf features do not match for %s: %i, %i" % (
                 feat_type, features.shape[1], classifier.n_features)
         probs = classifier.predict_probabilities(features, PipelineParameter().nThreads)[:, 1]
-        out.write([start], probs.astype('float32', copy=False))
+        out.writeSubarray((start,), probs.astype('float32', copy=False))
 
     # Out of core prediction for edge type
     def _predict_out_of_core(self,
@@ -359,7 +363,7 @@ class EdgeProbabilities(luigi.Task):
             read_start = start_index + start
 
             probs = classifier.predict_probabilities(sub_feats, 1)[:, 1]
-            out.write((read_start,), probs.astype('float32', copy=False))
+            out.writeSubarray((read_start,), probs.astype('float32', copy=False))
 
         n_workers = PipelineParameter().nThreads
         # n_workers = 1
@@ -370,13 +374,12 @@ class EdgeProbabilities(luigi.Task):
     def output(self):
         save_path = os.path.join(
             PipelineParameter().cache,
-            "EdgeProbabilities%s_%s" % (
+            "EdgeProbabilities%s_%s.h5" % (
                 "Separate" if PipelineParameter().separateEdgeClassification else "Joint",
                 "modified" if PipelineParameter().defectPipeline else "standard"
             )
         )
-        save_path += VolumeTarget.file_ending()
-        return VolumeTarget(save_path)
+        return HDF5DataTarget(save_path)
 
 
 # TODO fuzzy mapping in nifty ?!
