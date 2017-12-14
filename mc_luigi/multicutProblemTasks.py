@@ -39,13 +39,17 @@ class MulticutProblem(luigi.Task):
     # this can either contain a single path (classifier trained for xy - and z - edges jointly)
     # or two paths (classfier trained for xy - edges + classifier trained for z - edges separately)
     pathsToClassifier  = luigi.Parameter()
+    keyToSeg = luigi.Parameter(default='data')
 
     def requires(self):
-        return_tasks = {
-            "edge_probabilities": EdgeProbabilities(self.pathToSeg, self.pathsToClassifier),
-            "rag": StackedRegionAdjacencyGraph(self.pathToSeg)
-        }
+        return_tasks = {"edge_probabilities": EdgeProbabilities(self.pathToSeg,
+                                                                self.pathsToClassifier,
+                                                                self.keyToSeg),
+                        "rag": StackedRegionAdjacencyGraph(self.pathToSeg,
+                                                           self.keyToSeg)}
+        # TODO these should also take the key to seg !
         if PipelineParameter().defectPipeline:
+            assert False, "Defect mode is currently not supported !"
             return_tasks['modified_adjacency'] = ModifiedAdjacency(self.pathToSeg)
             return_tasks['skip_edge_lengths']  = SkipEdgeLengths(self.pathToSeg)
         return return_tasks

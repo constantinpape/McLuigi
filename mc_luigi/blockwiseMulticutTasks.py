@@ -40,6 +40,7 @@ class BlockwiseSolver(luigi.Task):
     pathToSeg = luigi.Parameter()
     globalProblem  = luigi.TaskParameter()
     numberOfLevels = luigi.Parameter()
+    keyToSeg = luigi.Parameter(default='data')
 
     def requires(self):
         # block size in first hierarchy level
@@ -50,13 +51,15 @@ class BlockwiseSolver(luigi.Task):
         problems = [self.globalProblem]
         block_factor = 1
 
-        for l in range(self.numberOfLevels):
-            block_shape = list(map(lambda x: x * block_factor, initialBlockShape))
-
+        for level in range(self.numberOfLevels):
             # TODO check that we don't get larger than the actual shape here
-            problems.append(
-                ReducedProblem(self.pathToSeg, problems[-1], block_shape, block_overlap, l)
-            )
+            block_shape = list(map(lambda x: x * block_factor, initialBlockShape))
+            problems.append(ReducedProblem(pathToSeg=self.pathToSeg,
+                                           problem=problems[-1],
+                                           blockShape=block_shape,
+                                           blockOverlap=block_overlap,
+                                           level=level,
+                                           keyToSeg=self.keyToSeg))
             block_factor *= 2
 
         return problems
@@ -176,14 +179,16 @@ class ReducedProblem(luigi.Task):
     blockOverlap = luigi.ListParameter()
 
     level = luigi.Parameter()
+    keyToSeg = luigi.Parameter(default='data')
 
     def requires(self):
-        return {
-            "sub_solution": BlockwiseSubSolver(
-                self.pathToSeg, self.problem, self.blockShape, self.blockOverlap, self.level
-            ),
-            "problem": self.problem
-        }
+        return {"sub_solution": BlockwiseSubSolver(pathToSeg=self.pathToSeg,
+                                                   problem=self.problem,
+                                                   blockShape=self.blockShape,
+                                                   blockOverlap=self.blockOverlap,
+                                                   level=self.level,
+                                                   keyToSeg=self.keyToSeg),
+                "problem": self.problem}
 
     # TODO we need to recover the edges between blocks for the stitching solver
     @run_decorator
@@ -222,13 +227,11 @@ class ReducedProblem(luigi.Task):
 
         t_edges = time.time()
         # find new edges and costs
-        uv_ids_new = self.find_new_edges_and_costs(
-            uv_ids,
-            problem,
-            cut_edges,
-            number_of_new_nodes,
-            old2new_nodes
-        )
+        uv_ids_new = self.find_new_edges_and_costs(uv_ids,
+                                                   problem,
+                                                   cut_edges,
+                                                   number_of_new_nodes,
+                                                   old2new_nodes)
         workflow_logger.info("ReducedProblem: Computing new edges took: %f s" % (time.time() - t_edges))
 
         # serialize the node converter
@@ -239,14 +242,12 @@ class ReducedProblem(luigi.Task):
         workflow_logger.info("ReucedProblem: Nodes: From %i to %i" % (g.numberOfNodes, number_of_new_nodes))
         workflow_logger.info("ReucedProblem: Edges: From %i to %i" % (g.numberOfEdges, len(uv_ids_new)))
 
-    def find_new_edges_and_costs(
-        self,
-        uv_ids,
-        problem,
-        cut_edges,
-        number_of_new_nodes,
-        old2new_nodes
-    ):
+    def find_new_edges_and_costs(self,
+                                 uv_ids,
+                                 problem,
+                                 cut_edges,
+                                 number_of_new_nodes,
+                                 old2new_nodes):
 
         # find mapping from new to old edges with nifty impl
         edge_mapping = nifty.tools.EdgeMapping(len(uv_ids))
@@ -331,24 +332,32 @@ class BlockwiseSubSolver(luigi.Task):
 
     level = luigi.Parameter()
     # needs to be true if we want to use the stitching - by overlap solver
-    serializeSubResults = luigi.Parameter(default=True)
+    serializeSubResults = luigi.Parameter(default=False)
+
     # will outer edges be cut ?
     # should be left at true, because results seem to degraded if false
     cutOuterEdges = luigi.Parameter(default=True)
+
+    keyToSeg = luigi.Parameter(default='data')
 
     def requires(self):
         initialShape = PipelineParameter().multicutBlockShape
         overlap      = PipelineParameter().multicutBlockOverlap
 
-        nodes2blocks = NodesToBlocks(self.pathToSeg, initialShape, overlap)
-        return {"seg": ExternalSegmentation(self.pathToSeg), "problem": self.problem, "nodes2blocks": nodes2blocks}
+        nodes2blocks = NodesToBlocks(self.pathToSeg,
+                                     initialShape,
+                                     overlap,
+                                     keyToSeg=self.keyToSeg)
+        return {"seg": ExternalSegmentation(self.pathToSeg),
+                "problem": self.problem,
+                "nodes2blocks": nodes2blocks}
 
     @run_decorator
     def run(self):
         # Input
         inp = self.input()
         seg = inp["seg"]
-        seg.open()
+        seg.open(self.keyToSeg)
         problem = inp["problem"]
         costs = problem.read("costs")
         nodes2blocks = inp["nodes2blocks"].read()
@@ -382,7 +391,7 @@ class BlockwiseSubSolver(luigi.Task):
         initial_overlap = list(PipelineParameter().multicutBlockOverlap)
         initial_blocking = nifty.tools.blocking(
             roiBegin=[0, 0, 0],
-            roiEnd=seg.shape(),
+            roiEnd=seg.shape(key=self.keyToSeg),
             blockShape=initial_block_shape
         )
         workflow_logger.info(
@@ -403,7 +412,9 @@ class BlockwiseSubSolver(luigi.Task):
             return np.array(inner_edges), np.array(outer_edges), subgraph, node_list
 
         block_overlap = list(self.blockOverlap)
-        blocking = nifty.tools.blocking(roiBegin=[0, 0, 0], roiEnd=seg.shape(), blockShape=self.blockShape)
+        blocking = nifty.tools.blocking(roiBegin=[0, 0, 0],
+                                        roiEnd=seg.shape(key=self.keyToSeg),
+                                        blockShape=self.blockShape)
         number_of_blocks = blocking.numberOfBlocks
 
         workflow_logger.info(

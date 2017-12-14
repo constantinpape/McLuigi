@@ -281,8 +281,10 @@ class EdgeFeatures(luigi.Task):
 
     # input over which filters are calculated and features accumulated
     pathToInput = luigi.Parameter()
+    keyToInput = luigi.Parameter(default='data')
     # current oversegmentation
     pathToSeg = luigi.Parameter()
+    keyToSeg = luigi.Parameter(default='data')
 
     # optional parameters
     keepOnlyXY = luigi.BoolParameter(default=False)
@@ -300,7 +302,7 @@ class EdgeFeatures(luigi.Task):
     # sigmas = luigi.ListParameter(default = [1.6, 4.2, 8.3] )
 
     def requires(self):
-        required_tasks = {'rag': StackedRegionAdjacencyGraph(self.pathToSeg),
+        required_tasks = {'rag': StackedRegionAdjacencyGraph(self.pathToSeg, self.keyToSeg),
                           'data': InputData(self.pathToInput)}
         if PipelineParameter().defectPipeline:
             required_tasks['modified_adjacency'] = ModifiedAdjacency(self.pathToSeg)
@@ -313,8 +315,8 @@ class EdgeFeatures(luigi.Task):
         inp = self.input()
         rag = inp['rag'].read()
         data_file = inp['data']
-        data_file.open()
-        data = data_file.get()
+        data_file.open(self.keyToInput)
+        data = data_file.get(self.keyToInput)
 
         out = self.output()
         if not os.path.exists(out.path):

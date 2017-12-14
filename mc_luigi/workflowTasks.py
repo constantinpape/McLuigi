@@ -42,6 +42,7 @@ class SegmentationWorkflow(luigi.Task):
 
     pathToSeg = luigi.Parameter()
     pathToClassifier  = luigi.Parameter()
+    keyToSeg = luigi.Parameter(default='data')
     dtype = luigi.Parameter(default='uint32')
 
     def requires(self):
@@ -58,8 +59,8 @@ class SegmentationWorkflow(luigi.Task):
         mc_nodes = inp["mc_nodes"].read().astype(self.dtype, copy=False)
         seg = inp["seg"]
 
-        seg.open()
-        shape = seg.shape()
+        seg.open(self.keyToSeg)
+        shape = seg.shape(self.keyToSeg)
 
         chunks = (1, min(1024, shape[1]), min(1024, shape[2]))
         if PipelineParameter().haveOffsets:
@@ -135,7 +136,7 @@ class SegmentationWorkflow(luigi.Task):
 
     def output(self):
         raise AttributeError(
-            "SegmentationWorkflow should never be called, \
+            "SegmentationWorkflow should not be called, \
             call MulticutSegmentation or BlockwiseMulticutSegmentation instead!"
         )
 
@@ -143,11 +144,10 @@ class SegmentationWorkflow(luigi.Task):
 class MulticutSegmentation(SegmentationWorkflow):
 
     def requires(self):
-        return_tasks = {
-            "mc_nodes": McSolverFusionMoves(MulticutProblem(self.pathToSeg, self.pathToClassifier)),
-            "rag": StackedRegionAdjacencyGraph(self.pathToSeg),
-            "seg": ExternalSegmentation(self.pathToSeg)
-        }
+        return_tasks = {"mc_nodes": McSolverFusionMoves(MulticutProblem(self.pathToSeg,
+                                                                        self.pathToClassifier)),
+                        "rag": StackedRegionAdjacencyGraph(self.pathToSeg),
+                        "seg": ExternalSegmentation(self.pathToSeg)}
         if PipelineParameter().defectPipeline:
             return_tasks["defect_slices"] = DefectsToNodes(self.pathToSeg)
         return return_tasks
@@ -164,15 +164,14 @@ class BlockwiseMulticutSegmentation(SegmentationWorkflow):
     numberOfLevels = luigi.IntParameter(default=1)
 
     def requires(self):
-        return_tasks = {
-            "mc_nodes": BlockwiseMulticutSolver(
-                self.pathToSeg,
-                MulticutProblem(self.pathToSeg, self.pathToClassifier),
-                self.numberOfLevels
-            ),
-            "rag": StackedRegionAdjacencyGraph(self.pathToSeg),
-            "seg": ExternalSegmentation(self.pathToSeg)
-        }
+        return_tasks = {"mc_nodes": BlockwiseMulticutSolver(self.pathToSeg,
+                                                            MulticutProblem(self.pathToSeg,
+                                                                            self.pathToClassifier,
+                                                                            keyToSeg=self.keyToSeg),
+                                                            self.numberOfLevels,
+                                                            keyToSeg=self.keyToSeg),
+                        "rag": StackedRegionAdjacencyGraph(self.pathToSeg, self.keyToSeg),
+                        "seg": ExternalSegmentation(self.pathToSeg)}
         if PipelineParameter().defectPipeline:
             return_tasks["defect_slices"] = DefectsToNodes(self.pathToSeg)
         return return_tasks
@@ -180,13 +179,14 @@ class BlockwiseMulticutSegmentation(SegmentationWorkflow):
     def output(self):
         save_path = os.path.join(
             PipelineParameter().cache,
-            "BlockwiseMulticutSegmentation_L%i_%s_%s_%s.h5" % (
+            "BlockwiseMulticutSegmentation_L%i_%s_%s_%s" % (
                 self.numberOfLevels,
                 '_'.join(map(str, PipelineParameter().multicutBlockShape)),
                 '_'.join(map(str, PipelineParameter().multicutBlockOverlap)),
                 "modified" if PipelineParameter().defectPipeline else "standard",
             )
         )
+        save_path += VolumeTarget.file_ending()
         return VolumeTarget(save_path)
 
 
@@ -196,16 +196,15 @@ class BlockwiseStitchingSegmentation(SegmentationWorkflow):
     boundaryBias = luigi.FloatParameter(default=.5)
 
     def requires(self):
-        return_tasks = {
-            "mc_nodes": BlockwiseStitchingSolver(
-                self.pathToSeg,
-                MulticutProblem(self.pathToSeg, self.pathToClassifier),
-                self.numberOfLevels,
-                self.boundaryBias
-            ),
-            "rag": StackedRegionAdjacencyGraph(self.pathToSeg),
-            "seg": ExternalSegmentation(self.pathToSeg)
-        }
+        return_tasks = {"mc_nodes": BlockwiseStitchingSolver(self.pathToSeg,
+                                                             MulticutProblem(self.pathToSeg,
+                                                                             self.pathToClassifier,
+                                                                             keyToSeg=self.keyToSeg),
+                                                             self.numberOfLevels,
+                                                             boundaryBia=self.boundaryBias,
+                                                             keyToSeg=self.keyToSeg),
+                        "rag": StackedRegionAdjacencyGraph(self.pathToSeg, self.keyToSeg),
+                        "seg": ExternalSegmentation(self.pathToSeg)}
         if PipelineParameter().defectPipeline:
             return_tasks["defect_slices"] = DefectsToNodes(self.pathToSeg)
         return return_tasks
@@ -213,7 +212,7 @@ class BlockwiseStitchingSegmentation(SegmentationWorkflow):
     def output(self):
         save_path = os.path.join(
             PipelineParameter().cache,
-            "BlockwiseStitchingSegmentation_L%i_%s_%s_%s_%.2f.h5" % (
+            "BlockwiseStitchingSegmentation_L%i_%s_%s_%s_%.2f" % (
                 self.numberOfLevels,
                 '_'.join(map(str, PipelineParameter().multicutBlockShape)),
                 '_'.join(map(str, PipelineParameter().multicutBlockOverlap)),
@@ -221,6 +220,7 @@ class BlockwiseStitchingSegmentation(SegmentationWorkflow):
                 self.boundaryBias
             )
         )
+        save_path += VolumeTarget.file_ending()
         return VolumeTarget(save_path)
 
 
@@ -229,15 +229,13 @@ class BlockwiseMulticutStitchingSegmentation(SegmentationWorkflow):
     numberOfLevels = luigi.IntParameter(default=1)
 
     def requires(self):
-        return_tasks = {
-            "mc_nodes": BlockwiseMulticutStitchingSolver(
-                self.pathToSeg,
-                MulticutProblem(self.pathToSeg, self.pathToClassifier),
-                self.numberOfLevels
-            ),
-            "rag": StackedRegionAdjacencyGraph(self.pathToSeg),
-            "seg": ExternalSegmentation(self.pathToSeg)
-        }
+        return_tasks = {"mc_nodes": BlockwiseMulticutStitchingSolver(self.pathToSeg,
+                                                                     MulticutProblem(self.pathToSeg,
+                                                                                     self.pathToClassifier,
+                                                                                     keyToSeg=self.keyToSeg),
+                                                                     self.numberOfLevels),
+                        "rag": StackedRegionAdjacencyGraph(self.pathToSeg, self.keyToSeg),
+                        "seg": ExternalSegmentation(self.pathToSeg)}
         if PipelineParameter().defectPipeline:
             return_tasks["defect_slices"] = DefectsToNodes(self.pathToSeg)
         return return_tasks
@@ -245,13 +243,14 @@ class BlockwiseMulticutStitchingSegmentation(SegmentationWorkflow):
     def output(self):
         save_path = os.path.join(
             PipelineParameter().cache,
-            "BlockwiseMulticutStitchingSegmentation_L%i_%s_%s_%s.h5" % (
+            "BlockwiseMulticutStitchingSegmentation_L%i_%s_%s_%s" % (
                 self.numberOfLevels,
                 '_'.join(map(str, PipelineParameter().multicutBlockShape)),
                 '_'.join(map(str, PipelineParameter().multicutBlockOverlap)),
                 "modified" if PipelineParameter().defectPipeline else "standard",
             )
         )
+        save_path += VolumeTarget.file_ending()
         return VolumeTarget(save_path)
 
 
@@ -260,15 +259,13 @@ class BlockwiseOverlapSegmentation(SegmentationWorkflow):
     numberOfLevels = luigi.IntParameter(default=1)
 
     def requires(self):
-        return_tasks = {
-            "mc_nodes": BlockwiseOverlapSolver(
-                self.pathToSeg,
-                MulticutProblem(self.pathToSeg, self.pathToClassifier),
-                self.numberOfLevels
-            ),
-            "rag": StackedRegionAdjacencyGraph(self.pathToSeg),
-            "seg": ExternalSegmentation(self.pathToSeg)
-        }
+        return_tasks = {"mc_nodes": BlockwiseOverlapSolver(self.pathToSeg,
+                                                           MulticutProblem(self.pathToSeg,
+                                                                           self.pathToClassifier,
+                                                                           keyToSeg=self.keyToSeg),
+                                                           self.numberOfLevels),
+                        "rag": StackedRegionAdjacencyGraph(self.pathToSeg, self.keyToSeg),
+                        "seg": ExternalSegmentation(self.pathToSeg)}
         if PipelineParameter().defectPipeline:
             return_tasks["defect_slices"] = DefectsToNodes(self.pathToSeg)
         return return_tasks
@@ -276,7 +273,7 @@ class BlockwiseOverlapSegmentation(SegmentationWorkflow):
     def output(self):
         save_path = os.path.join(
             PipelineParameter().cache,
-            "BlockwiseOverlapSegmentation_L%i_%s_%s_%s_%.2f.h5" % (
+            "BlockwiseOverlapSegmentation_L%i_%s_%s_%s_%.2f" % (
                 self.numberOfLevels,
                 '_'.join(map(str, PipelineParameter().multicutBlockShape)),
                 '_'.join(map(str, PipelineParameter().multicutBlockOverlap)),
@@ -284,6 +281,7 @@ class BlockwiseOverlapSegmentation(SegmentationWorkflow):
                 PipelineParameter().overlapThreshold
             )
         )
+        save_path += VolumeTarget.file_ending()
         return VolumeTarget(save_path)
 
 

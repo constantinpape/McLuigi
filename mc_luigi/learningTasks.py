@@ -162,10 +162,11 @@ class EdgeProbabilities(luigi.Task):
 
     pathToSeg        = luigi.Parameter()
     pathToClassifier = luigi.Parameter()
+    keyToSeg = luigi.Parameter(default='data')
 
     def requires(self):
         return_tasks = {"features": get_local_features(),
-                        "rag": StackedRegionAdjacencyGraph(self.pathToSeg)}
+                        "rag": StackedRegionAdjacencyGraph(self.pathToSeg, self.keyToSeg)}
         if PipelineParameter().defectPipeline:
             return_tasks['modified_adjacency'] = ModifiedAdjacency(self.pathToSeg)
         return return_tasks

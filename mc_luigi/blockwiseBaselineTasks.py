@@ -12,8 +12,8 @@ from .defectHandlingTasks import DefectsToNodes
 from .blocking_helper import EdgesBetweenBlocks, BlockGridGraph
 from .blockwiseMulticutTasks import BlockwiseSolver, BlockwiseSubSolver
 
-from .nifty_helper import run_nifty_solver, string_to_factory
-from .tools import config_logger, run_decorator, get_replace_slices, replace_from_dict
+from .nifty_helper import string_to_factory
+from .tools import config_logger, run_decorator, get_replace_slices
 
 import os
 import logging
@@ -56,24 +56,19 @@ class SubblockSegmentations(BlockwiseSolver):
 
         # block size in first hierarchy level
         block_factor = (self.numberOfLevels - 1) * 2 if self.numberOfLevels > 1 else 1
-        block_shape = map(
-            lambda x: x * block_factor,
-            PipelineParameter().multicutBlockShape
-        )
+        block_shape = map(lambda x: x * block_factor,
+                          PipelineParameter().multicutBlockShape)
         block_overlap = PipelineParameter().multicutBlockOverlap
 
-        sub_solver = BlockwiseSubSolver(
-            self.pathToSeg,
-            problems[-2],
-            block_shape,
-            block_overlap,
-            self.numberOfLevels - 1,
-            True
-        )
-        return_tasks = {
-            'sub_solver': sub_solver,
-            'rag': StackedRegionAdjacencyGraph(self.pathToSeg)
-        }
+        sub_solver = BlockwiseSubSolver(self.pathToSeg,
+                                        problems[-2],
+                                        block_shape,
+                                        block_overlap,
+                                        self.numberOfLevels - 1,
+                                        True,
+                                        keyToSeg=self.keyToSeg)
+        return_tasks = {'sub_solver': sub_solver,
+                        'rag': StackedRegionAdjacencyGraph(self.pathToSeg, self.keyToSeg)}
 
         if PipelineParameter().defectPipeline:
             return_tasks["defect_slices"] = DefectsToNodes(self.pathToSeg)
@@ -263,17 +258,14 @@ class BlockwiseMulticutStitchingSolver(BlockwiseSolver):
         block_factor  = max(1, (self.numberOfLevels - 1) * 2)
         block_shape = list(map(lambda x: x * block_factor, initial_shape))
 
-        return {
-            'seg': ExternalSegmentation(self.pathToSeg),
-            'problems': problems,
-            'edges_between_blocks': EdgesBetweenBlocks(
-                self.pathToSeg,
-                problems[-1],
-                block_shape,
-                overlap,
-                self.numberOfLevels
-            )
-        }
+        return {'seg': ExternalSegmentation(self.pathToSeg),
+                'problems': problems,
+                'edges_between_blocks': EdgesBetweenBlocks(self.pathToSeg,
+                                                           problems[-1],
+                                                           block_shape,
+                                                           overlap,
+                                                           self.numberOfLevels,
+                                                           keyToSeg=self.keyToSeg)}
 
     @run_decorator
     def run(self):
@@ -296,7 +288,11 @@ class BlockwiseMulticutStitchingSolver(BlockwiseSolver):
         reduced_objective = nifty.graph.optimization.multicut.multicutObjective(reduced_graph, reduced_costs)
 
         t_extract = time.time()
-        sub_problems = self._extract_subproblems(reduced_graph, block_uv_ids, seg, global2new_nodes, edges_between_blocks)
+        sub_problems = self._extract_subproblems(reduced_graph,
+                                                 block_uv_ids,
+                                                 seg,
+                                                 global2new_nodes,
+                                                 edges_between_blocks)
         workflow_logger.info(
             "BlockwiseMulticutStitchingSolver: Problem extraction took %f s" % (time.time() - t_extract)
         )
@@ -347,7 +343,9 @@ class BlockwiseMulticutStitchingSolver(BlockwiseSolver):
             block_u, block_v = block_uv
 
             # find the actual overlapping regions in block u and v and load them
-            have_overlap, ovlp_begin_u, ovlp_end_u, ovlp_begin_v, ovlp_end_v = blocking.getLocalOverlaps(block_u, block_v, overlap)
+            have_overlap, ovlp_begin_u, ovlp_end_u, ovlp_begin_v, ovlp_end_v = blocking.getLocalOverlaps(block_u,
+                                                                                                         block_v,
+                                                                                                         overlap)
 
             outer_block_u = blocking.getBlockWithHalo(block_u, overlap).outerBlock
             begin_u, end_u = outer_block_u.begin, outer_block_u.end
@@ -357,7 +355,8 @@ class BlockwiseMulticutStitchingSolver(BlockwiseSolver):
                 v_block = blocking.getBlockWithHalo(block_v, overlap).outerBlock
                 v_begin, v_end = v_block.begin, v_block.end
                 raise RuntimeError(
-                    "No overlap found for blocks %i, %i with coords %s, %s and %s, %s" % (block_u, block_v, str(u_begin), str(u_end), str(v_begin), str(v_end))
+                    "No overlap found for blocks %i, %i with coords %s, %s and %s, %s" %
+                    (block_u, block_v, str(begin_u), str(end_u), str(v_begin), str(v_end))
                 )
 
             # read the segmentation in the ovlp get the nodes and transform them to current node ids
@@ -380,7 +379,8 @@ class BlockwiseMulticutStitchingSolver(BlockwiseSolver):
                 quit()
 
             workflow_logger.debug(
-                "BlockwiseMulticutStitchingSolver: Extracting problem from block-edge %i ovlp between block %i, %i with shape %s"
+                "BlockwiseMulticutStitchingSolver: Extracting problem from block-edge %i \
+                ovlp between block %i, %i with shape %s"
                 % (block_edge_id, block_u, block_v, str(seg_ovlp.shape))
             )
 
@@ -529,26 +529,25 @@ class BlockwiseOverlapSolver(BlockwiseSolver):
         block_shape = list(map(lambda x: x * block_factor, initial_shape))
 
         # get the sub solver results
-        sub_solver = BlockwiseSubSolver(
-            self.pathToSeg,
-            problems[-2],
-            block_shape,
-            overlap,
-            self.numberOfLevels - 1,
-            True
-        )
+        sub_solver = BlockwiseSubSolver(self.pathToSeg,
+                                        problems[-2],
+                                        block_shape,
+                                        overlap,
+                                        self.numberOfLevels - 1,
+                                        True,
+                                        keyToSeg=self.keyToSeg)
 
-        return {
-            'subblocks': SubblockSegmentations(self.pathToSeg, self.globalProblem, self.numberOfLevels),
-            'problems': problems,
-            'block_graph': BlockGridGraph(
-                self.pathToSeg,
-                block_shape,
-                overlap
-            ),
-            'sub_solver': sub_solver,
-            'seg': ExternalSegmentation(self.pathToSeg)
-        }
+        return {'subblocks': SubblockSegmentations(self.pathToSeg,
+                                                   self.globalProblem,
+                                                   self.numberOfLevels,
+                                                   keyToSeg=self.keyToSeg),
+                'problems': problems,
+                'block_graph': BlockGridGraph(self.pathToSeg,
+                                              block_shape,
+                                              overlap,
+                                              keyToSeg=self.keyToSeg),
+                'sub_solver': sub_solver,
+                'seg': ExternalSegmentation(self.pathToSeg)}
 
     @run_decorator
     def run(self):
@@ -634,18 +633,25 @@ class BlockwiseOverlapSolver(BlockwiseSolver):
             block_v_path = os.path.join(block_res_path, 'block%i_segmentation.h5' % block_v)
 
             # find the actual overlapping regions in block u and v and load them
-            have_overlap, ovlp_begin_u, ovlp_end_u, ovlp_begin_v, ovlp_end_v = blocking.getLocalOverlaps(block_u, block_v, overlap)
+            have_overlap, ovlp_begin_u, ovlp_end_u, ovlp_begin_v, ovlp_end_v = blocking.getLocalOverlaps(block_u,
+                                                                                                         block_v,
+                                                                                                         overlap)
             if not have_overlap:
                 u_block = blocking.getBlockWithHalo(block_u, overlap).outerBlock
                 v_block = blocking.getBlockWithHalo(block_v, overlap).outerBlock
                 u_begin, u_end = u_block.begin, u_block.end
                 v_begin, v_end = v_block.begin, v_block.end
                 raise RuntimeError(
-                    "No overlap found for blocks %i, %i with coords %s, %s and %s, %s" % (block_u, block_v, str(u_begin), str(u_end), str(v_begin), str(v_end))
+                    "No overlap found for blocks %i, %i with coords %s, %s and %s, %s" %
+                    (block_u, block_v, str(u_begin), str(u_end), str(v_begin), str(v_end))
                 )
 
-            overlap_bb_u = np.s_[ovlp_begin_u[0]:ovlp_end_u[0], ovlp_begin_u[1]:ovlp_end_u[1], ovlp_begin_u[2]:ovlp_end_u[2]]
-            overlap_bb_v = np.s_[ovlp_begin_v[0]:ovlp_end_v[0], ovlp_begin_v[1]:ovlp_end_v[1], ovlp_begin_v[2]:ovlp_end_v[2]]
+            overlap_bb_u = np.s_[ovlp_begin_u[0]:ovlp_end_u[0],
+                                 ovlp_begin_u[1]:ovlp_end_u[1],
+                                 ovlp_begin_u[2]:ovlp_end_u[2]]
+            overlap_bb_v = np.s_[ovlp_begin_v[0]:ovlp_end_v[0],
+                                 ovlp_begin_v[1]:ovlp_end_v[1],
+                                 ovlp_begin_v[2]:ovlp_end_v[2]]
 
             with h5py.File(block_u_path) as f_u, \
                     h5py.File(block_v_path) as f_v:
@@ -660,8 +666,7 @@ class BlockwiseOverlapSolver(BlockwiseSolver):
                 raw_path = PipelineParameter().inputs['data'][0]
                 oseg_path = PipelineParameter().inputs['seg']
                 u_begin, u_end = u_block.begin, u_block.end
-                with h5py.File(raw_path) as f_raw, \
-                    h5py.File(oseg_path) as f_oseg:
+                with h5py.File(raw_path) as f_raw, h5py.File(oseg_path) as f_oseg:
                     global_bb = np.s_[
                         ovlp_begin_u[0] + u_begin[0]:ovlp_end_u[0] + u_begin[0],
                         ovlp_begin_u[1] + u_begin[1]:ovlp_end_u[1] + u_begin[1],
@@ -704,7 +709,8 @@ class BlockwiseOverlapSolver(BlockwiseSolver):
             return overlaps_u
 
         # serial for debugging
-        node_overlaps = [node_overlaps_for_block_pair(block_edge_id, block_uv) for block_edge_id, block_uv in enumerate(block_graph.uvIds())]
+        node_overlaps = [node_overlaps_for_block_pair(block_edge_id, block_uv)
+                         for block_edge_id, block_uv in enumerate(block_graph.uvIds())]
 
         # parallel
         # with futures.ThreadPoolExecutor(max_workers=PipelineParameter().nThreads) as tp:
@@ -742,7 +748,8 @@ class BlockwiseOverlapSolver(BlockwiseSolver):
 
             # get the results from the overlap calculations
             this_node_overlaps = node_overlaps[block_pair_id]
-            assert len(this_node_overlaps) <= len(sub_node_results[block_u]), "%i, %i" % (len(this_node_overlaps), len(sub_node_results[block_u]))
+            assert len(this_node_overlaps) <= len(sub_node_results[block_u]), "%i, %i" % \
+                (len(this_node_overlaps), len(sub_node_results[block_u]))
 
             offsets_u = block_offsets[block_u]
             offsets_v = block_offsets[block_v]

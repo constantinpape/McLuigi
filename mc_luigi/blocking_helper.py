@@ -33,6 +33,7 @@ class NodesToBlocks(luigi.Task):
     blockShape   = luigi.ListParameter()
     blockOverlap = luigi.ListParameter()
     dtype        = luigi.Parameter(default='uint32')
+    keyToSeg = luigi.Parameter(default='data')
 
     def requires(self):
         if PipelineParameter().defectPipeline:
@@ -56,13 +57,19 @@ class NodesToBlocks(luigi.Task):
         else:
             defect_slices = []
 
-        blocking = nifty.tools.blocking(roiBegin=[0, 0, 0], roiEnd=seg.shape(), blockShape=self.blockShape)
+        blocking = nifty.tools.blocking(roiBegin=[0, 0, 0],
+                                        roiEnd=seg.shape(self.keyToSeg),
+                                        blockShape=self.blockShape)
         number_of_blocks = blocking.numberOfBlocks
         block_overlap = list(self.blockOverlap)
 
         n_workers = min(number_of_blocks, PipelineParameter().nThreads)
         # nWorkers = 1
-        block_result = nifty.tools.nodesToBlocksStacked(seg.get(), blocking, block_overlap, defect_slices, n_workers)
+        block_result = nifty.tools.nodesToBlocksStacked(seg.get(self.keyToSeg),
+                                                        blocking,
+                                                        block_overlap,
+                                                        defect_slices,
+                                                        n_workers)
 
         block_result = [np.array(b_res, dtype=self.dtype) for b_res in block_result]
         self.output().writeVlen(block_result)
@@ -87,6 +94,8 @@ class BlockGridGraph(luigi.Task):
     blockShape   = luigi.ListParameter()
     blockOverlap = luigi.ListParameter()
 
+    keyToSeg = luigi.Parameter(default='data')
+
     def requires(self):
         return ExternalSegmentation(self.pathToSeg)
 
@@ -95,8 +104,8 @@ class BlockGridGraph(luigi.Task):
 
         # get the shape
         inp = self.input()
-        inp.open()
-        shape = inp.shape()
+        inp.open(self.keyToSeg)
+        shape = inp.shape(self.keyToSeg)
         overlap = list(self.blockOverlap)
 
         # construct the blocking
@@ -156,6 +165,7 @@ class BlockGridGraph(luigi.Task):
         out = self.output()
         out.write(block_graph.serialize())
         out.write(block_graph_nn.serialize(), 'nearest_neighbors')
+        inp.close()
 
     def output(self):
         block_string = '_'.join(map(str, self.blockShape))
@@ -175,13 +185,18 @@ class EdgesBetweenBlocks(luigi.Task):
     blockShape   = luigi.ListParameter()
     blockOverlap = luigi.ListParameter()
     level        = luigi.Parameter()
+    keyToSeg = luigi.Parameter(default='data')
 
     def requires(self):
-        return {
-            'block_graph': BlockGridGraph(self.pathToSeg, self.blockShape, self.blockOverlap),
-            'problem': self.problem,
-            'nodes_to_blocks': NodesToBlocks(self.pathToSeg, self.blockShape, self.blockOverlap)
-        }
+        return {'block_graph': BlockGridGraph(self.pathToSeg,
+                                              self.blockShape,
+                                              self.blockOverlap,
+                                              keyToSeg=self.keyToSeg),
+                'problem': self.problem,
+                'nodes_to_blocks': NodesToBlocks(self.pathToSeg,
+                                                 self.blockShape,
+                                                 self.blockOverlap,
+                                                 keyToSeg=self.keyToSeg)}
 
     @run_decorator
     def run(self):
