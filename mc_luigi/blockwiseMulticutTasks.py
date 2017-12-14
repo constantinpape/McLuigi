@@ -387,15 +387,9 @@ class BlockwiseSubSolver(luigi.Task):
         # block size in first hierarchy level
         initial_block_shape = PipelineParameter().multicutBlockShape
         initial_overlap = list(PipelineParameter().multicutBlockOverlap)
-        initial_blocking = nifty.tools.blocking(
-            roiBegin=[0, 0, 0],
-            roiEnd=seg.shape(key=self.keyToSeg),
-            blockShape=initial_block_shape
-        )
-        workflow_logger.info(
-            "BlockwiseSubSolver: Extracting sub-problems with initial blocking of shape %s with overlaps %s."
-            % (str(initial_block_shape), str(initial_overlap))
-        )
+        initial_blocking = nifty.tools.blocking(roiBegin=[0, 0, 0],
+                                                roiEnd=list(seg.shape(key=self.keyToSeg)),
+                                                blockShape=list(initial_block_shape))
 
         # function for subproblem extraction
         # extraction only for level 0
@@ -404,14 +398,19 @@ class BlockwiseSubSolver(luigi.Task):
             if self.level != 0:
                 node_list = np.unique(global2new_nodes[node_list])
             workflow_logger.debug(
-                "BlockwiseSubSolver: block id %i: Number of nodes %i" % (block_id, node_list.shape[0])
+                "BlockwiseSubSolver: block id %i: Number of nodes %i" % (block_id, len(node_list.shape))
             )
             inner_edges, outer_edges, subgraph = graph.extractSubgraphFromNodes(node_list.tolist())
+            # we can get 0 inner edges, if we have a subblock with just a single node
+            # or a subblock with only ignore edges.
+            # we filter these blocks, because they mess up the sub-solver
+            if len(inner_edges) <= 1:
+                return False
             return np.array(inner_edges), np.array(outer_edges), subgraph, node_list
 
         block_overlap = list(self.blockOverlap)
         blocking = nifty.tools.blocking(roiBegin=[0, 0, 0],
-                                        roiEnd=seg.shape(key=self.keyToSeg),
+                                        roiEnd=list(seg.shape(key=self.keyToSeg)),
                                         blockShape=self.blockShape)
         number_of_blocks = blocking.numberOfBlocks
 
@@ -442,12 +441,11 @@ class BlockwiseSubSolver(luigi.Task):
 
                 tasks.append(executor.submit(extract_subproblem, block_id, sub_blocks))
             sub_problems = [task.result() for task in tasks]
+            sub_problems = [sub_prob for sub_prob in sub_problems if sub_prob]
 
         out = self.output()
-        out.writeVlen(
-            np.array([sub_prob[1] for sub_prob in sub_problems]),
-            'outer_edges'
-        )
+        out.writeVlen(np.array([sub_prob[1] for sub_prob in sub_problems]),
+                      'outer_edges')
 
         # if we serialize the sub-results, write out the block positions and the sub nodes here
         if self.serializeSubResults:
@@ -472,7 +470,6 @@ class BlockwiseSubSolver(luigi.Task):
                 'sub_nodes'
             )
 
-        assert len(sub_problems) == number_of_blocks, str(len(sub_problems)) + " , " + str(number_of_blocks)
         return sub_problems
 
     def _solve_subproblems(self, costs, sub_problems, number_of_edges):
