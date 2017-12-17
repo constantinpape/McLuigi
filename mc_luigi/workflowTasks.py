@@ -44,7 +44,7 @@ class SegmentationWorkflow(luigi.Task):
     pathToClassifier  = luigi.Parameter()
     keyToSeg = luigi.Parameter(default='data')
     dtype = luigi.Parameter(default='uint32')
-    savePath = luigi.Parameter(default=None)
+    savePath = luigi.Parameter(default='')
     saveKey = luigi.Parameter(default='data')
 
     def requires(self):
@@ -158,7 +158,7 @@ class MulticutSegmentation(SegmentationWorkflow):
         return return_tasks
 
     def output(self):
-        if self.savePath is None:
+        if self.savePath is '':
             save_path = os.path.join(PipelineParameter().cache,
                                      "MulticutSegmentation_%s.h5" % (
                                          "modified" if PipelineParameter().defectPipeline else "standard",))
@@ -185,7 +185,7 @@ class BlockwiseMulticutSegmentation(SegmentationWorkflow):
         return return_tasks
 
     def output(self):
-        if self.savePath is None:
+        if self.savePath is '':
             save_path = os.path.join(
                 PipelineParameter().cache,
                 "BlockwiseMulticutSegmentation_L%i_%s_%s_%s" % (
@@ -221,7 +221,7 @@ class BlockwiseStitchingSegmentation(SegmentationWorkflow):
         return return_tasks
 
     def output(self):
-        if self.savePath is None:
+        if self.savePath is '':
             save_path = os.path.join(
                 PipelineParameter().cache,
                 "BlockwiseStitchingSegmentation_L%i_%s_%s_%s_%.2f" % (

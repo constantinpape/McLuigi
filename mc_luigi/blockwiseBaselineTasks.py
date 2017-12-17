@@ -179,7 +179,7 @@ class SubblockSegmentations(BlockwiseSolver):
 # stitch blockwise sub-results according to costs of the edges connecting the sub-blocks
 class BlockwiseStitchingSolver(BlockwiseSolver):
 
-    boundaryBias = luigi.Parameter(default=.5)
+    boundaryBias = luigi.FloatParameter(default=.5)
 
     @run_decorator
     def run(self):

@@ -405,6 +405,11 @@ class HDF5DataTarget(BaseTarget):
         with h5py.File(self.path) as f:
             f[key][bb] = data
 
+    def readSubarray(self, start, stop, key="data"):
+        bb = tuple(slice(sta, sto) for sta, sto in zip(start, stop))
+        with h5py.File(self.path, 'r') as f:
+            return f[key][bb]
+
 
 class PickleTarget(BaseTarget):
     """

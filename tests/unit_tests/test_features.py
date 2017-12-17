@@ -31,7 +31,7 @@ class TestDataTasks(McLuigiTestCase):
 
     def test_region_features(self):
         call(['python', './executables/features.py', 'region'])
-        feat_path = ''
+        feat_path = './cache/RegionFeatures_standard_sampleA_watershed.n5'
         self.check_features(feat_path)
 
 

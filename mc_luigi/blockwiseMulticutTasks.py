@@ -39,7 +39,7 @@ class BlockwiseSolver(luigi.Task):
 
     pathToSeg = luigi.Parameter()
     globalProblem  = luigi.TaskParameter()
-    numberOfLevels = luigi.Parameter()
+    numberOfLevels = luigi.IntParameter()
     keyToSeg = luigi.Parameter(default='data')
 
     def requires(self):
@@ -176,7 +176,7 @@ class ReducedProblem(luigi.Task):
     blockShape   = luigi.ListParameter()
     blockOverlap = luigi.ListParameter()
 
-    level = luigi.Parameter()
+    level = luigi.IntParameter()
     keyToSeg = luigi.Parameter(default='data')
 
     def requires(self):
@@ -328,13 +328,13 @@ class BlockwiseSubSolver(luigi.Task):
     blockShape   = luigi.ListParameter()
     blockOverlap = luigi.ListParameter()
 
-    level = luigi.Parameter()
+    level = luigi.IntParameter()
     # needs to be true if we want to use the stitching - by overlap solver
-    serializeSubResults = luigi.Parameter(default=False)
+    serializeSubResults = luigi.BoolParameter(default=False)
 
     # will outer edges be cut ?
     # should be left at true, because results seem to degraded if false
-    cutOuterEdges = luigi.Parameter(default=True)
+    cutOuterEdges = luigi.BoolParameter(default=True)
 
     keyToSeg = luigi.Parameter(default='data')
 

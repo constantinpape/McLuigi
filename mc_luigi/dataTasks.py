@@ -38,9 +38,6 @@ config_logger(workflow_logger)
 ###########################
 
 
-# FIXME creates wrong offsets atm !!
-# FIXME FIXME FIXME
-# not ingestible by stacked rag
 class WsdtSegmentation(luigi.Task):
     """
     Task for generating segmentation via wsdt.
@@ -49,9 +46,9 @@ class WsdtSegmentation(luigi.Task):
     pathToProbabilities = luigi.Parameter()
     keyToProbabilities = luigi.Parameter()
     dtype = luigi.Parameter(default='uint64')
-    pathToMask = luigi.Parameter(default=None)
+    pathToMask = luigi.Parameter(default='')
     keyToMask = luigi.Parameter(default='data')
-    savePath = luigi.Parameter(default=None)
+    savePath = luigi.Parameter(default='')
     saveKey = luigi.Parameter(default='data')
 
     def requires(self):
@@ -59,7 +56,7 @@ class WsdtSegmentation(luigi.Task):
         Dependencies:
         """
         deps = {'pmap': InputData(self.pathToProbabilities)}
-        if self.pathToMask is not None:
+        if self.pathToMask is not '':
             deps['mask'] = InputData(self.pathToMask)
         return deps
 
@@ -75,7 +72,7 @@ class WsdtSegmentation(luigi.Task):
                  chunks=pmap.chunks(self.keyToProbabilities),
                  dtype=self.dtype)
 
-        if self.pathToMask is None:
+        if self.pathToMask is '':
             self._run_wsdt2d_standard(pmap, out, shape)
         else:
             mask = self.input()['mask']
@@ -209,7 +206,7 @@ class WsdtSegmentation(luigi.Task):
         return True
 
     def output(self):
-        if self.savePath is None:
+        if self.savePath is '':
             save_path = os.path.join(PipelineParameter().cache,
                                      "WsdtSegmentation_%s" %
                                      os.path.split(self.pathToProbabilities)[1][:-3])

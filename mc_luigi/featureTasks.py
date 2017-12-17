@@ -5,7 +5,7 @@ from __future__ import division, print_function
 
 import luigi
 
-from .customTargets import VolumeTarget
+from .customTargets import VolumeTarget, HDF5DataTarget
 from .dataTasks import InputData, StackedRegionAdjacencyGraph, ExternalSegmentation
 from .defectHandlingTasks import ModifiedAdjacency
 from .pipelineParameter import PipelineParameter
@@ -33,7 +33,6 @@ workflow_logger = logging.getLogger(__name__)
 config_logger(workflow_logger)
 
 
-# FIXME need to adjust chunks for parallel n5 writing
 class RegionNodeFeatures(luigi.Task):
 
     pathToInput = luigi.Parameter()
@@ -73,18 +72,25 @@ class RegionNodeFeatures(luigi.Task):
         out = self.output()
         out_shape = (n_nodes, n_feats)
         chunk_shape = (min(5000, n_nodes), out_shape[1])
-        out.open("data", shape=out_shape, chunks=chunk_shape, dtype='float32')
+        out.open(key="data", shape=out_shape, chunks=chunk_shape, dtype='float32')
 
         # get region statistics with the vigra region feature extractor for a single slice
         def extract_stats_slice(z):
+            print("!!!!", z, "!!!!")
             start, end = [z, 0, 0], [z + 1, shape[1], shape[2]]
             min_node, max_node = min_max_node[z, 0], min_max_node[z, 1]
 
-            data_slice = data.read(start, end, self.keyToInput).squeeze().astype('float32', copy=False)
+            data_slice = data.read(start, end, self.keyToInput).squeeze().astype('float32',
+                                                                                 copy=False)
             seg_slice  = seg.read(start, end, self.keyToSeg).squeeze() - min_node
 
+            print("Here")
+            print(vigra.__file__)
+            print(vigra.analysis.__file__)
+            # FIXME some numpy issues...
             extractor = vigra.analysis.extractRegionFeatures(data_slice,
-                                                             seg_slice.astype('uint32', copy=False),
+                                                             seg_slice.astype('uint32',
+                                                                              copy=False),
                                                              features=statistics)
             region_stats_slice = []
             for stat_name in statistics:
@@ -97,12 +103,11 @@ class RegionNodeFeatures(luigi.Task):
                                                               axis=1).astype('float32',
                                                                              copy=False))
             assert region_stats_slice.shape[0] == max_node + 1 - min_node
-            out.write((min_node, 0), region_stats_slice)
-            return True
+            out.writeSubarray((min_node, 0), region_stats_slice)
 
         # parallel
-        n_workers = min(shape[0], PipelineParameter().nThreads)
-        # n_workers = 1
+        # n_workers = min(shape[0], PipelineParameter().nThreads)
+        n_workers = 1
         with futures.ThreadPoolExecutor(max_workers=n_workers) as tp:
             tasks = [tp.submit(extract_stats_slice, z) for z in range(shape[0])]
             [task.result() for task in tasks]
@@ -111,8 +116,10 @@ class RegionNodeFeatures(luigi.Task):
     def output(self):
         seg_file = os.path.split(self.pathToSeg)[1][:-3]
         save_path = os.path.join(PipelineParameter().cache, "RegionNodeFeatures_%s" % seg_file)
-        save_path += VolumeTarget.file_ending()
-        return VolumeTarget(save_path)
+        # save_path += VolumeTarget.file_ending()
+        # return VolumeTarget(save_path)
+        save_path += '.h5'
+        return HDF5DataTarget(save_path)
 
 
 # FIXME need to adjust chunks for parallel n5 writing
@@ -139,13 +146,8 @@ class RegionFeatures(luigi.Task):
 
         inp = self.input()
         out = self.output()
-        if not os.path.exists(out.path):
-            os.mkdir(out.path)
 
-        node_feats_file = inp["node_feats"]
-        node_feats_file.open()
-        node_feats = node_feats_file.read([0, 0], node_feats_file.shape())
-
+        node_feats = inp["node_feats"].read()
         if PipelineParameter().defectPipeline:
             modified_adjacency = inp['modified_adjacency']
             if modified_adjacency.read('has_defects'):
@@ -155,7 +157,6 @@ class RegionFeatures(luigi.Task):
         else:
             self._compute_standard_feats(node_feats, inp, out)
 
-        node_feats_file.close()
         out.close()
 
     def _compute_feats_from_uvs(self,
@@ -299,7 +300,7 @@ class EdgeFeatures(luigi.Task):
     keepOnlyXY = luigi.BoolParameter(default=False)
     keepOnlyZ = luigi.BoolParameter(default=False)
     simpleFeatures = luigi.BoolParameter(default=False)
-    zDirection = luigi.Parameter(default=0)
+    zDirection = luigi.IntParameter(default=0)
 
     # For now we can't set these any more, needs to be passed to C++ somehow
     # filterNames = luigi.ListParameter(
@@ -328,8 +329,6 @@ class EdgeFeatures(luigi.Task):
         data = data_file.get(self.keyToInput)
 
         out = self.output()
-        if not os.path.exists(out.path):
-            os.mkdir(out.path)
 
         has_defects = False
         if PipelineParameter().defectPipeline:
