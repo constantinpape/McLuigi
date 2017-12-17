@@ -7,7 +7,6 @@ import vigra
 import numpy as np
 
 from skimage.feature import peak_local_max
-from scipy.ndimage.morphology import distance_transform_edt
 
 
 # wrap vigra local maxima properly
@@ -17,10 +16,6 @@ def local_maxima(array):
         # this is considerably faster than the vigra implementation, but only works in 2d
         # FIXME not sure if this lifts the gil
         return peak_local_max(array, indices=False, exclude_border=False)
-        #return vigra.analysis.localMaxima(array,
-        #                                  allowAtBorder=True,
-        #                                  allowPlateaus=True,
-        #                                  marker=1).astype('bool')
     if array.ndim == 3:
         return vigra.analysis.localMaxima3D(array,
                                             allowAtBorder=True,
@@ -110,4 +105,9 @@ def iterative_inplace_watershed(hmap, seeds, min_segment_size, start_label=0):
                                                             start_label=start_label,
                                                             out=seeds,
                                                             keep_zeros=False)
+    else:
+        diff = seeds.min() - start_label
+        seeds -= diff
+        max_label -= diff
+
     return max_label

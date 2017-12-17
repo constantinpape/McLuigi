@@ -33,15 +33,18 @@ workflow_logger = logging.getLogger(__name__)
 config_logger(workflow_logger)
 
 
+# FIXME need to adjust chunks for parallel n5 writing
 class RegionNodeFeatures(luigi.Task):
 
     pathToInput = luigi.Parameter()
     pathToSeg   = luigi.Parameter()
+    keyToInput  = luigi.Parameter(default='data')
+    keyToSeg    = luigi.Parameter(default='data')
 
     def requires(self):
         return {"data": InputData(self.pathToInput),
                 "seg": ExternalSegmentation(self.pathToSeg),
-                "rag": StackedRegionAdjacencyGraph(self.pathToSeg)}
+                "rag": StackedRegionAdjacencyGraph(self.pathToSeg, self.keyToSeg)}
 
     @run_decorator
     def run(self):
@@ -49,11 +52,11 @@ class RegionNodeFeatures(luigi.Task):
         data = inp["data"]
         seg  = inp["seg"]
 
-        data.open()
-        seg.open()
-        shape = data.shape()
+        data.open(self.keyToInput)
+        seg.open(self.keyToSeg)
+        shape = data.shape(self.keyToInput)
 
-        assert shape == seg.shape(), str(shape) + " , " + str(seg.shape())
+        assert shape == seg.shape(self.keyToSeg), str(shape) + " , " + str(seg.shape())
 
         min_max_node = inp['rag'].readKey('minMaxLabelPerSlice').astype('uint32')
         n_nodes = inp['rag'].readKey('numberOfNodes')
@@ -77,8 +80,8 @@ class RegionNodeFeatures(luigi.Task):
             start, end = [z, 0, 0], [z + 1, shape[1], shape[2]]
             min_node, max_node = min_max_node[z, 0], min_max_node[z, 1]
 
-            data_slice = data.read(start, end).squeeze().astype('float32')
-            seg_slice  = seg.read(start, end).squeeze() - min_node
+            data_slice = data.read(start, end, self.keyToInput).squeeze().astype('float32')
+            seg_slice  = seg.read(start, end, self.keyToSeg).squeeze() - min_node
 
             extractor = vigra.analysis.extractRegionFeatures(data_slice,
                                                              seg_slice,
@@ -112,15 +115,21 @@ class RegionNodeFeatures(luigi.Task):
         return VolumeTarget(save_path)
 
 
+# FIXME need to adjust chunks for parallel n5 writing
 class RegionFeatures(luigi.Task):
 
     pathToInput = luigi.Parameter()
     pathToSeg   = luigi.Parameter()
+    keyToInput  = luigi.Parameter(default='data')
+    keyToSeg    = luigi.Parameter(default='data')
 
     # TODO have to rethink this if we include lifted multicut
     def requires(self):
-        required_tasks = {"rag": StackedRegionAdjacencyGraph(self.pathToSeg),
-                          "node_feats": RegionNodeFeatures(self.pathToInput, self.pathToSeg)}
+        required_tasks = {"rag": StackedRegionAdjacencyGraph(self.pathToSeg, self.keyToSeg),
+                          "node_feats": RegionNodeFeatures(pathToInput=self.pathToInput,
+                                                           pathToSeg=self.pathToSeg,
+                                                           keyToInput=self.keyToInput,
+                                                           keyToSeg=self.keyToSeg)}
         if PipelineParameter().defectPipeline:
             required_tasks['modified_adjacency'] = ModifiedAdjacency(self.pathToSeg)
         return required_tasks

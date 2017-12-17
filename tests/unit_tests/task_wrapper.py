@@ -12,6 +12,8 @@ def learn_rf():
     ppl_parameter.read_input_file('./inputs.json')
     inputs = ppl_parameter.inputs
     ppl_parameter.separateEdgeClassification = True
+    ppl_parameter.ignoreSegLabel = 0
+    ppl_parameter.useN5Backend = True
     ppl_parameter.nTrees = 150
 
     luigi.run([
@@ -31,7 +33,9 @@ def mc():
     # set the parameters
     ppl_parameter.multicutWeightingScheme = "z"
     ppl_parameter.separateEdgeClassification = True
-    ppl_parameter.multicutVerbose = True
+    ppl_parameter.multicutVerbose = False
+    ppl_parameter.ignoreSegLabel = 0
+    ppl_parameter.useN5Backend = True
 
     luigi.run(
         ["--local-scheduler",
@@ -50,9 +54,11 @@ def blockwise_mc():
     # set the parameters
     ppl_parameter.multicutWeightingScheme = "z"
     ppl_parameter.separateEdgeClassification = True
-    ppl_parameter.multicutVerbose = True
+    ppl_parameter.multicutVerbose = False
     ppl_parameter.multicutBlockShape = [20, 256, 256]
     ppl_parameter.multicutBlockOverlap = [5, 50, 50]
+    ppl_parameter.ignoreSegLabel = 0
+    ppl_parameter.useN5Backend = True
 
     n_levels = 1
     luigi.run(
