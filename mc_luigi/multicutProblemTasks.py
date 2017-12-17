@@ -39,13 +39,17 @@ class MulticutProblem(luigi.Task):
     # this can either contain a single path (classifier trained for xy - and z - edges jointly)
     # or two paths (classfier trained for xy - edges + classifier trained for z - edges separately)
     pathsToClassifier  = luigi.Parameter()
+    keyToSeg = luigi.Parameter(default='data')
 
     def requires(self):
-        return_tasks = {
-            "edge_probabilities": EdgeProbabilities(self.pathToSeg, self.pathsToClassifier),
-            "rag": StackedRegionAdjacencyGraph(self.pathToSeg)
-        }
+        return_tasks = {"edge_probabilities": EdgeProbabilities(self.pathToSeg,
+                                                                self.pathsToClassifier,
+                                                                self.keyToSeg),
+                        "rag": StackedRegionAdjacencyGraph(self.pathToSeg,
+                                                           self.keyToSeg)}
+        # TODO these should also take the key to seg !
         if PipelineParameter().defectPipeline:
+            assert False, "Defect mode is currently not supported !"
             return_tasks['modified_adjacency'] = ModifiedAdjacency(self.pathToSeg)
             return_tasks['skip_edge_lengths']  = SkipEdgeLengths(self.pathToSeg)
         return return_tasks
@@ -55,13 +59,10 @@ class MulticutProblem(luigi.Task):
 
         inp = self.input()
 
-        edge_cost_file = inp["edge_probabilities"]
-        edge_cost_file.open()
-        assert len(edge_cost_file.shape()) == 1
-        len_costs = edge_cost_file.shape()[0]
-        workflow_logger.info("MulticutProblem: loaded edge costs of len %i" % len_costs)
+        edge_costs = inp["edge_probabilities"].read()
+        assert edge_costs.ndim == 1
+        workflow_logger.info("MulticutProblem: loaded edge probs of len %i" % len(edge_costs))
 
-        edge_costs = edge_cost_file.read([0], [len_costs])
 
         if PipelineParameter().defectPipeline:
             workflow_logger.info("MulticutProblem: computing MulticutProblem for defect correction pipeline.")
@@ -73,8 +74,6 @@ class MulticutProblem(luigi.Task):
         else:
             workflow_logger.info("MulticutProblem: computing MulticutProblem for standard pipeline.")
             self._standard_multicut_problem(edge_costs)
-
-        edge_cost_file.close()
 
     # TODO parallelise ?!
     def _probabilities_to_costs(self, edge_costs):

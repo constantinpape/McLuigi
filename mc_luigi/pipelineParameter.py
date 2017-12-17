@@ -24,12 +24,13 @@ class Singleton(type):
 
 # FIXME this is not python 2 compatible
 class PipelineParameter(object, metaclass=Singleton):
-    #__metaclass__ = Singleton
+    # __metaclass__ = Singleton
 
     def __init__(self):
 
         # Input Files
         self.inputs = {}
+        self.input_keys = None
         self.cache  = ""
 
         # flag to switch between pipeline for anisotropic and isotropic (not implemented yet) data
@@ -45,13 +46,17 @@ class PipelineParameter(object, metaclass=Singleton):
         # flag to indicate if defects are detected with heuristics or random forest
         self.defectsFromRf = False
         self.defectRfPath = ''
+        # n5 or h5 backend
+        self.useN5Backend = True
 
         # feature string
         # FIXME in the current form z-affnity are toxic for defects!
         # for non-affinity maps replace 'affinitiesXY/Z' with prob
         # self.features = ["raw", "affinitiesXY", "affinitiesZ", "reg"]
         self.features = ["raw", "prob", "reg"]
-        self.zAffinityDirection = 2 # encoding of z-affinities: 1 -> slice z has affinties to z+1, 2 -> z+1 has affinities to z
+        # encoding of z-affinities: 1 -> slice z has affinties to z+1,
+        #                           2 -> z+1 has affinities to z
+        self.zAffinityDirection = 2
         self.useSimpleFeatures = False
 
         # path to neural network snapshots
@@ -59,14 +64,13 @@ class PipelineParameter(object, metaclass=Singleton):
         self.netArchitecturePath = ''
         self.netGpuId = 0  # id of gpu to be used
 
-        # ignore label for edge groundtruth
-        self.haveIgnoreLabel = False
-        self.ignoreLabel = -1
+        # igonore label for segment ids
+        self.ignoreSegLabel = -1
+        # ignore label for groundtruth ids
+        self.ignoreGtLabel = -1
 
         # number of threads
         self.nThreads = multiprocessing.cpu_count()
-        # compression level
-        self.compressionLevel = 5
         # log level
         self.logLevel = logging.INFO
         # enable using seperate classifier for xy - and z - edges
@@ -128,8 +132,15 @@ class PipelineParameter(object, metaclass=Singleton):
     # no segmentation -> assume we don't have probabilities either
     # and produce pmaps as well as segmentation
     def read_input_file(self, input_file):
-        with open(input_file) as f:
-            inp_dict = json.load(f)
+        # the input file can either be a json file
+        # or a dictionary
+        if isinstance(input_file, str):
+            assert os.path.exists(input_file)
+            with open(input_file, 'r') as f:
+                inp_dict = json.load(f)
+        else:
+            assert isinstance(input_file, dict)
+            inp_dict = input_file
 
         self.cache  = inp_dict['cache']
         if not os.path.exists(self.cache):
@@ -138,40 +149,49 @@ class PipelineParameter(object, metaclass=Singleton):
         # check if we have an over-segmentation already
         # if not we will schedule probability map prediction and watershed task
         if 'seg' not in inp_dict:
-            data_list = inp_dict['data']
-            if isinstance(data_list, str):
-                n_inp = 1
-                data_list = [data_list]
-            else:
-                assert isinstance(data_list, list)
-                n_inp = len(data_list)
+            assert False, "This is deprecated / currently not supported !"
+            #data_list = inp_dict['data']
+            #if isinstance(data_list, str):
+            #    n_inp = 1
+            #    data_list = [data_list]
+            #else:
+            #    assert isinstance(data_list, list)
+            #    n_inp = len(data_list)
 
-            # append the affinity maps that will be predicted to inputs
-            new_data_list = []
-            # append the watersheds that will be produced to the inputs
-            seg_list = []
-            for inp in range(n_inp):
+            ## append the affinity maps that will be predicted to inputs
+            #new_data_list = []
+            ## append the watersheds that will be produced to the inputs
+            #seg_list = []
+            #for inp in range(n_inp):
 
-                raw_path = data_list[inp]
-                new_data_list.append(raw_path)
-                raw_prefix = os.path.split(raw_path)[1][:-3]
+            #    raw_path = data_list[inp]
+            #    new_data_list.append(raw_path)
+            #    raw_prefix = os.path.split(raw_path)[1][:-3]
 
-                affinity_folder = os.path.join(self.cache, '%s_affinities' % raw_prefix)
+            #    affinity_folder = os.path.join(self.cache, '%s_affinities' % raw_prefix)
 
-                # xy-affinities
-                affinity_xy_path = os.path.join(affinity_folder, '%s_affinities_xy.h5' % raw_prefix)
-                new_data_list.append(affinity_xy_path)
+            #    # xy-affinities
+            #    affinity_xy_path = os.path.join(affinity_folder, '%s_affinities_xy.h5' % raw_prefix)
+            #    new_data_list.append(affinity_xy_path)
 
-                # z-affinities
-                affinity_z_path = os.path.join(affinity_folder, '%s_affinities_z.h5' % raw_prefix)
-                new_data_list.append(affinity_z_path)
+            #    # z-affinities
+            #    affinity_z_path = os.path.join(affinity_folder, '%s_affinities_z.h5' % raw_prefix)
+            #    new_data_list.append(affinity_z_path)
 
-                # wsdt segmentation
-                seg_list.append(
-                    os.path.join(self.cache, 'WsdtSegmentation_%s_affinities_xy.h5' % raw_prefix)
-                )
+            #    # wsdt segmentation
+            #    seg_list.append(
+            #        os.path.join(self.cache, 'WsdtSegmentation_%s_affinities_xy.h5' % raw_prefix)
+            #    )
 
-            inp_dict['data'] = new_data_list
-            inp_dict['seg'] = seg_list
+            #inp_dict['data'] = new_data_list
+            #inp_dict['seg'] = seg_list
+
+        key_dict = inp_dict.pop('keys', None)
+        # if we have a key dict, validate it !
+        if key_dict is not None:
+            assert 'data' in key_dict
+            assert len(key_dict['data']) == len(inp_dict['data'])
+            assert 'seg' in key_dict
 
         self.inputs = inp_dict
+        self.input_keys = key_dict

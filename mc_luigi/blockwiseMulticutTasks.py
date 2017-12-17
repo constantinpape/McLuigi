@@ -40,6 +40,7 @@ class BlockwiseSolver(luigi.Task):
     pathToSeg = luigi.Parameter()
     globalProblem  = luigi.TaskParameter()
     numberOfLevels = luigi.Parameter()
+    keyToSeg = luigi.Parameter(default='data')
 
     def requires(self):
         # block size in first hierarchy level
@@ -50,13 +51,15 @@ class BlockwiseSolver(luigi.Task):
         problems = [self.globalProblem]
         block_factor = 1
 
-        for l in range(self.numberOfLevels):
-            block_shape = list(map(lambda x: x * block_factor, initialBlockShape))
-
+        for level in range(self.numberOfLevels):
             # TODO check that we don't get larger than the actual shape here
-            problems.append(
-                ReducedProblem(self.pathToSeg, problems[-1], block_shape, block_overlap, l)
-            )
+            block_shape = list(map(lambda x: x * block_factor, initialBlockShape))
+            problems.append(ReducedProblem(pathToSeg=self.pathToSeg,
+                                           problem=problems[-1],
+                                           blockShape=block_shape,
+                                           blockOverlap=block_overlap,
+                                           level=level,
+                                           keyToSeg=self.keyToSeg))
             block_factor *= 2
 
         return problems
@@ -105,14 +108,12 @@ class BlockwiseMulticutSolver(BlockwiseSolver):
 
         # we use fm with kl as default backend, because this shows the best scaling behaviour
         solver_type = PipelineParameter().globalSolverType
-        inf_params  = dict(
-            sigma=PipelineParameter().multicutSigmaFusion,
-            number_of_iterations=PipelineParameter().multicutNumIt,
-            n_stop=PipelineParameter().multicutNumItStopGlobal,
-            n_threads=PipelineParameter().multicutNThreadsGlobal,
-            n_fuse=PipelineParameter().multicutNumFuse,
-            seed_fraction=PipelineParameter().multicutSeedFractionGlobal
-        )
+        inf_params  = dict(sigma=PipelineParameter().multicutSigmaFusion,
+                           number_of_iterations=PipelineParameter().multicutNumIt,
+                           n_stop=PipelineParameter().multicutNumItStopGlobal,
+                           n_threads=PipelineParameter().multicutNThreadsGlobal,
+                           n_fuse=PipelineParameter().multicutNumFuse,
+                           seed_fraction=PipelineParameter().multicutSeedFractionGlobal)
 
         workflow_logger.info("BlockwiseMulticutSolver: Solving problems with solver %s" % solver_type)
         workflow_logger.info(
@@ -176,14 +177,16 @@ class ReducedProblem(luigi.Task):
     blockOverlap = luigi.ListParameter()
 
     level = luigi.Parameter()
+    keyToSeg = luigi.Parameter(default='data')
 
     def requires(self):
-        return {
-            "sub_solution": BlockwiseSubSolver(
-                self.pathToSeg, self.problem, self.blockShape, self.blockOverlap, self.level
-            ),
-            "problem": self.problem
-        }
+        return {"sub_solution": BlockwiseSubSolver(pathToSeg=self.pathToSeg,
+                                                   problem=self.problem,
+                                                   blockShape=self.blockShape,
+                                                   blockOverlap=self.blockOverlap,
+                                                   level=self.level,
+                                                   keyToSeg=self.keyToSeg),
+                "problem": self.problem}
 
     # TODO we need to recover the edges between blocks for the stitching solver
     @run_decorator
@@ -222,13 +225,11 @@ class ReducedProblem(luigi.Task):
 
         t_edges = time.time()
         # find new edges and costs
-        uv_ids_new = self.find_new_edges_and_costs(
-            uv_ids,
-            problem,
-            cut_edges,
-            number_of_new_nodes,
-            old2new_nodes
-        )
+        uv_ids_new = self.find_new_edges_and_costs(uv_ids,
+                                                   problem,
+                                                   cut_edges,
+                                                   number_of_new_nodes,
+                                                   old2new_nodes)
         workflow_logger.info("ReducedProblem: Computing new edges took: %f s" % (time.time() - t_edges))
 
         # serialize the node converter
@@ -239,14 +240,12 @@ class ReducedProblem(luigi.Task):
         workflow_logger.info("ReucedProblem: Nodes: From %i to %i" % (g.numberOfNodes, number_of_new_nodes))
         workflow_logger.info("ReucedProblem: Edges: From %i to %i" % (g.numberOfEdges, len(uv_ids_new)))
 
-    def find_new_edges_and_costs(
-        self,
-        uv_ids,
-        problem,
-        cut_edges,
-        number_of_new_nodes,
-        old2new_nodes
-    ):
+    def find_new_edges_and_costs(self,
+                                 uv_ids,
+                                 problem,
+                                 cut_edges,
+                                 number_of_new_nodes,
+                                 old2new_nodes):
 
         # find mapping from new to old edges with nifty impl
         edge_mapping = nifty.tools.EdgeMapping(len(uv_ids))
@@ -331,24 +330,32 @@ class BlockwiseSubSolver(luigi.Task):
 
     level = luigi.Parameter()
     # needs to be true if we want to use the stitching - by overlap solver
-    serializeSubResults = luigi.Parameter(default=True)
+    serializeSubResults = luigi.Parameter(default=False)
+
     # will outer edges be cut ?
     # should be left at true, because results seem to degraded if false
     cutOuterEdges = luigi.Parameter(default=True)
+
+    keyToSeg = luigi.Parameter(default='data')
 
     def requires(self):
         initialShape = PipelineParameter().multicutBlockShape
         overlap      = PipelineParameter().multicutBlockOverlap
 
-        nodes2blocks = NodesToBlocks(self.pathToSeg, initialShape, overlap)
-        return {"seg": ExternalSegmentation(self.pathToSeg), "problem": self.problem, "nodes2blocks": nodes2blocks}
+        nodes2blocks = NodesToBlocks(self.pathToSeg,
+                                     initialShape,
+                                     overlap,
+                                     keyToSeg=self.keyToSeg)
+        return {"seg": ExternalSegmentation(self.pathToSeg),
+                "problem": self.problem,
+                "nodes2blocks": nodes2blocks}
 
     @run_decorator
     def run(self):
         # Input
         inp = self.input()
         seg = inp["seg"]
-        seg.open()
+        seg.open(self.keyToSeg)
         problem = inp["problem"]
         costs = problem.read("costs")
         nodes2blocks = inp["nodes2blocks"].read()
@@ -380,15 +387,9 @@ class BlockwiseSubSolver(luigi.Task):
         # block size in first hierarchy level
         initial_block_shape = PipelineParameter().multicutBlockShape
         initial_overlap = list(PipelineParameter().multicutBlockOverlap)
-        initial_blocking = nifty.tools.blocking(
-            roiBegin=[0, 0, 0],
-            roiEnd=seg.shape(),
-            blockShape=initial_block_shape
-        )
-        workflow_logger.info(
-            "BlockwiseSubSolver: Extracting sub-problems with initial blocking of shape %s with overlaps %s."
-            % (str(initial_block_shape), str(initial_overlap))
-        )
+        initial_blocking = nifty.tools.blocking(roiBegin=[0, 0, 0],
+                                                roiEnd=list(seg.shape(key=self.keyToSeg)),
+                                                blockShape=list(initial_block_shape))
 
         # function for subproblem extraction
         # extraction only for level 0
@@ -397,13 +398,20 @@ class BlockwiseSubSolver(luigi.Task):
             if self.level != 0:
                 node_list = np.unique(global2new_nodes[node_list])
             workflow_logger.debug(
-                "BlockwiseSubSolver: block id %i: Number of nodes %i" % (block_id, node_list.shape[0])
+                "BlockwiseSubSolver: block id %i: Number of nodes %i" % (block_id, len(node_list.shape))
             )
             inner_edges, outer_edges, subgraph = graph.extractSubgraphFromNodes(node_list.tolist())
+            # we can get 0 inner edges, if we have a subblock with just a single node
+            # or a subblock with only ignore edges.
+            # we filter these blocks, because they mess up the sub-solver
+            if len(inner_edges) <= 1:
+                return False
             return np.array(inner_edges), np.array(outer_edges), subgraph, node_list
 
         block_overlap = list(self.blockOverlap)
-        blocking = nifty.tools.blocking(roiBegin=[0, 0, 0], roiEnd=seg.shape(), blockShape=self.blockShape)
+        blocking = nifty.tools.blocking(roiBegin=[0, 0, 0],
+                                        roiEnd=list(seg.shape(key=self.keyToSeg)),
+                                        blockShape=self.blockShape)
         number_of_blocks = blocking.numberOfBlocks
 
         workflow_logger.info(
@@ -433,12 +441,11 @@ class BlockwiseSubSolver(luigi.Task):
 
                 tasks.append(executor.submit(extract_subproblem, block_id, sub_blocks))
             sub_problems = [task.result() for task in tasks]
+            sub_problems = [sub_prob for sub_prob in sub_problems if sub_prob]
 
         out = self.output()
-        out.writeVlen(
-            np.array([sub_prob[1] for sub_prob in sub_problems]),
-            'outer_edges'
-        )
+        out.writeVlen(np.array([sub_prob[1] for sub_prob in sub_problems]),
+                      'outer_edges')
 
         # if we serialize the sub-results, write out the block positions and the sub nodes here
         if self.serializeSubResults:
@@ -463,7 +470,6 @@ class BlockwiseSubSolver(luigi.Task):
                 'sub_nodes'
             )
 
-        assert len(sub_problems) == number_of_blocks, str(len(sub_problems)) + " , " + str(number_of_blocks)
         return sub_problems
 
     def _solve_subproblems(self, costs, sub_problems, number_of_edges):
@@ -505,23 +511,23 @@ class BlockwiseSubSolver(luigi.Task):
             return res
 
         # sequential for debugging
-        # subResults = []
-        # for blockId, subProblem in enumerate(sub_problems):
-        #     print "Sequential prediction for block id:", blockId
-        #     subResults.append( _solve_mc( subProblem[2], costs[subProblem[0]], blockId) )
+        # sub_results = []
+        # for block_id, sub_problem in enumerate(sub_problems):
+        #     print("Sequential prediction for block id:", block_id)
+        #     print(type(sub_problem[0]))
+        #     print(sub_problem[0].shape)
+        #     print(sub_problem[0].dtype)
+        #     sub_results.append(_solve_mc(sub_problem[2], costs[sub_problem[0]], block_id))
 
         n_workers = min(len(sub_problems), PipelineParameter().nThreads)
-        # n_workers = 1
         with futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
-            tasks = [executor.submit(
-                _solve_mc,
-                sub_problem[2],
-                costs[sub_problem[0]],
-                block_id) for block_id, sub_problem in enumerate(sub_problems)]
+            tasks = [executor.submit(_solve_mc,
+                     sub_problem[2],
+                     costs[sub_problem[0]],
+                     block_id) for block_id, sub_problem in enumerate(sub_problems)]
         sub_results = [task.result() for task in tasks]
 
         cut_edges = np.zeros(number_of_edges, dtype=np.uint8)
-
         assert len(sub_results) == len(sub_problems), str(len(sub_results)) + " , " + str(len(sub_problems))
 
         for block_id in range(len(sub_problems)):

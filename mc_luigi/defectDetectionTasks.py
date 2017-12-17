@@ -4,7 +4,7 @@ from __future__ import division, print_function
 # Taksks for defect detection
 import luigi
 
-from .customTargets import HDF5DataTarget, HDF5VolumeTarget
+from .customTargets import HDF5DataTarget, VolumeTarget
 from .dataTasks import ExternalSegmentation
 from .pipelineParameter import PipelineParameter
 from .tools import config_logger, run_decorator
@@ -45,8 +45,8 @@ class OversegmentationPatchStatistics(luigi.Task):
         seg = self.input()
         seg.open()
 
-        ny = seg.shape[1]
-        nx = seg.shape[2]
+        ny = seg.shape()[1]
+        nx = seg.shape()[2]
 
         patch_shape = [self.patchSize, self.patchSize]
 
@@ -66,7 +66,7 @@ class OversegmentationPatchStatistics(luigi.Task):
         # parallel
         with futures.ThreadPoolExecutor(max_workers=PipelineParameter().nThreads) as executor:
             tasks = []
-            for z in range(seg.shape[0]):
+            for z in range(seg.shape()[0]):
                 tasks.append(executor.submit(extract_patch_statistics_slice, z))
             segs_per_patch = []
             for fut in tasks:
@@ -112,7 +112,7 @@ class OversegmentationSliceStatistics(luigi.Task):
         def extract_segs_in_slice(z):
             # 2d blocking representing the patches
             seg_z = seg.read([z, 0, 0], [z + 1, ny, nx])
-            return np.unique(seg_z).shape[0]
+            return np.unique(seg_z).shape()[0]
 
         # parallel
         with futures.ThreadPoolExecutor(max_workers=PipelineParameter().nThreads) as executor:
@@ -167,10 +167,11 @@ class DefectPatchDetection(luigi.Task):
 
         seg.open()
         out = self.output()
-        out.open(seg.shape)
+        chunks = (1, min(1024, seg.shape()[1]), min(1024, seg.shape()[2]))
+        out.open('data', shape=seg.shape(), chunks=chunks, dtype='uint8')
 
-        ny = seg.shape[1]
-        nx = seg.shape[2]
+        ny = seg.shape()[1]
+        nx = seg.shape()[2]
 
         patch_shape = [self.patchSize, self.patchSize]
         patch_overlap = [self.patchOverlap, self.patchOverlap]
@@ -199,13 +200,13 @@ class DefectPatchDetection(luigi.Task):
 
         with futures.ThreadPoolExecutor(max_workers=PipelineParameter().nThreads) as executor:
             tasks = []
-            for z in range(seg.shape[0]):
+            for z in range(seg.shape()[0]):
                 tasks.append(executor.submit(detect_patches_z, z))
             defects_per_slice = [fut.result() for fut in tasks]
 
         # log the defects
         workflow_logger.info("DefectPatchDetection: total number of defected patches: %i" % np.sum(defects_per_slice))
-        for z in range(seg.shape[0]):
+        for z in range(seg.shape()[0]):
             if defects_per_slice[z] > 0:
                 workflow_logger.info(
                     "DefectPatchDetection slice %i has %i defected patches." % (z, defects_per_slice[z])
@@ -215,8 +216,10 @@ class DefectPatchDetection(luigi.Task):
 
     def output(self):
         segFile = os.path.split(self.pathToSeg)[1][:-3]
-        save_path = os.path.join(PipelineParameter().cache, "DefectPatchDetection_%s.h5" % segFile)
-        return HDF5VolumeTarget(save_path, dtype='uint8', compression=PipelineParameter().compressionLevel)
+        save_path = os.path.join(PipelineParameter().cache,
+                                 "DefectPatchDetection_%s" % segFile)
+        save_path += VolumeTarget.file_ending()
+        return VolumeTarget(save_path)
 
 
 class DefectSliceDetection(luigi.Task):
@@ -238,7 +241,8 @@ class DefectSliceDetection(luigi.Task):
 
         seg.open()
         out = self.output()
-        out.open(seg.shape())
+        chunks = (1, min(1024, seg.shape()[1]), min(1024, seg.shape()[2]))
+        out.open('data', shape=seg.shape(), chunks=chunks, dtype='uint8')
 
         ny = seg.shape()[1]
         nx = seg.shape()[2]
@@ -291,10 +295,11 @@ class DefectSliceDetection(luigi.Task):
         segFile = os.path.split(self.pathToSeg)[1][:-3]
         save_path = os.path.join(
             PipelineParameter().cache,
-            "DefectSliceDetection_%s_nBins%i_binThreshold%i.h5" % (
+            "DefectSliceDetection_%s_nBins%i_binThreshold%i" % (
                 segFile,
                 PipelineParameter().nBinsSliceStatistics,
                 PipelineParameter().binThreshold
             )
         )
-        return HDF5VolumeTarget(save_path, dtype='uint8', compression=PipelineParameter().compressionLevel)
+        save_path += VolumeTarget.file_ending()
+        return VolumeTarget(save_path)
