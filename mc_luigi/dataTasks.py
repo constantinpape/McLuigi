@@ -116,7 +116,7 @@ class WsdtSegmentation(luigi.Task):
             seg = vigra.analysis.labelMultiArrayWithBackground(seg)
             max_z = seg.max()
             out.write(sliceStart, seg[None, :, :].astype(self.dtype, copy=False), self.saveKey)
-            return max_z + 1
+            return max_z
 
         n_workers = PipelineParameter().nThreads
 

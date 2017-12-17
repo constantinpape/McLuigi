@@ -32,19 +32,18 @@ class TestDataTasks(McLuigiTestCase):
         self.assertEqual(result.shape, self.expected_shape)
         prev_offset = 0
         for z, ws in enumerate(result):
-            print("!!!!", z, "!!!!!")
             wsmasked = ws[ws != 0]
             wsmin = wsmasked.min()
             self.assertEqual(wsmin, prev_offset + 1)
             prev_offset = wsmasked.max()
         rmtree(res_path)
 
-    def _test_wsdt_default(self):
+    def test_wsdt_default(self):
         call(['python', './executables/watershed.py', 'default'])
         res_path = './cache/WsdtSegmentation_sampleA_affinitiesXY.n5'
         self.check_wsresult(res_path)
 
-    def _test_wsdt_nominseg(self):
+    def test_wsdt_nominseg(self):
         call(['python', './executables/watershed.py', 'nominseg'])
         res_path = './cache/WsdtSegmentation_sampleA_affinitiesXY.n5'
         self.check_wsresult(res_path)
@@ -54,7 +53,7 @@ class TestDataTasks(McLuigiTestCase):
         res_path = './cache/WsdtSegmentation_sampleA_affinitiesXY.n5'
         self.check_wsresult_masked(res_path)
 
-    def _test_wsdt_masked_nominseg(self):
+    def test_wsdt_masked_nominseg(self):
         call(['python', './executables/watershed.py', 'masked_nominseg'])
         res_path = './cache/WsdtSegmentation_sampleA_affinitiesXY.n5'
         self.check_wsresult_masked(res_path)

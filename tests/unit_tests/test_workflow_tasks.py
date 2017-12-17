@@ -13,7 +13,7 @@ class TestDataTasks(McLuigiTestCase):
     @classmethod
     def setUpClass(cls):
         super(TestDataTasks, cls).setUpClass()
-        call(['python', 'task_wrapper.py', 'learn_rf'])
+        call(['python', './executables/workflow.py', 'learn_rf'])
 
     @classmethod
     def tearDownClass(cls):
@@ -27,12 +27,12 @@ class TestDataTasks(McLuigiTestCase):
         self.assertGreater(len(clusters), self.expected_shape[0])
 
     def test_multicut_wf(self):
-        call(['python', 'task_wrapper.py', 'mc'])
+        call(['python', './executables/workflow.py', 'mc'])
         seg_path = './cache/MulticutSegmentation_standard.h5'
         self.check_segmentation(seg_path)
 
     def test_blockwise_wf(self):
-        call(['python', 'task_wrapper.py', 'blockwise_mc'])
+        call(['python', './executables/workflow.py', 'blockwise_mc'])
         seg_path = './cache/BlockwiseMulticutSegmentation_L1_20_256_256_5_50_50_standard.h5'
         self.check_segmentation(seg_path)
 
