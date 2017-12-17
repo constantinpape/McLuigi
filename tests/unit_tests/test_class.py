@@ -16,8 +16,6 @@ class McLuigiTestCase(unittest.TestCase):
         from subprocess import call
         url = 'https://www.dropbox.com/s/l1tgzlim8h1pb7w/test_data_anisotropic.zip?dl=0'
         data_file = 'data.zip'
-
-        # FIXME good old wget still does the job done better than any python lib I know....
         call(['wget', '-O', data_file, url])
         with zipfile.ZipFile(data_file) as f:
             f.extractall('.')

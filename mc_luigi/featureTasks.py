@@ -80,11 +80,11 @@ class RegionNodeFeatures(luigi.Task):
             start, end = [z, 0, 0], [z + 1, shape[1], shape[2]]
             min_node, max_node = min_max_node[z, 0], min_max_node[z, 1]
 
-            data_slice = data.read(start, end, self.keyToInput).squeeze().astype('float32')
+            data_slice = data.read(start, end, self.keyToInput).squeeze().astype('float32', copy=False)
             seg_slice  = seg.read(start, end, self.keyToSeg).squeeze() - min_node
 
             extractor = vigra.analysis.extractRegionFeatures(data_slice,
-                                                             seg_slice,
+                                                             seg_slice.astype('uint32', copy=False),
                                                              features=statistics)
             region_stats_slice = []
             for stat_name in statistics:
