@@ -83,16 +83,42 @@ class WsdtSegmentation(luigi.Task):
         out.close()
         pmap.close()
 
+    def _single_slice_masked(self, z, pmap, mask, out):
+        threshold  = self.threshold
+        min_seg    = self.min_seg
+        sig_seeds  = self.sig_seeds
+        invert     = self.invert
+        shape = pmap.shape(self.keyToProbabilities)
+
+        print("Slice", z, "/", shape[0])
+        sliceStart = [z, 0, 0]
+        sliceStop  = [z + 1, shape[1], shape[2]]
+        pmap_z = pmap.read(sliceStart, sliceStop, self.keyToProbabilities).squeeze()
+        mask_z = mask.read(sliceStart, sliceStop, self.keyToMask).squeeze().astype('bool')
+        if invert:
+            pmap_z = 1. - pmap_z
+        pmap_z[np.logical_not(mask_z)] = 1.
+        # use default watershed and mask after that
+        seg, max_z = compute_wsdt_segmentation(pmap_z,
+                                               threshold,
+                                               sig_seeds,
+                                               min_seg,
+                                               start_label=1)
+        seg[np.logical_not(mask_z)] = 0
+        seg = vigra.analysis.labelMultiArrayWithBackground(seg)
+        max_z = seg.max()
+        out.write(sliceStart, seg[None, :, :].astype(self.dtype, copy=False), self.saveKey)
+        return max_z
+
     def _run_wsdt2d_with_mask(self, pmap, mask, out, shape):
         # read the wsdt settings from ppl params
         ppl_params = PipelineParameter()
-        threshold  = ppl_params.wsdtThreshold
-        min_seg    = ppl_params.wsdtMinSeg
-        sig_seeds  = ppl_params.wsdtSigSeeds
-        invert     = ppl_params.wsdtInvert
-        workflow_logger.info(
-            "WsdtSegmentation: Running 2d dt watershed with mask with threshold %f" % threshold
-        )
+        self.threshold  = ppl_params.wsdtThreshold
+        self.min_seg    = ppl_params.wsdtMinSeg
+        self.sig_seeds  = ppl_params.wsdtSigSeeds
+        self.invert     = ppl_params.wsdtInvert
+        workflow_logger.info("WsdtSegmentation: Running 2d dt watershed with mask with threshold %f"
+                             % self.threshold)
 
         def segment_slice(z):
             print("Slice", z, "/", shape[0])
@@ -103,12 +129,12 @@ class WsdtSegmentation(luigi.Task):
             if invert:
                 pmap_z = 1. - pmap_z
             pmap_z[np.logical_not(mask_z)] = 1.
+            # use default watershed and mask after that
             seg, max_z = compute_wsdt_segmentation(pmap_z,
                                                    threshold,
                                                    sig_seeds,
                                                    min_seg,
                                                    start_label=1)
-            # alternative: use default watershed and mask after that
             seg[np.logical_not(mask_z)] = 0
             seg = vigra.analysis.labelMultiArrayWithBackground(seg)
             max_z = seg.max()
@@ -118,8 +144,11 @@ class WsdtSegmentation(luigi.Task):
         n_workers = PipelineParameter().nThreads
 
         t_wsdt = time.time()
-        with futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
-            tasks = [executor.submit(segment_slice, z) for z in range(shape[0])]
+        #with futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
+        #    tasks = [executor.submit(segment_slice, z) for z in range(shape[0])]
+        with futures.ProcessPoolExecutor(max_workers=n_workers) as executor:
+            tasks = [executor.submit(self._single_slice_masked, z, pmap, mask, out)
+                     for z in range(shape[0])]
             offsets = np.array([future.result() for future in tasks], dtype='uint64')
         workflow_logger.info("WsdtSegmentation: Running watershed took: %f s"
                              % (time.time() - t_wsdt))

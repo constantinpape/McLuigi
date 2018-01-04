@@ -131,14 +131,18 @@ def get_local_features_for_multiinp():
 
         if "raw" in features:
             # by convention we assume that the raw data is given as 0th
-            feature_tasks[i].append(EdgeFeatures(input_data[inp0], segs[i], simpleFeatures=simpleFeats))
+            feature_tasks[i].append(EdgeFeatures(pathToInput=input_data[inp0],
+                                                 pathToSeg=segs[i],
+                                                 simpleFeatures=simpleFeats))
             workflow_logger.debug(
                 "get_local_features_for_multiinp: calculating Edge Features from raw input: " + input_data[inp0]
             )
 
         if "prob" in features:
             # by convention we assume that the membrane probs are given as 1st
-            feature_tasks[i].append(EdgeFeatures(input_data[inp1], segs[i], simpleFeatures=simpleFeats))
+            feature_tasks[i].append(EdgeFeatures(pathToInput=input_data[inp1],
+                                                 pathToSeg=segs[i],
+                                                 simpleFeatures=simpleFeats))
             workflow_logger.debug(
                 "get_local_features_for_multiinp: calculating Edge Features from probability maps: " + input_data[inp1]
             )
@@ -146,8 +150,8 @@ def get_local_features_for_multiinp():
         if "affinitiesXY" in features:
             assert nInpPerSeg == 3
             # by convention we assume that the xy - affinity channel is given as 1st input
-            feature_tasks[i].append(EdgeFeatures(input_data[inp1],
-                                                 segs[i],
+            feature_tasks[i].append(EdgeFeatures(pathToInput=input_data[inp1],
+                                                 pathToSeg=segs[i],
                                                  keepOnlyXY=True,
                                                  simpleFeatures=simpleFeats))
             workflow_logger.debug(
@@ -157,8 +161,8 @@ def get_local_features_for_multiinp():
         if "affinitiesZ" in features:
             assert nInpPerSeg == 3
             # by convention we assume that the z - affinity channel is given as 2nd input
-            feature_tasks[i].append(EdgeFeatures(input_data[inp2],
-                                                 segs[i],
+            feature_tasks[i].append(EdgeFeatures(pathToInput=input_data[inp2],
+                                                 pathToSeg=segs[i],
                                                  keepOnlyZ=True,
                                                  zDirection=zDir,
                                                  simpleFeatures=simpleFeats))
