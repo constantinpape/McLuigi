@@ -71,6 +71,7 @@ class WsdtSegmentation(luigi.Task):
                  shape=shape,
                  chunks=pmap.chunks(self.keyToProbabilities),
                  dtype=self.dtype)
+        self.out = out
 
         # read the wsdt settings from ppl params
         # and add them as class members
@@ -81,29 +82,38 @@ class WsdtSegmentation(luigi.Task):
         self.invert     = ppl_params.wsdtInvert
         workflow_logger.info("WsdtSegmentation: Running 2d dt watershed with mask with threshold %f"
                              % self.threshold)
+        # add the pmap as class variable, so we don't need to pass it to the
+        # functions queued on the process pool
+        self.pmap = pmap
 
         if self.pathToMask is '':
-            self._run_wsdt2d_standard(pmap, out, shape)
+            self._run_wsdt2d_standard(out, shape)
         else:
             mask = self.input()['mask']
             mask.open(self.keyToMask)
-            self._run_wsdt2d_with_mask(pmap, mask, out, shape)
+            # add the mask as class variable, so we don't need to pass it to the
+            # functions queued on the process pool
+            self.mask = mask
+            self._run_wsdt2d_with_mask(mask, out, shape)
             mask.close()
 
         out.close()
         pmap.close()
 
-    def _single_slice_masked(self, z, pmap, mask, out):
-        shape = pmap.shape(self.keyToProbabilities)
+    def _single_slice_masked(self, z):
+        out = self.out
+        shape = self.pmap.shape(self.keyToProbabilities)
         print("Slice", z, "/", shape[0])
 
         sliceStart = [z, 0, 0]
         sliceStop  = [z + 1, shape[1], shape[2]]
-        pmap_z = pmap.read(sliceStart, sliceStop, self.keyToProbabilities).squeeze()
-        mask_z = mask.read(sliceStart, sliceStop, self.keyToMask).squeeze().astype('bool')
+        print("Reading slice ", z)
+        pmap_z = self.pmap.read(sliceStart, sliceStop, self.keyToProbabilities).squeeze()
+        mask_z = self.mask.read(sliceStart, sliceStop, self.keyToMask).squeeze().astype('bool')
         if self.invert:
             pmap_z = 1. - pmap_z
         pmap_z[np.logical_not(mask_z)] = 1.
+        print("WSDT slice ", z)
         # use default watershed and mask after that
         seg, max_z = compute_wsdt_segmentation(pmap_z,
                                                self.threshold,
@@ -113,19 +123,24 @@ class WsdtSegmentation(luigi.Task):
         seg[np.logical_not(mask_z)] = 0
         seg = vigra.analysis.labelMultiArrayWithBackground(seg)
         max_z = seg.max()
+        print("Write slice ", z)
         out.write(sliceStart, seg[None, :, :].astype(self.dtype, copy=False), self.saveKey)
+        print("Done slice", z)
         return max_z
 
-    def _run_wsdt2d_with_mask(self, pmap, mask, out, shape):
+    def _run_wsdt2d_with_mask(self, mask, out, shape):
 
         workflow_logger.info("WsdtSegmentation: Computing wsdt with mask")
 
         n_workers = PipelineParameter().nThreads
         t_wsdt = time.time()
         with futures.ProcessPoolExecutor(max_workers=n_workers) as executor:
-            tasks = [executor.submit(self._single_slice_masked, z, pmap, mask, out)
+            tasks = [executor.submit(self._single_slice_masked, z)
                      for z in range(shape[0])]
             offsets = np.array([future.result() for future in tasks], dtype='uint64')
+
+        # serial for debugging
+        # offsets = np.array([self._single_slice_masked(z) for z in range(shape[0])])
         workflow_logger.info("WsdtSegmentation: Running watershed took: %f s"
                              % (time.time() - t_wsdt))
 
@@ -154,12 +169,13 @@ class WsdtSegmentation(luigi.Task):
         workflow_logger.info("WsdtSegmentation: Adding offsets took %f s" % (time.time() - t_off))
         return True
 
-    def _single_slice(self, z, pmap, out):
-        shape = pmap.shape(self.keyToProbabilities)
+    def _single_slice(self, z):
+        shape = self.pmap.shape(self.keyToProbabilities)
+        out = self.out
         print("Slice", z, "/", shape[0])
         sliceStart = [z, 0, 0]
         sliceStop  = [z + 1, shape[1], shape[2]]
-        pmap_z = pmap.read(sliceStart, sliceStop, self.keyToProbabilities).squeeze()
+        pmap_z = self.pmap.read(sliceStart, sliceStop, self.keyToProbabilities).squeeze()
         if self.invert:
             pmap_z = 1. - pmap_z
         seg, max_z = compute_wsdt_segmentation(pmap_z,
@@ -169,14 +185,14 @@ class WsdtSegmentation(luigi.Task):
         out.write(sliceStart, seg[None, :, :].astype(self.dtype, copy=False), self.saveKey)
         return max_z + 1
 
-    def _run_wsdt2d_standard(self, pmap, out, shape):
+    def _run_wsdt2d_standard(self, out, shape):
 
         workflow_logger.info("WsdtSegmentation: Computing wsdt without mask")
         n_workers = PipelineParameter().nThreads
 
         t_wsdt = time.time()
         with futures.ProcessPoolExecutor(max_workers=n_workers) as executor:
-            tasks = [executor.submit(self._single_slice, z, pmap, out)
+            tasks = [executor.submit(self._single_slice, z)
                      for z in range(shape[0])]
             offsets = [future.result() for future in tasks]
         workflow_logger.info("WsdtSegmentation: Running watershed took: %f s"
@@ -220,7 +236,6 @@ class WsdtSegmentation(luigi.Task):
 ###########################
 # Tasks for providing data
 ###########################
-
 
 class InputData(luigi.Task):
     """

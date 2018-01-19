@@ -347,9 +347,9 @@ class EdgeProbabilities(luigi.Task):
 
         def predict_subfeats(sub_feat_id):
             print(sub_feat_id, '/', n_sub_feats)
-            start_index = int(float(sub_feat_id) / n_sub_feats * n_edges)
-            end_index   = int(float(sub_feat_id + 1) / n_sub_feats * n_edges)
-            if sub_feat_id == n_sub_feats:
+            start_index = int(sub_feat_id / n_sub_feats * n_edges)
+            end_index   = int((sub_feat_id + 1) / n_sub_feats * n_edges)
+            if end_index > n_edges:
                 end_index = n_edges
 
             sub_feats = []

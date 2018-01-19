@@ -43,7 +43,7 @@ class SegmentationWorkflow(luigi.Task):
     pathToSeg = luigi.Parameter()
     pathToClassifier  = luigi.Parameter()
     keyToSeg = luigi.Parameter(default='data')
-    dtype = luigi.Parameter(default='uint32')
+    dtype = luigi.Parameter(default='uint64')
     savePath = luigi.Parameter(default='')
     saveKey = luigi.Parameter(default='data')
 
