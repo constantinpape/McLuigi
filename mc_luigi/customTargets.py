@@ -109,6 +109,9 @@ class VolumeTarget(BaseTarget):
     def keys(self):
         return self._impl.keys()
 
+    def write_attribute(self, attr_key, val, key='data'):
+        self._impl.write_attribute(attr_key, val, key)
+
 
 # TODO enable zarr format ?!
 class N5Target(object):
@@ -201,6 +204,10 @@ class N5Target(object):
     def close(self):
         pass
 
+    def write_attribute(self, attr_key, val, key='data'):
+        assert key in self.datasets, "Can't write attribures for a dataset that has not been opened"
+        self.datasets[key].attrs[attr_key] = val
+
 
 class HDF5Target(object):
     """
@@ -290,6 +297,10 @@ class HDF5Target(object):
     def keys(self):
         assert self.h5_file is not None, "Need to open the h5 file first"
         return self.datasets.keys()
+
+    def write_attribute(self, attr_key, val, key='data'):
+        assert key in self.datasets, "Can't write attribures for a dataset that has not been opened"
+        raise NotImplementedError("Not Implemented")
 
 
 class HDF5DataTarget(BaseTarget):

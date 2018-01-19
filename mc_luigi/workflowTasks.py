@@ -75,6 +75,10 @@ class SegmentationWorkflow(luigi.Task):
             workflow_logger.info("SegmentationWorkflow: Postprocessing defected slices.")
             self._postprocess_defected_slices(inp, out)
 
+        # we need to serialize the max id for big-cat painting
+        max_id = int(mc_nodes.max())
+        out.write_attribute("maxId", max_id)
+
         seg.close()
         out.close()
 
