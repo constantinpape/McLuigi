@@ -109,8 +109,6 @@ class VolumeTarget(BaseTarget):
     def keys(self):
         return self._impl.keys()
 
-    # TODO interface for the offsets once implemented in z5
-
 
 # TODO enable zarr format ?!
 class N5Target(object):
@@ -137,7 +135,6 @@ class N5Target(object):
         return self.n5_file.keys()
 
     # TODO change compression to blosc as soon as n5 supports it !
-    # TODO offset handling, need to implement loading with offsets and offsets in z5
     def open(self, key='data', dtype=None, shape=None, chunks=None, compression='gzip', **compression_opts):
 
         # open the n5 file if it wasn't opened yet
@@ -160,16 +157,8 @@ class N5Target(object):
                                                              dtype=dtype,
                                                              shape=shape,
                                                              chunks=chunks,
-                                                             compressor=compression,
+                                                             compressor=compression,  # TODO this will change to `compression`
                                                              **compression_opts)
-        # TODO implement offsets in n5
-        # check if any offsets were added to the array
-        # if self.has_offsets(key):
-        #     ds = self.datasets[key]
-        #     offset_front = ds.attrs.get('offset_front')
-        #     offset_back = ds.attrs.get('offset_back')
-        #     self.set_offsets(offset_front, offset_back, 'data', serialize_offsets=False)
-
         return self
 
     def write(self, start, data, key='data'):
@@ -211,34 +200,6 @@ class N5Target(object):
     # dummy implementation to be consisteny with HDF5Target
     def close(self):
         pass
-
-    # add offsets to the nh5 array
-    def set_offsets(self, offset_front, offset_back, key='data', serialize_offsets=True):
-        assert False, "Offsets not implemented in z5py yet"
-        assert key in self.datasets, "Can't set offsets for a dataset that has not been opened"
-        # TODO implement in z5
-        self.datasets[key].set_offset_front(offset_front)
-        self.datasets[key].set_offset_back(offset_back)
-        # serialize the offsets
-        if serialize_offsets:
-            self.serialize_offsets(offset_front, offset_back, key)
-
-    def serialize_offsets(self, offset_front, offset_back, key='data'):
-        assert False, "Offsets not implemented in z5py yet"
-        assert key in self.datasets, "Can't serialize offsets for a dataset that has not been opened"
-        self.datasets[key].attrs['offset_front'] = offset_front
-        self.datasets[key].attrs['offset_back'] = offset_back
-
-    @staticmethod
-    def has_offsets(path, key='data'):
-        assert False, "Offsets not implemented in z5py yet"
-        f = z5py.File(path)
-        ds = f[key]
-        if 'offset_front' in ds.attrs:
-            assert 'offset_back' in ds.attrs
-            return True
-        else:
-            return False
 
 
 class HDF5Target(object):
@@ -290,13 +251,6 @@ class HDF5Target(object):
             self.datasets[key] = nh5.hdf5Array(dtype, self.h5_file, key,
                                                shape, chunks,
                                                compression=compression_)
-        # TODO re-enable support for ofsets once we have this in z5
-        # check if any offsets were added to the array
-        # if self.has_offsets(key):
-        #     ds = self.datasets[key]
-        #     offset_front = ds.attrs.get('offset_front')
-        #     offset_back = ds.attrs.get('offset_back')
-        #     self.set_offsets(offset_front, offset_back, 'data', serialize_offsets=False)
         return self
 
     def close(self):
@@ -336,32 +290,6 @@ class HDF5Target(object):
     def keys(self):
         assert self.h5_file is not None, "Need to open the h5 file first"
         return self.datasets.keys()
-
-    # add offsets to the nh5 array
-    def set_offsets(self, offset_front, offset_back, key='data', serialize_offsets=True):
-        assert self.h5_file is not None, "Need to open the n5 file first"
-        assert key in self.datasets, "Can't set offsets for a dataset that has not been opened"
-        self.datasets[key].setOffsetFront(offset_front)
-        self.datasets[key].setOffsetBack(offset_back)
-        # serialize the offsets
-        if serialize_offsets:
-            self.serialize_offsets(offset_front, offset_back, key)
-
-    def serialize_offsets(self, offset_front, offset_back, key='data'):
-        assert self.h5_file is not None, "Need to open the n5 file first"
-        assert key in self.datasets, "Can't serialize offsets for a dataset that has not been opened"
-        self.datasets[key].attrs.create('offset_front', offset_front)
-        self.datasets[key].attrs.create('offset_back', offset_back)
-
-    @staticmethod
-    def has_offsets(path, key='data'):
-        with h5py.File(path) as f:
-            ds = f[key]
-            if 'offset_front' in ds.attrs:
-                assert 'offset_back' in ds.attrs
-                return True
-            else:
-                return False
 
 
 class HDF5DataTarget(BaseTarget):

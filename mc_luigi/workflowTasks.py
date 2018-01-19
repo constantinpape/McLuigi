@@ -65,11 +65,8 @@ class SegmentationWorkflow(luigi.Task):
         shape = seg.shape(self.keyToSeg)
 
         chunks = (1, min(1024, shape[1]), min(1024, shape[2]))
-        if PipelineParameter().haveOffsets:
-            out = self._expand_shape(shape, chunks)
-        else:
-            out = self.output()
-            out.open(self.saveKey, shape=shape, chunks=chunks, dtype=self.dtype)
+        out = self.output()
+        out.open(self.saveKey, shape=shape, chunks=chunks, dtype=self.dtype)
 
         workflow_logger.info("SegmentationWorkflow: Projecting node result to segmentation.")
         self._project_result_to_segmentation(rag, mc_nodes, out)
@@ -78,9 +75,6 @@ class SegmentationWorkflow(luigi.Task):
             workflow_logger.info("SegmentationWorkflow: Postprocessing defected slices.")
             self._postprocess_defected_slices(inp, out)
 
-        # FIXME this does not work for some reason
-        # if PipelineParameter().haveOffsets:
-        #     self._serialize_offsets(out)
         seg.close()
         out.close()
 
@@ -121,23 +115,6 @@ class SegmentationWorkflow(luigi.Task):
             out.write([z, 0, 0],
                       out.read([replace_z, 0, 0], [replace_z + 1, shape[1], shape[2]]),
                       key=self.saveKey)
-
-    # expand the segmentation by offset !
-    def _expand_shape(self, seg_shape, chunks):
-        out = self.output()
-        offset_front = PipelineParameter().offsetFront
-        assert offset_front is not None
-        offset_back = PipelineParameter().offsetBack
-        assert offset_back is not None
-        shape = (np.array(offset_front) + np.array(offset_back) + np.array(seg_shape)).tolist()
-        out.open(self.saveKey, shape=shape, chunks=chunks, dtype=self.dtype)
-        out.set_offsets(offset_front, offset_back, serialize_offsets=False)
-        return out
-
-    def _serialize_offsets(self, out):
-        offset_front = PipelineParameter().offsetFront
-        offset_back = PipelineParameter().offsetBack
-        out.serialize_offsets(offset_front, offset_back)
 
     def output(self):
         raise AttributeError(
