@@ -1,3 +1,5 @@
+This repository is deprecated, have a look at [cluster_tools](https://github.com/constantinpape/cluster_tools) instead.
+
 # McLuigi
 
 Multicut workflow for large connectomics data.
